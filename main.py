@@ -819,27 +819,55 @@ def split_name_and_color(raw_name: str) -> Tuple[str, str]:
 
 
 def extract_color_from_name(raw_name: str) -> str:
-    """상품명에서 색상 정보를 우선순위 기반으로 추출한다"""
+    """???? ?? ?? ??? ???? ???? ????"""
     if not raw_name:
         return ""
 
     cleaned = re.sub(r'\s*/\s*[A-Z0-9-]+$', '', raw_name).strip()
     _, color_part = split_name_and_color(cleaned)
-    if color_part:
+    if color_part and not is_color_count_placeholder(color_part):
         return color_part
 
     bracket_match = re.search(r'\[([^\[\]]{1,50})\]\s*$', cleaned)
     if bracket_match:
-        return bracket_match.group(1).strip()
+        candidate = bracket_match.group(1).strip()
+        if not is_color_count_placeholder(candidate):
+            return candidate
 
     paren_match = re.search(r'\(([^()]{1,50})\)\s*$', cleaned)
     if paren_match:
         candidate = paren_match.group(1).strip()
-        if any(token in candidate for token in ['/', ',', '-', ':']) or has_hangul(candidate):
+        if (
+            not is_color_count_placeholder(candidate)
+            and (any(token in candidate for token in ['/', ',', '-', ':']) or has_hangul(candidate))
+        ):
             return candidate
 
     return ""
 
+
+def is_color_count_placeholder(text: str) -> bool:
+    """'2color', '4 colors', '3??' ?? ?? ???? ????."""
+    value = (text or "").strip().lower()
+    if not value:
+        return False
+    compact = re.sub(r'\s+', '', value)
+
+    # english patterns: 2color, 4colors, color3, colours2
+    if re.fullmatch(r'^\d+(?:color|colors|colour|colours)$', compact):
+        return True
+    if re.fullmatch(r'^(?:color|colors|colour|colours)\d+$', compact):
+        return True
+
+    # korean patterns: 2??, 4??, ??3, ??2
+    korean_suffixes = ("\uceec\ub7ec", "\uc0c9\uc0c1")
+    m_prefix = re.fullmatch(r'^(\d+)(.+)$', compact)
+    if m_prefix and m_prefix.group(2) in korean_suffixes:
+        return True
+    m_suffix = re.fullmatch(r'^(.+?)(\d+)$', compact)
+    if m_suffix and m_suffix.group(1) in korean_suffixes:
+        return True
+    return False
 
 def normalize_korean_color(color_text: str) -> str:
     """한국어 색상 문자열을 보기 좋게 정리한다"""
@@ -855,7 +883,7 @@ def normalize_korean_color(color_text: str) -> str:
         value = token.strip()
         if value.endswith('색') and len(value) > 1 and has_hangul(value):
             value = value[:-1].strip()
-        if value:
+        if value and not is_color_count_placeholder(value):
             tokens.append(value)
 
     return ', '.join(tokens)
@@ -1005,13 +1033,47 @@ def extract_color_from_api(goods_options: Dict[str, object]) -> str:
     if not goods_options:
         return ""
 
+    # optionValues의 색상 축(C / COLOR)을 우선 사용한다. (예: CG, MG)
+    option_value_colors: List[str] = []
+    for item in goods_options.get('optionItems', []):
+        for option_value in item.get('optionValues', []):
+            axis = str(option_value.get('optionName', '')).strip().upper()
+            if axis not in {"C", "COLOR", "CLR", "COL"}:
+                continue
+            value = str(option_value.get('name', '')).strip() or str(option_value.get('code', '')).strip()
+            if not value:
+                continue
+            if re.fullmatch(r'\d+', value):
+                continue
+            value = value.lower() if re.fullmatch(r'[A-Za-z0-9._-]{1,8}', value) else value
+            if value not in option_value_colors and not is_color_count_placeholder(value):
+                option_value_colors.append(value)
+
+    if option_value_colors:
+        return normalize_korean_color(', '.join(option_value_colors))
+
     color_map = get_color_name_map()
     color_names: List[str] = []
     for item in goods_options.get('optionItems', []):
         for color in item.get('colors', []):
             color_code = str(color.get('colorCode', '')).strip()
-            color_name = color_map.get(color_code, '').strip()
-            if color_name and color_name not in color_names:
+            color_id = str(color.get('colorId', '')).strip()
+
+            # 1) API에 색상명이 직접 있으면 우선 사용
+            color_name = str(color.get('colorName', '')).strip() or str(color.get('name', '')).strip()
+
+            # 2) 색상명 맵(color-images)으로 보강
+            if not color_name:
+                if color_code:
+                    color_name = color_map.get(color_code, '').strip()
+                if not color_name and color_id:
+                    color_name = color_map.get(color_id, '').strip()
+
+            # 3) 맵이 없으면 원본 코드라도 보존 (예: cg.mg)
+            if not color_name:
+                color_name = color_code or color_id
+
+            if color_name and not is_color_count_placeholder(color_name) and color_name not in color_names:
                 color_names.append(color_name)
 
     return normalize_korean_color(', '.join(color_names))
@@ -2463,13 +2525,17 @@ def scrape_musinsa_product(
             musinsa_sku = existing_sku.strip()
 
         brand = extract_brand_text(product_json, title_text)
-        color_kr_raw = extract_color_from_name(raw_product_name)
-        color_kr = normalize_korean_color(color_kr_raw)
-        if not color_kr:
-            color_kr = extract_color_from_api(goods_options)
+        color_from_name = normalize_korean_color(extract_color_from_name(raw_product_name))
+        color_from_api = extract_color_from_api(goods_options)
         size_text, color_from_size = extract_sizes_from_api(goods_no, goods_sale_type, opt_kind_cd)
+
+        # 실제 옵션 색상을 우선 반영한다. (size 파싱 > 옵션 API > 상품명)
         if color_from_size:
             color_kr = color_from_size
+        elif color_from_api:
+            color_kr = color_from_api
+        else:
+            color_kr = color_from_name
         if not color_kr:
             color_kr = "none"
         if not size_text:

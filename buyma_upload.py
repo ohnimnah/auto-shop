@@ -679,6 +679,53 @@ def _split_color_values(color_text: str) -> List[str]:
     return out
 
 
+COLOR_ABBR_MAP: Dict[str, str] = {
+    "bk": "Black",
+    "br": "Brown",
+    "dg": "Dark Gray",
+    "lg": "Light Gray",
+    "cg": "Charcoal Gray",
+    "mg": "Melange Gray",
+    "gy": "Gray",
+    "iv": "Ivory",
+    "na": "Navy",
+    "nv": "Navy",
+    "wh": "White",
+    "wt": "White",
+    "be": "Beige",
+    "kh": "Khaki",
+    "ol": "Olive",
+    "rd": "Red",
+    "pk": "Pink",
+    "ye": "Yellow",
+    "gr": "Green",
+    "bl": "Blue",
+    "pu": "Purple",
+    "or": "Orange",
+}
+
+
+def _expand_color_abbreviations(color_text: str) -> str:
+    """약어 색상코드(bk, cg 등)를 BUYMA 입력용 색상명으로 확장한다."""
+    normalized_text = (color_text or "").strip()
+    dot_parts = [p.strip() for p in normalized_text.split(".") if p.strip()]
+    if len(dot_parts) >= 2 and all(re.fullmatch(r"[A-Za-z]{1,3}", p) for p in dot_parts):
+        values = dot_parts
+    else:
+        values = _split_color_values(normalized_text)
+    if not values:
+        return color_text
+
+    expanded: List[str] = []
+    for raw in values:
+        key = re.sub(r'[^a-z0-9]', '', raw.strip().lower())
+        mapped = COLOR_ABBR_MAP.get(key)
+        value = mapped if mapped else raw.strip()
+        if value and value not in expanded:
+            expanded.append(value)
+    return ", ".join(expanded)
+
+
 def _try_add_color_row(driver) -> bool:
     """색상 행 추가 버튼을 찾아 클릭한다."""
     try:
@@ -2212,6 +2259,7 @@ def fill_buyma_form(driver, row_data: Dict[str, str]) -> str:
         brand_en = row_data.get('brand_en', '') or row_data.get('brand', '')
         name_en = row_data.get('product_name_en') or row_data['product_name_kr']
         color_en = row_data.get('color_en') or row_data.get('color_kr', '')
+        color_en = _expand_color_abbreviations(color_en)
         if color_en.lower() == 'none':
             color_en = ''
         try:
@@ -2257,7 +2305,8 @@ def fill_buyma_form(driver, row_data: Dict[str, str]) -> str:
 
         # ---- 색상: React Select에서 색상 선택 + 텍스트 입력 ----
         color = row_data.get('color_en') or row_data.get('color_kr', '')
-        color_en_input = (row_data.get('color_en') or '').strip()
+        color = _expand_color_abbreviations(color)
+        color_en_input = _expand_color_abbreviations((row_data.get('color_en') or '').strip())
         if color and color.lower() != 'none':
             try:
                 color_values = _split_color_values(color_en_input or color)
