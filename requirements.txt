@@ -1,0 +1,6 @@
+selenium>=4.23.0
+webdriver-manager>=4.0.2
+beautifulsoup4>=4.12.3
+google-auth>=2.35.0
+google-api-python-client>=2.149.0
+urllib3>=2.2.2

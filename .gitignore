@@ -1,0 +1,14 @@
+# Runtime artifacts
+images/
+
+# Secrets
+credentials.json
+buyma_credentials.json
+chrome_profile/
+
+# Local runtime data folder (when using --data-dir in project)
+.local_data/
+
+# Python cache
+__pycache__/
+*.pyc
