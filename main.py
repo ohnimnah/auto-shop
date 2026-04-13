@@ -80,9 +80,9 @@ PRICE_COLUMN = "L"
 BAIMA_SELL_PRICE_COLUMN = "M"
 IMAGE_PATHS_COLUMN = "N"
 SHIPPING_COST_COLUMN = "O"
-CATEGORY_LARGE_COLUMN = "W"
-CATEGORY_MIDDLE_COLUMN = "X"
-CATEGORY_SMALL_COLUMN = "Y"
+CATEGORY_LARGE_COLUMN = "V"
+CATEGORY_MIDDLE_COLUMN = "W"
+CATEGORY_SMALL_COLUMN = "X"
 ROW_START = 2
 
 
@@ -227,12 +227,12 @@ def initialize_runtime_paths(data_dir: str = "", credentials_file: str = ""):
 # ==================== 배송비 산출 ====================
 
 def read_shipping_table(service, sheet_name: str) -> List[Tuple[float, int]]:
-    """Z/AA/AB 영역에서 무게(kg)→배송비(원) 기준표를 읽어 리스트로 반환한다.
+    """Y/Z/AA 영역에서 무게(kg)→배송비(원) 기준표를 읽어 리스트로 반환한다.
     반환: [(0.5, 8950), (1.0, 11350), ...] 무게 오름차순"""
     try:
         result = service.spreadsheets().values().get(
             spreadsheetId=SPREADSHEET_ID,
-            range=f"'{sheet_name}'!Z1:AB60"
+            range=f"'{sheet_name}'!Y1:AA60"
         ).execute()
         rows = result.get('values', [])
         table: List[Tuple[float, int]] = []
@@ -770,9 +770,6 @@ def extract_actual_size_text(goods_no: str) -> str:
 
         size_name = str(row.get("name", "")).strip()
         values = row.get("values")
-        if not isinstance(values, list) or not values:
-            # some products use "items" instead of "values"
-            values = row.get("items")
         if not isinstance(values, list) or not values:
             continue
 
@@ -1408,7 +1405,7 @@ def get_existing_row_values(service, sheet_name: str, row_num: int) -> Dict[str,
     try:
         result = service.spreadsheets().values().get(
             spreadsheetId=SPREADSHEET_ID,
-            range=f"'{sheet_name}'!A{row_num}:Y{row_num}"
+            range=f"'{sheet_name}'!A{row_num}:X{row_num}"
         ).execute()
         rows = result.get('values', [])
         row = rows[0] if rows else []
@@ -1429,9 +1426,9 @@ def get_existing_row_values(service, sheet_name: str, row_num: int) -> Dict[str,
             BAIMA_SELL_PRICE_COLUMN: row[12] if len(row) > 12 else "",
             IMAGE_PATHS_COLUMN: row[13] if len(row) > 13 else "",
             SHIPPING_COST_COLUMN: row[14] if len(row) > 14 else "",
-            CATEGORY_LARGE_COLUMN: row[22] if len(row) > 22 else "",
-            CATEGORY_MIDDLE_COLUMN: row[23] if len(row) > 23 else "",
-            CATEGORY_SMALL_COLUMN: row[24] if len(row) > 24 else "",
+            CATEGORY_LARGE_COLUMN: row[21] if len(row) > 21 else "",
+            CATEGORY_MIDDLE_COLUMN: row[22] if len(row) > 22 else "",
+            CATEGORY_SMALL_COLUMN: row[23] if len(row) > 23 else "",
         }
         return existing
     except Exception as e:
@@ -1462,7 +1459,7 @@ def get_existing_rows_bulk(
     try:
         result = service.spreadsheets().values().get(
             spreadsheetId=SPREADSHEET_ID,
-            range=f"'{sheet_name}'!A{min_row}:Y{max_row}"
+            range=f"'{sheet_name}'!A{min_row}:X{max_row}"
         ).execute()
         values = result.get('values', [])
 
@@ -1485,9 +1482,9 @@ def get_existing_rows_bulk(
             mapped[BAIMA_SELL_PRICE_COLUMN] = row_values[12] if len(row_values) > 12 else ""
             mapped[IMAGE_PATHS_COLUMN] = row_values[13] if len(row_values) > 13 else ""
             mapped[SHIPPING_COST_COLUMN] = row_values[14] if len(row_values) > 14 else ""
-            mapped[CATEGORY_LARGE_COLUMN] = row_values[22] if len(row_values) > 22 else ""
-            mapped[CATEGORY_MIDDLE_COLUMN] = row_values[23] if len(row_values) > 23 else ""
-            mapped[CATEGORY_SMALL_COLUMN] = row_values[24] if len(row_values) > 24 else ""
+            mapped[CATEGORY_LARGE_COLUMN] = row_values[21] if len(row_values) > 21 else ""
+            mapped[CATEGORY_MIDDLE_COLUMN] = row_values[22] if len(row_values) > 22 else ""
+            mapped[CATEGORY_SMALL_COLUMN] = row_values[23] if len(row_values) > 23 else ""
             row_map[row_num] = mapped
 
         return row_map
@@ -1759,7 +1756,7 @@ def process_sheet_once(
 
     shipping_table = read_shipping_table(service, sheet_name)
     if not shipping_table:
-        print(f"'{sheet_name}' 시트: 배송비 기준표(Z/AA/AB)를 읽지 못해 O열 배송비는 비워집니다.")
+        print(f"'{sheet_name}' 시트: 배송비 기준표(Y/Z/AA)를 읽지 못해 O열 배송비는 비워집니다.")
     for idx, url in target_rows:
         print(f"[{sheet_name}] {idx}행 처리 중: {url}")
         existing_values_for_row = existing_rows_map.get(idx, {})
@@ -2635,8 +2632,6 @@ def scrape_musinsa_product(
         color_from_api = extract_color_from_api(goods_options)
         size_text, color_from_size = extract_sizes_from_api(goods_no, goods_sale_type, opt_kind_cd)
         actual_size_text = extract_actual_size_text(goods_no)
-        if not (actual_size_text or "").strip():
-            actual_size_text = "none"
 
         # 실제 옵션 색상을 우선 반영한다. (size 파싱 > 옵션 API > 상품명)
         if color_from_size:
@@ -2739,7 +2734,7 @@ def scrape_musinsa_product(
             'product_name_kr': '상품명 미확인',
             'color_kr': 'none',
             'size': '',
-            'actual_size': 'none',
+            'actual_size': '',
             'price': '가격 미확인',
             'buyma_price': '',
             'musinsa_sku': '',

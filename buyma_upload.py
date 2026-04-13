@@ -1,7 +1,7 @@
-﻿"""
-BUYMA 異쒗뭹 ?먮룞??紐⑤뱢.
+"""
+BUYMA 출품 자동화 모듈.
 
-Google Sheets???곹뭹 ?뺣낫瑜?BUYMA 異쒗뭹 ?섏씠吏???먮룞 ?낅젰?쒕떎.
+Google Sheets의 상품 정보를 BUYMA 출품 페이지에 자동 입력한다.
 
 Usage:
     python buyma_upload.py
@@ -19,7 +19,7 @@ import re
 import sys
 import tempfile
 
-# Windows cp949 ?섍꼍?먯꽌 ?좊땲肄붾뱶 異쒕젰 ?ㅻ쪟 諛⑹?
+# Windows cp949 환경에서 유니코드 출력 오류 방지
 if sys.stdout.encoding and sys.stdout.encoding.lower().replace("-", "") in ("cp949", "euckr"):
     import io
     sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding="utf-8", errors="replace")
@@ -29,7 +29,7 @@ from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Dict, List, Tuple
 
-# ?꾩껜 ?湲곗떆媛??ㅼ??쇰쭅: ?섍꼍蹂??AUTO_SHOP_WAIT_SCALE (湲곕낯 0.6)
+# 전체 대기시간 스케일링: 환경변수 AUTO_SHOP_WAIT_SCALE (기본 0.6)
 _RAW_SLEEP = time.sleep
 try:
     WAIT_SCALE = float(os.environ.get('AUTO_SHOP_WAIT_SCALE', '0.6'))
@@ -56,10 +56,10 @@ from webdriver_manager.chrome import ChromeDriverManager
 from google.oauth2.service_account import Credentials
 from googleapiclient.discovery import build
 
-# main.py? ?숈씪???쒗듃 ?뺣낫
+# main.py와 동일한 시트 정보
 SPREADSHEET_ID = "1mTV-Fcybov-0uC7tNyM_GXGDoth8F_7wM__zaC1fAjs"
 SHEET_GIDS = [1698424449]
-SHEET_NAME = "?쒗듃1"
+SHEET_NAME = "시트1"
 ROW_START = 2
 HEADER_ROW = 1
 PROGRESS_STATUS_HEADER = "진행상태"
@@ -70,7 +70,7 @@ STATUS_COMPLETED = "출품완료"
 
 
 def _load_sheet_runtime_config() -> None:
-    """濡쒖뺄?먯꽌 ??ν븳 ?쒗듃 ?ㅼ젙?뚯씪???쎌뼱 湲곕낯媛믪쓣 諛섏쁺?쒕떎."""
+    """로컬에서 저장한 시트 설정파일을 읽어 기본값을 반영한다."""
     global SPREADSHEET_ID, SHEET_GIDS, SHEET_NAME, ROW_START
     local_app_data = os.environ.get('LOCALAPPDATA', '').strip()
     if local_app_data:
@@ -89,7 +89,7 @@ def _load_sheet_runtime_config() -> None:
             return
 
         sid = (cfg.get('spreadsheet_id') or '').strip()
-        # URL ?꾩껜 ?꾨떖??寃쎌슦?먮룄 /d/<id>/?먯꽌 ID留?異붿텧
+        # URL 전체 전달된 경우에도 /d/<id>/에서 ID만 추출
         if sid:
             m = re.search(r'/spreadsheets/d/([a-zA-Z0-9-_]+)', sid)
             if m:
@@ -115,7 +115,7 @@ def _load_sheet_runtime_config() -> None:
         if isinstance(rstart, int) and rstart >= 1:
             ROW_START = rstart
     except Exception as e:
-        print(f"?쒗듃 ?ㅼ젙 濡쒕뱶 ?ㅽ뙣: {e}")
+        print(f"시트 설정 로드 실패: {e}")
 
 
 _load_sheet_runtime_config()
@@ -123,12 +123,12 @@ _load_sheet_runtime_config()
 BUYMA_SELL_URL = "https://www.buyma.com/my/sell/new?tab=b"
 BUYMA_LOGIN_URL = "https://www.buyma.com/login/"
 
-# 諛붿씠留?濡쒓렇???뺣낫 ??κ꼍濡?(濡쒖뺄)
+# 바이마 로그인 정보 저장경로 (로컬)
 BUYMA_CRED_PATH = os.path.join(
     os.environ.get('LOCALAPPDATA', os.path.expanduser('~')),
     'auto_shop', 'buyma_credentials.json'
 )
-# Chrome ?꾨줈??寃쎈줈 (?몄뀡/荑좏궎 ?좎?)
+# Chrome 프로필 경로 (세션/쿠키 유지)
 CHROME_PROFILE_DIR = os.path.join(
     os.environ.get('LOCALAPPDATA', os.path.expanduser('~')),
     'auto_shop', 'chrome_profile'
@@ -136,39 +136,38 @@ CHROME_PROFILE_DIR = os.path.join(
 
 
 BUYMA_COMMENT_TEMPLATE = """
-?ャ깇?담꺁, ?뺛궊?잆꺁?쇈깪?쇈궦, 誤ゅ춴?ゃ꺍??
-?썽슋堊울펷OCS竊됵폏?녶뱚繹뽩굺2-5?ο펻?븅곻퐵?곁?7-9??
-亮녑만?귙겘若됧츣?㎯걲?뚣곭퉩恙숁쐿?사빊躍멩셽??댆??γ걣?띶풄?쇻굥?닷릦?귙걫?뽧걚?얇걲?귟㈂?쀣걦??걡?뤵걚?덀굩?쎼걦?졼걬?꾠?
-壤볟틭?㏛툏訝訝띹돬?삡툖?룟릦?뚣걗?뗥졃?덀겘雅ㅶ룢野얍퓶?쀣겍?듽굤?얇걲?귛퐪?녺뵳?㎯걡?귡뼋?귙걦?닷릦??꺗佯╉걫?긷몜?뺛걵?╉걚?잆걽?띲겲?쇻?
+カテゴリ, ファミリーページ, 親子リンク
+国際便（OCS）：商品準備2-5日＋発送～到着7-9日
+平常時は安定ですが、繁忙期・異常時は到着日が前後する場合もございます。詳しくはお問い合わせください。
+当店で万一不良・不具合がある場合は交換対応しております。当理由でお時間頂く場合は都度ご報告させていただきます。
 
-?딂뜼?⑵옙瓮←빁?룔걗?듽겓??쇇?곥걮?얇걲??겎?곲쉹?귡뀓?곭듁力곥굮?붺▶沃띲걚?잆걽?묆겲?쇻?
-?잍뿥曄앫겘鴉묈떃?곦폂?롢걨?ラ젂轝▼?恙쒌걮?얇걲??
+お荷物追跡番号ありにて発送しますので、随時配送状況をご確認いただけます。
+土日祝は休務、休明けに順次対応します。
 
-役룟쨼獒썲뱚?츼ADE IN JAPAN??＝?곥겏驪붵겧??떏亮꿱쫳?ｃ굤?쇻굥?닷릦?뚣걫?뽧걚?얇걲??
-瓦붷뱚?삡벡?쎼겓?귙걼?ｃ겍訝띶끁?덃죭餓뜰겓?㏂걮?╉겘?듿룚凉뺛겇?꾠겍?믡걫閻븃첀?뤵걽?뺛걚??
+海外製品はMADE IN JAPANの製品と比べて若干見劣りする場合がございます。
+返品・交換にあたって不具合案件に関してはお取引ついてをご確認ください。
 
-壤볟틭?㎯겘?녔뿥若뚦２?곥굜?ζ쑍?ゅ뀯?룔궋?ㅳ깇?졼곲솏若싧뱚?ゃ겑
-?▲꺍?뷩곥꺃?뉎궍?쇈궧?곥궘?껁궨?곥궥?γ꺖?븝펷?밤깑?쇈궖?쇘춬竊됥굜烏ｉ줊?믡깳?ㅳ꺍?ュ룚?딀돮?ｃ겍?듽굤?얇걲??
-?먦걫力ⓩ꼷雅뗩쟿??
-?삥돈鸚뽬＝?곥겘?ζ쑍獒썲뱚?ⓩ캈?밤겍濾쒎뱚?뷸틬?뚥퐥?꾢졃?덀걣?붵걭?꾠겲?쇻?
-?사릊獒썬겗?섅걬?곭릊?꾤탞?뤵굤?ⓨ늽??낯?뚧츐?ｃ겍?꾠굥?닷릦?뚣걫?뽧걚?얇걲??
-?사뵟?겹겗?졼꺀?곥깤?ゃ꺍?덀겗?뷩꺃?곮떏亮꿔겗?룔깱?곮＝?좈걥葉뗣겎??컦?뺛겒?루춬?뚣걗?뗥졃?덀걣?붵걭?꾠겲?쇻?
-?삭＝?곥겗?듐궎?뷸릍若싨뼶力뺛겓?덀겂?╉겘??節?cm葉뗥벧??い藥?걣?잆걯?뗥졃?덀걣?붵걭?꾠겲?쇻?
-?삭퓭?곥꺕雅ㅶ룢?ラ뼟?쇻굥誤뤷츣?츭UYMA誤뤷츣?ユ틬?섅겲?쇻귙걡若€쭣?썲릦?ャ굠?뗨퓭?곥겘?듿룛?묆겎?띲걢??겲?쇻겗?㎯곥걫蘊쇔뀯??뀕?띲겓?딃줁?꾠걚?잆걮?얇걲??
-?삡툖??뱚?삭い?띺곥겘雅ㅶ룢?얇걼??퓭?곥걣??꺗?㎯걲??
+当店では即日完売品や日本未入荷アイテム、限定品など
+メンズ、レディース、キッズ、シューズ（スニーカー等）や衣類をメインに取り扱っております。
+【ご注意事項】
+・海外製品は日本製品と比べて検品基準が低い場合がございます。
+・縫製の甘さ、縫い終わり部分の糸が残っている場合がございます。
+・生地のムラ、プリントのズレ、若干のシミ、製造過程での小さな傷等がある場合がございます。
+・製品のサイズ測定方法によっては、1～3cm程度の誤差が生じる場合がございます。
+・返品・交換に関する規定はBUYMA規定に準じます。お客様都合による返品はお受けできかねますので、ご購入は慎重にお願いいたします。
+・不良品・誤配送は交換または返品が可能です。
 """.strip()
 
-# ?쒗듃 而щ읆 ?몃뜳??A=0, B=1, ..., M=12)
+# 시트 컬럼 인덱스(A=0, B=1, ..., M=12)
 COL = {
     'A': 0, 'B': 1, 'C': 2, 'D': 3, 'E': 4, 'F': 5,
     'G': 6, 'H': 7, 'I': 8, 'J': 9, 'K': 10, 'L': 11,
     'M': 12, 'N': 13, 'O': 14,
-    'W': 22, 'X': 23, 'Y': 24,
 }
 
 
 def get_credentials_path() -> str:
-    """?먭꺽利앸챸 ?뚯씪 寃쎈줈 諛섑솚"""
+    """자격증명 파일 경로 반환"""
     local_app_data = os.environ.get('LOCALAPPDATA', '').strip()
     if local_app_data:
         cred = os.path.join(local_app_data, 'auto_shop', 'credentials.json')
@@ -177,7 +176,7 @@ def get_credentials_path() -> str:
     fallback = os.path.join(os.path.dirname(__file__), 'credentials.json')
     if os.path.exists(fallback):
         return fallback
-    raise FileNotFoundError("credentials.json ?뚯씪??李얠쓣 ???놁뒿?덈떎")
+    raise FileNotFoundError("credentials.json 파일을 찾을 수 없습니다")
 
 
 def get_sheets_service():
@@ -202,7 +201,7 @@ def read_upload_rows(service, sheet_name: str, specific_row: int = 0) -> List[Di
     """Read upload target rows from sheet. Only rows with BUYMA price are included."""
     header_map = get_sheet_header_map(service, sheet_name)
     status_index = header_map.get(PROGRESS_STATUS_HEADER)
-    last_index = max(COL['Y'], status_index if status_index is not None else COL['Y'])
+    last_index = max(COL['O'], status_index if status_index is not None else COL['O'])
     last_col_letter = column_index_to_letter(last_index)
 
     try:
@@ -211,7 +210,7 @@ def read_upload_rows(service, sheet_name: str, specific_row: int = 0) -> List[Di
             range=f"'{sheet_name}'!A{ROW_START}:{last_col_letter}1000",
         ).execute()
     except Exception as e:
-        print(f"?쒗듃 ?쎄린 ?ㅽ뙣: {e}")
+        print(f"시트 읽기 실패: {e}")
         return []
 
     rows_data = []
@@ -228,7 +227,7 @@ def read_upload_rows(service, sheet_name: str, specific_row: int = 0) -> List[Di
                 return ""
             return row[index].strip() if index < len(row) and row[index] else ""
 
-        # 理쒖냼 議곌굔: URL + ?곹뭹紐?+ 諛붿씠留??먮ℓ媛 ?덉뼱??異쒗뭹 ???
+        # 최소 조건: URL + 상품명 + 바이마 판매가 있어야 출품 대상
         url = cell('B')
         product_name = cell('E')
         buyma_price = cell('M')
@@ -239,18 +238,13 @@ def read_upload_rows(service, sheet_name: str, specific_row: int = 0) -> List[Di
         progress_status = cell_by_index(status_index)
         normalized_status = (progress_status or "").strip()
         if normalized_status == STATUS_COMPLETED:
-            print(f"  {idx}??嫄대꼫? (吏꾪뻾?곹깭: {progress_status})")
+            print(f"  {idx}행 건너뜀 (진행상태: {progress_status})")
             continue
 
         if normalized_status in {STATUS_UPLOADING, "UPLOADING"}:
             continue
 
-        if status_index is not None and normalized_status not in {
-            STATUS_UPLOAD_READY,
-            STATUS_THUMBNAILS_DONE,
-            "THUMBNAILS_DONE",
-            "업로드진행대기",
-        }:
+        if status_index is not None and normalized_status not in {STATUS_UPLOAD_READY, STATUS_THUMBNAILS_DONE, "THUMBNAILS_DONE", "업로드진행대기"}:
             continue
 
         rows_data.append({
@@ -269,9 +263,6 @@ def read_upload_rows(service, sheet_name: str, specific_row: int = 0) -> List[Di
             'buyma_price': buyma_price,
             'image_paths': cell('N'),
             'shipping_cost': cell('O'),
-            'musinsa_category_large': cell('W'),
-            'musinsa_category_middle': cell('X'),
-            'musinsa_category_small': cell('Y'),
             'progress_status': progress_status,
         })
 
@@ -280,7 +271,7 @@ def read_upload_rows(service, sheet_name: str, specific_row: int = 0) -> List[Di
 
 
 def _save_buyma_credentials(email: str, password: str):
-    """諛붿씠留?濡쒓렇???뺣낫瑜?濡쒖뺄????ν븳??""
+    """바이마 로그인 정보를 로컬에 저장한다"""
     os.makedirs(os.path.dirname(BUYMA_CRED_PATH), exist_ok=True)
     import base64
     data = {
@@ -289,11 +280,11 @@ def _save_buyma_credentials(email: str, password: str):
     }
     with open(BUYMA_CRED_PATH, 'w') as f:
         json.dump(data, f)
-    print("  濡쒓렇???뺣낫媛 ??λ릺?덉뒿?덈떎.")
+    print("  로그인 정보가 저장되었습니다.")
 
 
 def _load_buyma_credentials() -> tuple:
-    """??λ맂 諛붿씠留?濡쒓렇???뺣낫媛 ?놁쑝硫?(None, None) 諛섑솚"""
+    """저장된 바이마 로그인 정보가 없으면 (None, None) 반환"""
     if not os.path.exists(BUYMA_CRED_PATH):
         return None, None
     try:
@@ -308,10 +299,10 @@ def _load_buyma_credentials() -> tuple:
 
 
 def _prompt_buyma_credentials() -> tuple:
-    """?ъ슜?먯뿉寃?諛붿씠留?濡쒓렇???뺣낫瑜??낅젰諛쏄퀬 ??ν븳??""
-    print("\n諛붿씠留?濡쒓렇???뺣낫瑜??낅젰?댁＜?몄슂 (理쒖큹 1?뚮쭔):")
-    email = input("  ?대찓?? ").strip()
-    password = input("  鍮꾨?踰덊샇: ").strip()
+    """사용자에게 바이마 로그인 정보를 입력받고 저장한다"""
+    print("\n바이마 로그인 정보를 입력해주세요 (최초 1회만):")
+    email = input("  이메일: ").strip()
+    password = input("  비밀번호: ").strip()
     if email and password:
         _save_buyma_credentials(email, password)
     return email, password
@@ -331,7 +322,7 @@ def setup_visible_chrome_driver():
             "user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
             "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
         )
-        # ?먮룞 ?먯? 諛⑹? ?듭뀡
+        # 자동 탐지 방지 옵션
         chrome_options.add_experimental_option("excludeSwitches", ["enable-automation"])
         chrome_options.add_experimental_option("useAutomationExtension", False)
         return chrome_options
@@ -361,7 +352,7 @@ def setup_visible_chrome_driver():
         if 'failed to write prefs file' not in str(e).lower():
             raise
         fallback_profile = tempfile.mkdtemp(prefix='buyma_profile_', dir=os.path.dirname(CHROME_PROFILE_DIR))
-        print(f"Chrome 湲곕낯 ?꾨줈?꾩씠 ?좉꺼 ?덉뼱 ?꾩떆 ?꾨줈?꾨줈 ?ъ떆?꾪빀?덈떎: {fallback_profile}")
+        print(f"Chrome 기본 프로필이 잠겨 있어 임시 프로필로 재시도합니다: {fallback_profile}")
         driver = webdriver.Chrome(service=service, options=_build_options(fallback_profile))
 
     driver.execute_cdp_cmd("Page.addScriptToEvaluateOnNewDocument", {
@@ -374,24 +365,24 @@ def wait_for_buyma_login(driver) -> bool:
     driver.get(BUYMA_SELL_URL)
     _sleep(3)
 
-    # ?대? 濡쒓렇???곹깭硫??듦낵
+    # 이미 로그인 상태면 통과
     if '/login' not in driver.current_url:
-        print("?대? 濡쒓렇???곹깭?낅땲??")
+        print("이미 로그인 상태입니다.")
         return True
 
-    # ??λ맂 怨꾩젙 ?뺣낫 濡쒕뱶 (?놁쑝硫??낅젰 諛쏄린)
+    # 저장된 계정 정보 로드 (없으면 입력 받기)
     email, password = _load_buyma_credentials()
     if not email or not password:
         email, password = _prompt_buyma_credentials()
 
     if email and password:
-        # ?먮룞 濡쒓렇???쒕룄
-        print("?먮룞 濡쒓렇???쒕룄 以?..")
+        # 자동 로그인 시도
+        print("자동 로그인 시도 중...")
         try:
             driver.get(BUYMA_LOGIN_URL)
             _sleep(2)
 
-            # ?대찓???낅젰
+            # 이메일 입력
             email_input = WebDriverWait(driver, 10).until(
                 EC.presence_of_element_located((By.CSS_SELECTOR,
                     "input[name='txtLoginId'], input[type='email'], "
@@ -402,7 +393,7 @@ def wait_for_buyma_login(driver) -> bool:
 
             email_input.clear()
 
-            # 鍮꾨?踰덊샇 ?낅젰
+            # 비밀번호 입력
             pw_input = driver.find_element(By.CSS_SELECTOR,
                 "input[name='txtLoginPass'], input[type='password'], "
                 "input[name='password']"
@@ -410,36 +401,36 @@ def wait_for_buyma_login(driver) -> bool:
             pw_input.clear()
             pw_input.send_keys(password)
 
-            # 濡쒓렇??踰꾪듉 ?대┃
+            # 로그인 버튼 클릭
             login_btn = driver.find_element(By.CSS_SELECTOR,
-                "input[type='submit'][value*='?뷴뱚'], "
+                "input[type='submit'][value*='出品'], "
                 "button[type='submit'], input[type='submit'], "
                 ".login-btn, button[class*='login']"
             )
             login_btn.click()
             _sleep(5)
 
-            # 濡쒓렇???깃났 ?뺤씤
+            # 로그인 성공 확인
             if '/login' not in driver.current_url:
-                print("???먮룞 濡쒓렇???깃났!")
+                print("✓ 자동 로그인 성공!")
                 driver.get(BUYMA_SELL_URL)
                 _sleep(2)
                 return True
             else:
-                print("???먮룞 濡쒓렇???ㅽ뙣 (鍮꾨?踰덊샇 ?ㅻ쪟 ?먮뒗 罹≪감 ?꾩슂)")
-                print("  ??λ맂 濡쒓렇???뺣낫媛 ?由щ㈃ ?ㅼ쓬???ㅼ떆 ?낅젰?댁＜?몄슂.")
+                print("✗ 자동 로그인 실패 (비밀번호 오류 또는 캡차 필요)")
+                print("  저장된 로그인 정보가 틀리면 다음에 다시 입력해주세요.")
                 try:
                     os.remove(BUYMA_CRED_PATH)
                 except Exception:
                     pass
         except Exception as e:
-            print(f"???먮룞 濡쒓렇???ㅻ쪟: {e}")
+            print(f"✗ 자동 로그인 오류: {e}")
 
-    # ?섎룞 濡쒓렇???덈궡
+    # 수동 로그인 안내
     print("\n" + "=" * 60)
-    print("  諛붿씠留?濡쒓렇?몄씠 ?꾩슂?⑸땲??")
-    print("  釉뚮씪?곗??먯꽌 吏곸젒 濡쒓렇???댁＜?몄슂.")
-    print("  濡쒓렇???꾨즺 媛먯??섎㈃ ?먮룞?쇰줈 吏꾪뻾?⑸땲??")
+    print("  바이마 로그인이 필요합니다.")
+    print("  브라우저에서 직접 로그인 해주세요.")
+    print("  로그인 완료 감지되면 자동으로 진행됩니다.")
     print("=" * 60 + "\n")
 
     for _ in range(300):
@@ -447,12 +438,12 @@ def wait_for_buyma_login(driver) -> bool:
         try:
             current_url = driver.current_url
             if '/login' not in current_url:
-                print("濡쒓렇???깃났! 異쒗뭹 ?섏씠吏濡??대룞?⑸땲??.")
-                # ?먮룞 濡쒓렇???깃났 ??怨꾩젙 ?뺣낫 ????щ? 臾산린
-                save = input("  ??怨꾩젙 ?뺣낫瑜???ν븯寃좎뒿?덇퉴? (y/n): ").strip().lower()
+                print("로그인 성공! 출품 페이지로 이동합니다..")
+                # 자동 로그인 성공 시 계정 정보 저장 여부 묻기
+                save = input("  이 계정 정보를 저장하겠습니까? (y/n): ").strip().lower()
                 if save == 'y':
-                    new_email = input("  ?대찓?? ").strip()
-                    new_pw = input("  鍮꾨?踰덊샇: ").strip()
+                    new_email = input("  이메일: ").strip()
+                    new_pw = input("  비밀번호: ").strip()
                     if new_email and new_pw:
                         _save_buyma_credentials(new_email, new_pw)
                 _sleep(2)
@@ -460,7 +451,7 @@ def wait_for_buyma_login(driver) -> bool:
         except Exception:
             pass
 
-    print("濡쒓렇???湲곗떆媛?珥덇낵 (5遺?")
+    print("로그인 대기시간 초과 (5분)")
     return False
 
 
@@ -469,11 +460,11 @@ def scan_form_structure(driver):
     driver.get(BUYMA_SELL_URL)
     _sleep(5)
 
-    print("\n=== 諛붿씠留?異쒗뭹 ??援ъ“ ?ㅼ틪 ===\n")
+    print("\n=== 바이마 출품 폼 구조 스캔 ===\n")
 
-    # input ???
+    # input ?소
     inputs = driver.find_elements(By.CSS_SELECTOR, "input[type='text'], input[type='number'], input[type='file']")
-    print(f"[INPUT ?낅젰] ({len(inputs)}媛?")
+    print(f"[INPUT 입력] ({len(inputs)}개)")
     for inp in inputs:
         name = inp.get_attribute('name') or ''
         id_attr = inp.get_attribute('id') or ''
@@ -483,7 +474,7 @@ def scan_form_structure(driver):
 
     # textarea
     textareas = driver.find_elements(By.TAG_NAME, "textarea")
-    print(f"\n[TEXTAREA] ({len(textareas)}媛?")
+    print(f"\n[TEXTAREA] ({len(textareas)}개)")
     for ta in textareas:
         name = ta.get_attribute('name') or ''
         id_attr = ta.get_attribute('id') or ''
@@ -491,7 +482,7 @@ def scan_form_structure(driver):
 
     # select
     selects = driver.find_elements(By.TAG_NAME, "select")
-    print(f"\n[SELECT] ({len(selects)}媛?")
+    print(f"\n[SELECT] ({len(selects)}개)")
     for sel in selects:
         name = sel.get_attribute('name') or ''
         id_attr = sel.get_attribute('id') or ''
@@ -501,18 +492,18 @@ def scan_form_structure(driver):
 
     # button/submit
     buttons = driver.find_elements(By.CSS_SELECTOR, "button, input[type='submit']")
-    print(f"\n[BUTTON] ({len(buttons)}媛?")
+    print(f"\n[BUTTON] ({len(buttons)}개)")
     for btn in buttons:
         text = btn.text.strip() or btn.get_attribute('value') or ''
         btn_type = btn.get_attribute('type') or ''
         btn_class = btn.get_attribute('class') or ''
         print(f"  text={text}, type={btn_type}, class={btn_class[:60]}")
 
-    # ?꾩떆 HTML ????붾쾭洹몄슜)
+    # 임시 HTML 저장(디버그용)
     html_path = os.path.join(os.path.dirname(__file__), '_buyma_form_scan.html')
     with open(html_path, 'w', encoding='utf-8') as f:
         f.write(driver.page_source)
-    print(f"\n??HTML ??? {html_path}")
+    print(f"\n폼 HTML 저장: {html_path}")
 
 
 def resolve_image_files(image_paths_cell: str) -> List[str]:
@@ -520,7 +511,7 @@ def resolve_image_files(image_paths_cell: str) -> List[str]:
     if not image_paths_cell:
         return []
 
-    # ?대?吏媛 ??λ맂 湲곕낯 寃쎈줈
+    # 이미지가 저장된 기본 경로
     local_app_data = os.environ.get('LOCALAPPDATA', '')
     data_dir = os.path.join(local_app_data, 'auto_shop') if local_app_data else os.path.expanduser('~/.auto_shop')
     images_root = os.path.join(data_dir, 'images')
@@ -535,10 +526,10 @@ def resolve_image_files(image_paths_cell: str) -> List[str]:
 
         norm_path = path.replace('\\', '/').lstrip('./')
         if norm_path.lower().startswith('images/'):
-            # ?쒗듃??images/媛 ??踰??ㅼ뼱媛硫?猷⑦듃 以묐났 諛⑹?
+            # 시트에 images/가 두 번 들어가면 루트 중복 방지
             norm_path = norm_path[len('images/'):]
 
-        # ?곷?寃쎈줈??images_root 湲곗? 寃쎈줈
+        # 상대경로는 images_root 기준 경로
         if os.path.isabs(path):
             candidate_paths = [path]
         else:
@@ -553,13 +544,13 @@ def resolve_image_files(image_paths_cell: str) -> List[str]:
                 candidate_dirs.append(os.path.dirname(os.path.abspath(full_path)))
                 break
             if os.path.isdir(full_path):
-                # ?대뜑?쇰㈃ ?섏쐞 ?대?吏 紐⑤몢
+                # 폴더라면 하위 이미지 모두
                 for ext in ('*.jpg', '*.jpeg', '*.png', '*.webp'):
                     files.extend(sorted(glob.glob(os.path.join(full_path, ext))))
                 candidate_dirs.append(os.path.abspath(full_path))
                 break
 
-    # ?곗꽑 ?몃꽕?쇱씠 ?대뜑???덉쑝硫?泥ル쾲吏몃줈 ?щ┝
+    # 우선 썸네일이 폴더에 있으면 첫번째로 올림
     priority_names = [
         '00_thumb_main.jpg',
         '00_thumbnail.jpg',
@@ -599,38 +590,38 @@ def _infer_color_system(color_text: str) -> str:
     """Map color text to BUYMA color system labels."""
     c = (color_text or '').strip().lower()
     if not c or c == 'none':
-        return '?꿩뙁若싥겒??
-    if any(k in c for k in ['black', '釉붾옓', '寃??]):
-        return '?뽧꺀?껁궚楹?
-    if any(k in c for k in ['white', 'ivory', '?ㅽ봽?붿씠??, '?꾩씠蹂대━', '??]):
-        return '?쎼꺈?ㅳ깉楹?
-    if any(k in c for k in ['gray', 'grey', '洹몃젅??, '?뚯깋']):
-        return '?겹꺃?쇘내'
-    if any(k in c for k in ['beige', 'camel', '踰좎씠吏', '移대찞']):
-        return '?쇻꺖?멥깷楹?
-    if any(k in c for k in ['brown', '釉뚮씪??, '媛덉깋']):
-        return '?뽧꺀?╉꺍楹?
-    if any(k in c for k in ['pink', '?묓겕']):
-        return '?붵꺍??내'
-    if any(k in c for k in ['red', '?덈뱶', '鍮④컯']):
-        return '?с긿?됬내'
-    if any(k in c for k in ['orange', '?ㅻ젋吏']):
-        return '?ゃ꺃?녈궦楹?
-    if any(k in c for k in ['yellow', '?먮줈??, '?몃옉']):
-        return '?ㅳ궓??꺖楹?
-    if any(k in c for k in ['green', 'khaki', 'olive', '洹몃┛', '移댄궎', '?щ━釉?]):
-        return '?겹꺁?쇈꺍楹?
-    if any(k in c for k in ['blue', 'navy', '釉붾（', '?ㅼ씠鍮?]):
-        return '?뽧꺂?쇘내'
-    if any(k in c for k in ['purple', 'violet', '?쇳뵆', '蹂대씪']):
-        return '?묆꺖?쀣꺂楹?
-    if any(k in c for k in ['gold', '?ㅻ쾭', 'silver', 'metal', '硫뷀깉']):
-        return '?룔꺂?먦꺖?삠궡?쇈꺂?됬내'
-    return '?욁꺂?곥궖?⒲꺖'
+        return '色指定なし'
+    if any(k in c for k in ['black', '블랙', '검정']):
+        return 'ブラック系'
+    if any(k in c for k in ['white', 'ivory', '오프화이트', '아이보리', '흰']):
+        return 'ホワイト系'
+    if any(k in c for k in ['gray', 'grey', '그레이', '회색']):
+        return 'グレー系'
+    if any(k in c for k in ['beige', 'camel', '베이지', '카멜']):
+        return 'ベージュ系'
+    if any(k in c for k in ['brown', '브라운', '갈색']):
+        return 'ブラウン系'
+    if any(k in c for k in ['pink', '핑크']):
+        return 'ピンク系'
+    if any(k in c for k in ['red', '레드', '빨강']):
+        return 'レッド系'
+    if any(k in c for k in ['orange', '오렌지']):
+        return 'オレンジ系'
+    if any(k in c for k in ['yellow', '옐로우', '노랑']):
+        return 'イエロー系'
+    if any(k in c for k in ['green', 'khaki', 'olive', '그린', '카키', '올리브']):
+        return 'グリーン系'
+    if any(k in c for k in ['blue', 'navy', '블루', '네이비']):
+        return 'ブルー系'
+    if any(k in c for k in ['purple', 'violet', '퍼플', '보라']):
+        return 'パープル系'
+    if any(k in c for k in ['gold', '실버', 'silver', 'metal', '메탈']):
+        return 'シルバー・ゴールド系'
+    return 'マルチカラー'
 
 
 def _select_color_system(driver, color_system: str, row_index: int = 0) -> bool:
-    """?됱긽怨꾪넻 Select?먯꽌 而щ윭??留욌뒗 ?듭뀡???좏깮?쒕떎."""
+    """색상계통 Select에서 컬러에 맞는 옵션을 선택한다."""
     try:
         color_selects = driver.find_elements(By.CSS_SELECTOR, ".sell-color-table .Select")
         if not color_selects:
@@ -640,32 +631,32 @@ def _select_color_system(driver, color_system: str, row_index: int = 0) -> bool:
         _scroll_and_click(driver, control)
         _sleep(0.4)
 
-        # ?쒕∼?ㅼ슫 ?듭뀡?먯꽌 紐⑺몴 ?됱긽 ?곗꽑 ?좏깮
+        # 드롭다운 옵션에서 목표 색상 우선 선택
         options = driver.find_elements(By.CSS_SELECTOR, ".Select-menu-outer .Select-option")
         if options:
-            target = color_system.replace('楹?, '')
+            target = color_system.replace('系', '')
             for opt in options:
                 txt = opt.text.strip()
                 if color_system in txt or target in txt:
                     _scroll_and_click(driver, opt)
                     return True
-            # ?됱긽 留ㅽ븨 ?ㅽ뙣 ??'?앫겗餓? ?먮뒗 泥??듭뀡 ?좏깮
+            # 색상 매핑 실패 시 'その他' 또는 첫 옵션 선택
             for opt in options:
                 txt = opt.text.strip()
-                if '?앫겗餓? in txt:
+                if 'その他' in txt:
                     _scroll_and_click(driver, opt)
                     return True
             _scroll_and_click(driver, options[0])
             return True
 
-        # ?듭뀡??諛붾줈 ???⑤뒗 寃쎌슦 ?ㅻ낫??fallback
+        # 옵션이 바로 안 뜨는 경우 키보드 fallback
         active = driver.switch_to.active_element
         for _ in range(25):
             focused = driver.execute_script(
                 "var el=document.querySelector('.Select-menu-outer .Select-option.is-focused');"
                 "return el?el.textContent.trim():'';"
             )
-            if focused and (color_system in focused or color_system.replace('楹?, '') in focused):
+            if focused and (color_system in focused or color_system.replace('系', '') in focused):
                 active.send_keys(Keys.ENTER)
                 return True
             active.send_keys(Keys.ARROW_DOWN)
@@ -677,7 +668,7 @@ def _select_color_system(driver, color_system: str, row_index: int = 0) -> bool:
 
 
 def _split_color_values(color_text: str) -> List[str]:
-    """?됱긽 臾몄옄?댁쓣 援щ텇?먮줈 遺꾨━?쒕떎."""
+    """색상 문자열을 구분자로 분리한다."""
     if not color_text:
         return []
     parts = re.split(r'[,/|]|\s+and\s+|\s*&\s*', color_text)
@@ -716,7 +707,7 @@ COLOR_ABBR_MAP: Dict[str, str] = {
 
 
 def _expand_color_abbreviations(color_text: str) -> str:
-    """?쎌뼱 ?됱긽肄붾뱶(bk, cg ??瑜?BUYMA ?낅젰???됱긽紐낆쑝濡??뺤옣?쒕떎."""
+    """약어 색상코드(bk, cg 등)를 BUYMA 입력용 색상명으로 확장한다."""
     normalized_text = (color_text or "").strip()
     dot_parts = [p.strip() for p in normalized_text.split(".") if p.strip()]
     if len(dot_parts) >= 2 and all(re.fullmatch(r"[A-Za-z]{1,3}", p) for p in dot_parts):
@@ -737,14 +728,14 @@ def _expand_color_abbreviations(color_text: str) -> str:
 
 
 def _try_add_color_row(driver) -> bool:
-    """?됱긽 ??異붽? 踰꾪듉??李얠븘 ?대┃?쒕떎."""
+    """색상 행 추가 버튼을 찾아 클릭한다."""
     try:
         area = driver.find_element(By.CSS_SELECTOR, ".sell-color-table")
         candidates = area.find_elements(By.CSS_SELECTOR, "button, a, [role='button'], [class*='add']")
         for c in candidates:
             txt = (c.text or '').strip()
             cls = (c.get_attribute('class') or '')
-            if ('瓦썲뒥' in txt) or ('add' in cls.lower()) or ('plus' in cls.lower()):
+            if ('追加' in txt) or ('add' in cls.lower()) or ('plus' in cls.lower()):
                 _scroll_and_click(driver, c)
                 _sleep(0.4)
                 return True
@@ -754,14 +745,14 @@ def _try_add_color_row(driver) -> bool:
 
 
 def _try_add_size_row(driver, scope=None) -> bool:
-    """?ъ씠利???異붽? 踰꾪듉??李얠븘 ?대┃?쒕떎."""
+    """사이즈 행 추가 버튼을 찾아 클릭한다."""
     try:
         root = scope or driver
         before = len(root.find_elements(By.CSS_SELECTOR, ".Select"))
         candidates = root.find_elements(
             By.CSS_SELECTOR,
             "button, a, [role='button'], [class*='add'], [class*='plus'], "
-            "[aria-label*='瓦썲뒥'], [title*='瓦썲뒥'], [data-testid*='add']"
+            "[aria-label*='追加'], [title*='追加'], [data-testid*='add']"
         )
         for c in candidates:
             txt = (c.text or '').strip()
@@ -769,14 +760,14 @@ def _try_add_size_row(driver, scope=None) -> bool:
             aria = (c.get_attribute('aria-label') or '')
             title = (c.get_attribute('title') or '')
             if (
-                ('瓦썲뒥' in txt) or ('add' in cls.lower()) or ('plus' in cls.lower())
-                or ('瓦썲뒥' in aria) or ('瓦썲뒥' in title)
+                ('追加' in txt) or ('add' in cls.lower()) or ('plus' in cls.lower())
+                or ('追加' in aria) or ('追加' in title)
             ):
                 _scroll_and_click(driver, c)
                 _sleep(0.4)
 
 
-        # 由ъ뒪???녿뒗 ?ъ씠利덈쾭??fallback
+        # 리스트 없는 사이즈버튼 fallback
         icon_buttons = root.find_elements(By.CSS_SELECTOR, "button, [role='button']")
         for b in icon_buttons:
             txt = (b.text or '').strip()
@@ -795,7 +786,7 @@ def _try_add_size_row(driver, scope=None) -> bool:
 
 
 def _select_size_by_select_controls(driver, scope, size_text: str) -> int:
-    """?ъ씠利??쇰꺼 泥댄겕諛뺤뒪 ???React Select 而⑦듃濡ㅼ뿉???ъ씠利덈? ?좏깮?쒕떎."""
+    """사이즈 라벨 체크박스 대신 React Select 컨트롤에서 사이즈를 선택한다."""
     if not size_text:
         return 0
     try:
@@ -804,7 +795,7 @@ def _select_size_by_select_controls(driver, scope, size_text: str) -> int:
         if not sizes:
             return 0
 
-        # ?꾩슂 ?듭뀡 媛쒖닔留뚰겮 Select 異붽????쒕룄
+        # 필요 옵션 개수만큼 Select 추가장 시도
         for _ in range(10):
             if time.time() - t0 > 8:
                 break
@@ -853,11 +844,11 @@ def _select_size_by_select_controls(driver, scope, size_text: str) -> int:
                         break
 
             if not picked:
-                # ?쇳븨 ?뚰듃???듭뀡 媛뺤젣?낅젰(?뱀젙 ENTER濡?留ㅼ묶 ?덈맆 ??
+                # 쇼핑 파트너 옵션 강제입력(특정 ENTER로 매칭 안될 때)
                 try:
                     sel_input = sel.find_element(By.CSS_SELECTOR, "input")
                     sel_input.clear()
-                    # cm ?쒓린 蹂?섏슜 ?쇳븨 ?쒕룄 (?? "215" ??"21.5")
+                    # cm 표기 변환용 쇼핑 시도 (예: "215" → "21.5")
                     only_num = re.sub(r"[^0-9]", "", sz)
                     type_candidates = [sz]
                     if only_num and 200 <= int(only_num) <= 350:
@@ -884,7 +875,7 @@ def _select_size_by_select_controls(driver, scope, size_text: str) -> int:
                     pass
 
             if not picked:
-                # ArrowDown?쇰줈 留ㅼ묶 ?듭뀡 ?먯깋 (?뱀젙 ENTER)
+                # ArrowDown으로 매칭 옵션 탐색 (특정 ENTER)
                 try:
                     driver.execute_script("arguments[0].click()", control)
                     _sleep(0.3)
@@ -915,7 +906,7 @@ def _select_size_by_select_controls(driver, scope, size_text: str) -> int:
 
 
 def _fill_size_supplement(driver, size_text: str) -> bool:
-    """?ъ씠利??좏깮 ?듭뀡???놁쓣 ??蹂댁땐?뺣낫 textarea???ъ씠利덈? 湲곕줉?쒕떎."""
+    """사이즈 선택 옵션이 없을 때 보충정보 textarea에 사이즈를 기록한다."""
     if not size_text:
         return False
     try:
@@ -926,7 +917,7 @@ def _fill_size_supplement(driver, size_text: str) -> bool:
         target = areas[0]
         _scroll_and_click(driver, target)
         existing = (target.get_attribute('value') or '').strip()
-        line = f"?듐궎??{size_text}"
+        line = f"サイズ {size_text}"
         if existing:
             if line not in existing:
                 target.clear()
@@ -940,7 +931,7 @@ def _fill_size_supplement(driver, size_text: str) -> bool:
 
 
 def _fill_color_supplement(driver, color_text_en: str) -> bool:
-    """?됱긽 ?낅젰???鍮꾪솢?깆씪 ??蹂댁땐?뺣낫 textarea???됱긽紐낆쓣 湲곕줉?쒕떎."""
+    """색상 입력란이 비활성일 때 보충정보 textarea에 색상명을 기록한다."""
     if not color_text_en:
         return False
     try:
@@ -966,7 +957,7 @@ def _fill_color_supplement(driver, color_text_en: str) -> bool:
 
 
 def _build_size_variants(size_raw: str) -> List[str]:
-    """?쒗듃 ?ъ씠利덈? BUYMA ?쇰꺼 鍮꾧탳???꾨낫濡??뺤옣?쒕떎."""
+    """시트 사이즈를 BUYMA 라벨 비교용 후보로 확장한다."""
     sz = (size_raw or '').strip()
     if not sz:
         return []
@@ -974,21 +965,21 @@ def _build_size_variants(size_raw: str) -> List[str]:
     variants = [sz]
     szu = sz.upper().replace(' ', '')
 
-    # 蹂듯빀 ?쒓린(?? 220/M3W5, US7/250)??遺꾪빐?댁꽌 ?꾨낫濡?異붽?
+    # 복합 표기(예: 220/M3W5, US7/250)도 분해해서 후보로 추가
     parts = [p.strip() for p in re.split(r'[/|]', sz) if p.strip()]
     for p in parts:
         if p not in variants:
             variants.append(p)
 
-    # F/FREE/OS 怨꾩뿴(?꾨━?ъ씠利?
+    # F/FREE/OS 계열(프리사이즈)
     if szu in {'F', 'FREE', 'FREESIZE', 'OS', 'ONESIZE', 'O/S'}:
         variants.extend([
             'F', 'FREE', 'FREE SIZE', 'ONE SIZE', 'ONESIZE', 'OS', 'O/S',
-            '?뺛꺁??, '?뺛꺁?쇈궢?ㅳ궨', '??꺍?듐궎??, '?듐궎?뷸뙁若싥겒??, '?뉐츣?ゃ걮'
+            'フリー', 'フリーサイズ', 'ワンサイズ', 'サイズ指定なし', '指定なし'
         ])
 
 
-    # ?좊컻 ?レ옄 ?쒓린 ?뺤옣 (?? 240, 24.0, 24cm, JP24)
+    # 신발 숫자 표기 확장 (예: 240, 24.0, 24cm, JP24)
     numeric_seeds = []
     for token in [sz] + parts:
         only_num = re.sub(r"[^0-9.]", "", token)
@@ -997,7 +988,7 @@ def _build_size_variants(size_raw: str) -> List[str]:
         try:
             if '.' in only_num:
                 val = float(only_num)
-                # 20~35??cm濡?媛꾩＜, 200~350? mm濡?媛꾩＜
+                # 20~35는 cm로 간주, 200~350은 mm로 간주
                 if 20 <= val <= 35:
                     numeric_seeds.append(int(round(val * 10)))
                 elif 200 <= val <= 350:
@@ -1024,7 +1015,7 @@ def _build_size_variants(size_raw: str) -> List[str]:
             f"KR{cm_str}",
         ])
 
-    # 以묐났 ?쒓굅(?쒖꽌 ?좎?)
+    # 중복 제거(순서 유지)
     seen = set()
     out = []
     for v in variants:
@@ -1041,18 +1032,18 @@ def _normalize_size_token_for_match(s: str) -> str:
     if not t:
         return ''
     t = t.replace('?', ' ')
-    t = t.replace('節껓퐤', 'cm').replace('??, 'cm').replace('?삠꺍??, 'cm')
-    t = t.replace('?듐궎??, '').replace('size', '')
+    t = t.replace('ｃｍ', 'cm').replace('㎝', 'cm').replace('センチ', 'cm')
+    t = t.replace('サイズ', '').replace('size', '')
     t = t.replace('cm', '').replace('mm', '')
     t = t.replace('jp', '').replace('kr', '').replace('us', '').replace('uk', '').replace('eu', '').replace('it', '')
     t = re.sub(r"[\s\-_/\(\)\[\]\{\}:;,+]", '', t)
-    # 23.5 == 235 ?뺥깭 鍮꾧탳瑜??꾪빐 ???쒓굅
+    # 23.5 == 235 형태 비교를 위해 점 제거
     t = t.replace('.', '')
     return t
 
 
 def _size_match(a: str, b: str) -> bool:
-    """?ъ씠利??쒓린 a? b媛 ?ㅼ쭏?곸쑝濡?媛숈?吏 ?먮퀎?쒕떎."""
+    """사이즈 표기 a와 b가 실질적으로 같은지 판별한다."""
     na = _normalize_size_token_for_match(a)
     nb = _normalize_size_token_for_match(b)
     if not na or not nb:
@@ -1068,7 +1059,7 @@ def _size_match(a: str, b: str) -> bool:
 
 
 def _is_free_size_text(size_text: str) -> bool:
-    """?꾨━?ъ씠利?怨꾩뿴 ?쒓린?몄? ?먮퀎?쒕떎. (?? free size, one size, f)"""
+    """프리사이즈 계열 표기인지 판별한다. (예: free size, one size, f)"""
     raw = (size_text or '').strip()
     if not raw:
         return False
@@ -1088,26 +1079,26 @@ def _is_free_size_text(size_text: str) -> bool:
     free_aliases = {
         'f', 'free', 'freesize', 'onesize', 'os', 'o/s'.replace('/', ''),
         'none', 'n/a', 'na', 'no', 'nosize', 'nosizes', 'notapplicable',
-        '吏?뺤뾾??, '?ъ씠利덉뾾??, '?놁쓬', '?대떦?놁쓬',
-        '?듐궎?뷸뙁若싥겒??, '?뉐츣?ゃ걮', '?듐궎?뷩겒??, '?ゃ걮',
-        '?꾨━', '?꾨━?ъ씠利?,
-        '?뺛꺁??, '?뺛꺁?쇈궢?ㅳ궨', '??꺍?듐궎??
+        '지정없음', '사이즈없음', '없음', '해당없음',
+        'サイズ指定なし', '指定なし', 'サイズなし', 'なし',
+        '프리', '프리사이즈',
+        'フリー', 'フリーサイズ', 'ワンサイズ'
     }
 
     return all(t in free_aliases for t in normalized_tokens)
 
 
 def _check_no_variation_option(driver, prefer_shitei_nashi: bool = False) -> bool:
-    """?ъ씠利??됱긽 ?듭뀡???놁쓣 ??'蹂?뺤뾾??吏?뺛겒?? 怨꾩뿴 ?듭뀡???좏깮?쒕떎."""
+    """사이즈/색상 옵션이 없을 때 '변형없음/지정なし' 계열 옵션을 선택한다."""
     if prefer_shitei_nashi:
         keywords = [
-            '?뉐츣?ゃ걮', '?듐궎?뷸뙁若싥겒??, '?듐궎?뷩겒??,
-            '鸚됧땿?ゃ걮', '鸚됧숱?ゃ걮', '?먦꺁?ⓦ꺖?룔깾?녈겒??, '?먦꺁?ⓦ꺖?룔깾?녕꽒??, '蹂?뺤뾾??
+            '指定なし', 'サイズ指定なし', 'サイズなし',
+            '変動なし', '変形なし', 'バリエーションなし', 'バリエーション無し', '변형없음'
         ]
     else:
         keywords = [
-            '鸚됧땿?ゃ걮', '鸚됧숱?ゃ걮', '?먦꺁?ⓦ꺖?룔깾?녈겒??, '?먦꺁?ⓦ꺖?룔깾?녕꽒??, '?듐궎?뷩겒??,
-            '?듐궎?뷸뙁若싥겒??, '?뉐츣?ゃ걮', '蹂?뺤뾾??
+            '変動なし', '変形なし', 'バリエーションなし', 'バリエーション無し', 'サイズなし',
+            'サイズ指定なし', '指定なし', '변형없음'
         ]
     try:
         variation = driver.find_element(By.CSS_SELECTOR, ".sell-variation")
@@ -1121,7 +1112,7 @@ def _check_no_variation_option(driver, prefer_shitei_nashi: bool = False) -> boo
                     _scroll_and_click(driver, lb)
                     return True
 
-        # ?ъ씠利?湲곕컲?쇰줈 ?대┃ 媛?ν븳 ?붿냼瑜??먯깋
+        # 사이즈 기반으로 클릭 가능한 요소를 탐색
         nodes = variation.find_elements(By.XPATH, ".//*[normalize-space(text())!='']")
         for kw in keywords:
             for node in nodes:
@@ -1143,7 +1134,7 @@ def _check_no_variation_option(driver, prefer_shitei_nashi: bool = False) -> boo
                     if clicked:
                         return True
 
-        # ?쇰꺼 諛뺤뒪媛 鍮꾩뼱?덈뒗 寃쎌슦 input ?대쫫?쇰줈 fallback
+        # 라벨 박스가 비어있는 경우 input 이름으로 fallback
         inputs = variation.find_elements(By.CSS_SELECTOR, "input[type='checkbox'], input[type='radio']")
         for ipt in inputs:
             meta = ' '.join([
@@ -1156,9 +1147,9 @@ def _check_no_variation_option(driver, prefer_shitei_nashi: bool = False) -> boo
                     os.makedirs(CHROME_PROFILE_DIR, exist_ok=True)
                     return True
 
-        # React Select 紐⑤뱶 ?좏깮 fallback
+        # React Select 모드 선택 fallback
         selects = variation.find_elements(By.CSS_SELECTOR, ".Select")
-        targets = ['?뉐츣?ゃ걮', '?듐궎?뷸뙁若싥겒??, '?먦꺁?ⓦ꺖?룔깾?녈겒??, '?ⓨ벴鸚됧땿?ゃ걮'] if prefer_shitei_nashi else ['?먦꺁?ⓦ꺖?룔깾?녈겒??, '?ⓨ벴鸚됧땿?ゃ걮', '?듐궎?뷸뙁若싥겒??, '?뉐츣?ゃ걮']
+        targets = ['指定なし', 'サイズ指定なし', 'バリエーションなし', '在庫変動なし'] if prefer_shitei_nashi else ['バリエーションなし', '在庫変動なし', 'サイズ指定なし', '指定なし']
         for sel in selects:
             for target in targets:
                 if _select_option_in_select_control(driver, sel, target):
@@ -1169,20 +1160,20 @@ def _check_no_variation_option(driver, prefer_shitei_nashi: bool = False) -> boo
 
 
 def _force_select_shitei_nashi(driver) -> bool:
-    """?꾨━?ъ씠利덉뿉??'?뉐츣?ゃ걮' ?뺥솗 ?쇱튂留??좏깮?쒕떎."""
+    """프리사이즈에서 '指定なし' 정확 일치만 선택한다."""
     try:
         variation = driver.find_element(By.CSS_SELECTOR, ".sell-variation")
 
-        # 1) ?踰?????移????
+        # 1) ?벨 ?확 ?치 ?선
         labels = variation.find_elements(By.CSS_SELECTOR, "label")
         for lb in labels:
             txt = (lb.text or '').strip().replace('?', ' ')
-            if txt == '?若???:
+            if txt == '?定?し':
                 _scroll_and_click(driver, lb)
                 return True
 
-        # 2) ?ъ씠利??쒕∼?ㅼ슫?먯꽌 '吏?뺛겒?? ?꾩튂 ?대┃
-        nodes = variation.find_elements(By.XPATH, ".//*[normalize-space(text())='?若???]")
+        # 2) 사이즈 드롭다운에서 '지정なし' 위치 클릭
+        nodes = variation.find_elements(By.XPATH, ".//*[normalize-space(text())='?定?し']")
         for node in nodes:
             clicked = driver.execute_script(
                 "var el=arguments[0];"
@@ -1198,10 +1189,10 @@ def _force_select_shitei_nashi(driver) -> bool:
             if clicked:
                 return True
 
-        # 3) React Select?먯꽌 ?뺥솗 ?듭뀡 ?좏깮
+        # 3) React Select에서 정확 옵션 선택
         selects = variation.find_elements(By.CSS_SELECTOR, ".Select")
         for sel in selects:
-            if _select_option_in_select_control(driver, sel, '?若???):
+            if _select_option_in_select_control(driver, sel, '?定?し'):
                 return True
     except Exception:
         return False
@@ -1209,23 +1200,23 @@ def _force_select_shitei_nashi(driver) -> bool:
 
 
 def _force_select_shitei_nashi_global(driver) -> bool:
-    """?꾨━?ъ씠利덉뿉??紐⑤뱺 ?곸뿭?먯꽌 '?뉐츣?ゃ걮'瑜?李얠븘 ?좏깮?쒕떎."""
-    # 1) 湲곕낯 ?곸뿭 ?곗꽑
+    """프리사이즈에서 모든 영역에서 '指定なし'를 찾아 선택한다."""
+    # 1) 기본 영역 우선
     if _force_select_shitei_nashi(driver):
         return True
 
-    # 2) ?ъ씠利??쇰낯?ъ씠利?Select(?쇰낯?ъ씠利??놁쓣 ???좏깮 ?쒕룄)
+    # 2) 사이즈/일본사이즈 Select(일본사이즈 없을 때 선택 시도)
     try:
         selects = driver.find_elements(By.CSS_SELECTOR, ".sell-size-table .Select, .sell-variation .Select")
         for sel in selects:
-            if _select_option_in_select_control(driver, sel, '?若???):
+            if _select_option_in_select_control(driver, sel, '?定?し'):
                 return True
     except Exception:
         pass
 
-    # 3) ?곸뿭 ?ъ씠利??뺥솗 ?쇱튂 ?대┃ ?쒕룄
+    # 3) 영역 사이즈 정확 일치 클릭 시도
     try:
-        nodes = driver.find_elements(By.XPATH, "//*[normalize-space(text())='?若???]")
+        nodes = driver.find_elements(By.XPATH, "//*[normalize-space(text())='?定?し']")
         for node in nodes:
             clicked = driver.execute_script(
                 "var el=arguments[0];"
@@ -1247,10 +1238,10 @@ def _force_select_shitei_nashi_global(driver) -> bool:
 
 
 def _force_reference_size_shitei_nashi(driver, panel=None) -> bool:
-    """?ъ씠利??뚯씠釉붿쓽 ?쇰낯?ъ씠利?Select?먯꽌 '?뉐츣?ゃ걮' 媛뺤젣 ?좏깮?쒕떎."""
+    """사이즈 테이블의 일본사이즈 Select에서 '指定なし' 강제 선택한다."""
     try:
         root = panel if panel is not None else driver
-        # BUYMA ?붾㈃ 援ъ“ 蹂寃쎌쓣 ?鍮꾪빐 ?щ윭 ??됲꽣瑜??쒕룄??
+        # BUYMA 화면 구조 변경을 대비해 여러 셀렉터를 시도함
         selects = root.find_elements(By.CSS_SELECTOR, ".sell-size-table .Select")
         if not selects:
             selects = root.find_elements(By.CSS_SELECTOR, ".sell-variation .sell-size-table .Select")
@@ -1260,30 +1251,30 @@ def _force_reference_size_shitei_nashi(driver, panel=None) -> bool:
         changed = 0
         for sel in selects:
             try:
-                # 媛??놁쓣 ??skip
+                # 값 없을 때 skip
                 current = sel.find_elements(By.CSS_SELECTOR, ".Select-value-label")
-                if current and (current[0].text or '').strip() == '?若???:
+                if current and (current[0].text or '').strip() == '?定?し':
                     changed += 1
                     continue
 
-                # 1? ?諛???????
-                if _select_option_in_select_control(driver, sel, '?若???):
+                # 1? ?반 ?택 ?수
+                if _select_option_in_select_control(driver, sel, '?定?し'):
                     changed += 1
                     continue
 
-                # 2) 吏곸젒 ?쇳븨/Enter ?좏깮
+                # 2) 직접 쇼핑/Enter 선택
                 try:
                     control = sel.find_element(By.CSS_SELECTOR, ".Select-control")
                     _scroll_and_click(driver, control)
                     _sleep(0.2)
                     inp = sel.find_element(By.CSS_SELECTOR, ".Select-input input")
                     inp.clear()
-                    inp.send_keys('?若???)
+                    inp.send_keys('?定?し')
                     _sleep(0.35)
                     opts = driver.find_elements(By.CSS_SELECTOR, ".Select-menu-outer .Select-option")
                     exact = None
                     for o in opts:
-                        if (o.text or '').strip() == '?若???:
+                        if (o.text or '').strip() == '?定?し':
                             exact = o
                             break
                     if exact is not None:
@@ -1293,7 +1284,7 @@ def _force_reference_size_shitei_nashi(driver, panel=None) -> bool:
                     inp.send_keys(Keys.ENTER)
                     _sleep(0.2)
                     current2 = sel.find_elements(By.CSS_SELECTOR, ".Select-value-label")
-                    if current2 and (current2[0].text or '').strip() == '?若???:
+                    if current2 and (current2[0].text or '').strip() == '?定?し':
                         changed += 1
                         continue
                 except Exception:
@@ -1306,8 +1297,8 @@ def _force_reference_size_shitei_nashi(driver, panel=None) -> bool:
 
 
 def _enable_size_selection_ui(driver) -> bool:
-    """?ъ씠利??좏깮 UI媛 ?묓? ?덉쓣 ??'?ъ씠利?吏?? 怨꾩뿴 ?좉????대┃???쇱튇??"""
-    keywords = ['?듐궎?뷩굮?뉐츣', '?듐궎?뷩걗??, '?듐궎?뷩굮?멩뒢', '?듐궎?뷩굮?ε뒟', '?먦꺁?ⓦ꺖?룔깾?녈걗??]
+    """사이즈 선택 UI가 접혀 있을 때 '사이즈 지정' 계열 토글을 클릭해 펼친다."""
+    keywords = ['サイズを指定', 'サイズあり', 'サイズを選択', 'サイズを入力', 'バリエーションあり']
     try:
         variation = driver.find_element(By.CSS_SELECTOR, ".sell-variation")
         nodes = variation.find_elements(By.XPATH, ".//*[normalize-space(text())!='']")
@@ -1328,7 +1319,7 @@ def _enable_size_selection_ui(driver) -> bool:
 
 
 def _fill_size_text_inputs(driver, size_text: str) -> int:
-    """泥댄겕諛뺤뒪 ?녿뒗 寃쎌슦 ?ъ씠利??낅젰移몄뿉 媛믪쓣 ?낅젰?쒕떎."""
+    """체크박스 없는 경우 사이즈 입력칸에 값을 입력한다."""
     if not size_text:
         return 0
     sizes = [s.strip() for s in size_text.split(',') if s.strip()]
@@ -1361,8 +1352,8 @@ def _select_option_in_select_control(driver, select_el, target_text: str) -> boo
         options = driver.find_elements(By.CSS_SELECTOR, ".Select-menu-outer .Select-option")
 
         def _norm(s: str) -> str:
-            t = (s or '').strip().replace('?', ' ').lower()
-            t = t.replace('?듐궎??, '').replace('size', '').replace('cm', '').replace('??, '')
+            t = (s or '').strip().replace('　', ' ').lower()
+            t = t.replace('サイズ', '').replace('size', '').replace('cm', '').replace('㎝', '')
             t = re.sub(r'\s+', '', t)
             return t
 
@@ -1371,7 +1362,7 @@ def _select_option_in_select_control(driver, select_el, target_text: str) -> boo
             t = (s or '').strip().lower()
             if not t:
                 return None
-            t = t.replace('?', ' ').replace('??, 'cm')
+            t = t.replace('　', ' ').replace('㎝', 'cm')
             num = re.sub(r"[^0-9.]", "", t)
             if not num:
                 return None
@@ -1394,9 +1385,9 @@ def _select_option_in_select_control(driver, select_el, target_text: str) -> boo
 
         target_norm = _norm(target_text)
         target_mm = _to_mm(target_text)
-        has_range_suffix = ('餓δ툓' in (target_text or '')) or ('餓δ툔' in (target_text or ''))
+        has_range_suffix = ('以上' in (target_text or '')) or ('以下' in (target_text or ''))
 
-        # 1) ???留ㅼ묶 ???
+        # 1) ?확 매칭 ?선
         for opt in options:
             txt = (opt.text or '').strip()
             if _norm(txt) == target_norm:
@@ -1404,7 +1395,7 @@ def _select_option_in_select_control(driver, select_el, target_text: str) -> boo
                 _sleep(0.3)
                 return True
 
-        # 1-1) ?レ옄 ?ъ씠利덈뒗 mm 湲곗??쇰줈 媛寃?留ㅼ튂
+        # 1-1) 숫자 사이즈는 mm 기준으로 가격 매치
         if target_mm is not None and not has_range_suffix:
             for opt in options:
                 txt = (opt.text or '').strip()
@@ -1413,10 +1404,10 @@ def _select_option_in_select_control(driver, select_el, target_text: str) -> boo
                     _sleep(0.3)
                     return True
 
-            # 蹂듭옟???듭뀡 ?뚮뜑留곹븯??寃쎌슦, ?섎룞?낅젰?쇰줈 ?⑦꽩 ?쒕룄
+            # 복잡한 옵션 렌더링하는 경우, 수동입력으로 패턴 시도
             try:
                 query_candidates = [str(target_text).strip()]
-                # 275 -> 27.5 ?뺥깭濡?蹂??
+                # 275 -> 27.5 형태로 변환
                 query_from_mm = target_mm / 10.0
                 query_candidates.append(f"{query_from_mm:.1f}")
                 if abs(query_from_mm - int(query_from_mm)) < 1e-9:
@@ -1441,16 +1432,16 @@ def _select_option_in_select_control(driver, select_el, target_text: str) -> boo
                 pass
             return False
 
-        # 2) ?쇰낯 ?ъ씠利?S/M/L)? 留ㅼ묶 湲덉? (S媛 XS??嫄몃━??臾몄젣 諛⑹?)
+        # 2) 일본 사이즈(S/M/L)와 매칭 금지 (S가 XS에 걸리는 문제 방지)
         if target_norm in {'s', 'm', 'l'}:
             return False
 
-        # 3) ?留ㅼ묶 fallback
+        # 3) ?매칭 fallback
         for opt in options:
             txt = (opt.text or '').strip()
             txt_norm = _norm(txt)
             if target_norm and target_norm in txt_norm:
-                # S XS?留ㅼ묶??????諛?
+                # S XS?매칭?는 ?탐 방?
                 if target_norm == 's' and 'xs' in txt_norm:
                     continue
                 _scroll_and_click(driver, opt)
@@ -1462,31 +1453,31 @@ def _select_option_in_select_control(driver, select_el, target_text: str) -> boo
 
 
 def _infer_reference_jp_size(size_raw: str) -> str:
-    """???臾몄옄??????????Select ?踰?留ㅽ븨???"""
-    # ?꾨━?ъ씠利?NONE 怨꾩뿴? 諛섎뱶??'?뉐츣?ゃ걮' 怨좎젙
+    """?이?문자?을 ?日?サ?ズ Select ?벨?매핑?다."""
+    # 프리사이즈 NONE 계열은 반드시 '指定なし' 고정
     if _is_free_size_text(size_raw):
-        return '?若???
+        return '?定?し'
 
     s = (size_raw or '').strip().upper()
     if not s:
         return ''
 
-    # 蹂듯빀 ?쒓린(?? 220/M3W5) ?묒そ ?ъ씠利덉뿉 ?곸슜
+    # 복합 표기(예: 220/M3W5) 양쪽 사이즈에 적용
     if '/' in s:
         s = s.split('/')[0].strip()
 
-    # ?レ옄 ?쇰꺼??遺숈? ?섎쪟 ?ъ씠利??? 0 (S), 1 (M))??愿꾪샇 ???곷Ц ?ъ씠利덈? ?곗꽑 ?ъ슜
+    # 숫자 라벨이 붙은 의류 사이즈(예: 0 (S), 1 (M))는 괄호 안 영문 사이즈를 우선 사용
     paren_alpha = re.search(r"\(([A-Z]{1,4})\)", s)
     if paren_alpha:
         s = paren_alpha.group(1)
 
-    # ?쇰컲 ?곷Ц ?섎쪟 ?ъ씠利??좏겙???レ옄 泥섎━蹂대떎 癒쇱? ?댁꽍
+    # 일반 영문 의류 사이즈 토큰도 숫자 처리보다 먼저 해석
     alpha_match = re.search(r"(?<![A-Z])(XXXS|XXS|XS|S|M|L|XL|XXL|XXXL)(?![A-Z])", s)
     if alpha_match:
         s = alpha_match.group(1)
 
     if s in {'XXS', 'XS'}:
-        return 'XS餓δ툔'
+        return 'XS以下'
     if s == 'S':
         return 'S'
     if s == 'M':
@@ -1494,9 +1485,9 @@ def _infer_reference_jp_size(size_raw: str) -> str:
     if s == 'L':
         return 'L'
     if s in {'XL', 'XXL', 'XXXL'}:
-        return 'XL餓δ툓'
+        return 'XL以上'
 
-    # ?レ옄 ?쒓린 蹂??洹쒖튃: 215 -> 21.5, 250 -> 25.0, 25 -> 25
+    # 숫자 표기 변환 규칙: 215 -> 21.5, 250 -> 25.0, 25 -> 25
     only_num = re.sub(r"[^0-9.]", "", s)
     if only_num:
         try:
@@ -1517,10 +1508,10 @@ def _infer_reference_jp_size(size_raw: str) -> str:
                 else:
                     return s
 
-            # ?泥?諛섏쁺: 275(mm) ??? '27cm餓δ툓'?濡?踰꾪궥 泥섎━
+            # ?청 반영: 275(mm) ?상? '27cm以上'?로 버킷 처리
             mm_val = int(round(cm * 10))
             if mm_val >= 275:
-                return '27cm餓δ툓'
+                return '27cm以上'
 
             if abs(cm - round(cm)) < 1e-9:
                 return str(int(round(cm)))
@@ -1532,7 +1523,7 @@ def _infer_reference_jp_size(size_raw: str) -> str:
 
 
 def _fill_size_table_rows(driver, panel, size_text: str) -> int:
-    """?먮ℓ?먯슜 ?ъ씠利?sell-size-table)?먯꽌 ?ъ씠利덈챸??吏???꾩튂???낅젰?쒕떎."""
+    """판매자용 사이즈(sell-size-table)에서 사이즈명을 지정 위치에 입력한다."""
     if not size_text:
         return 0
     try:
@@ -1540,17 +1531,17 @@ def _fill_size_table_rows(driver, panel, size_text: str) -> int:
         if not sizes:
             return 0
 
-        # ?곷떒 紐⑤뱶 Select瑜?'?먦꺁?ⓦ꺖?룔깾?녈걗??濡??ㅼ젙
+        # 상단 모드 Select를 'バリエーションあり'로 설정
         mode_selects = panel.find_elements(By.CSS_SELECTOR, ".bmm-l-grid-no-bottom .Select")
         if mode_selects:
-            _select_option_in_select_control(driver, mode_selects[0], '?먦꺁?ⓦ꺖?룔깾?녈걗??)
+            _select_option_in_select_control(driver, mode_selects[0], 'バリエーションあり')
             _sleep(0.4)
 
         table = panel.find_elements(By.CSS_SELECTOR, ".sell-size-table")
         if not table:
             return 0
 
-        # ?꾩슂 ?듭뀡留?異붽? (怨좎젙 12媛??쒗븳?쇰줈 ?쇰? ?ъ씠利??꾨씫?섎뒗 臾몄젣 諛⑹?)
+        # 필요 옵션만 추가 (고정 12개 제한으로 일부 사이즈 누락되는 문제 방지)
         max_add_attempts = max(len(sizes) * 2, 24)
         for _ in range(max_add_attempts):
             rows = panel.find_elements(By.CSS_SELECTOR, ".sell-size-table tbody tr")
@@ -1560,7 +1551,7 @@ def _fill_size_table_rows(driver, panel, size_text: str) -> int:
             clicked = False
             for a in add_links:
                 txt = (a.text or '').strip()
-                if '?겹걮?꾠궢?ㅳ궨?믦옙?? in txt or '?듐궎?? in txt:
+                if '新しいサイズを追加' in txt or 'サイズ' in txt:
                     _scroll_and_click(driver, a)
                     _sleep(0.35)
                     clicked = True
@@ -1579,7 +1570,7 @@ def _fill_size_table_rows(driver, panel, size_text: str) -> int:
                 name_input.clear()
                 name_input.send_keys(sz)
 
-                # ?ㅻⅨ ?곸뿭(?쇰낯?ъ씠利??먯꽌 ?좏깮
+                # 다른 영역(일본사이즈)에서 선택
                 try:
                     ref_select = rows[idx].find_element(By.CSS_SELECTOR, "td:nth-child(3) .Select")
                     ref_target = _infer_reference_jp_size(sz)
@@ -1598,209 +1589,36 @@ def _fill_size_table_rows(driver, panel, size_text: str) -> int:
         return 0
 
 
-# ---- 移댄뀒怨좊━ 異붾줎 留ㅽ븨 ----
-MEASURE_LABEL_KEYWORDS: Dict[str, List[str]] = {
-    "珥앹옣": ["?訝?, "渶뤶툑", "?③빓", "訝?],
-    "?닿묠?덈퉬": ["?⒴퉭"],
-    "媛?대떒硫?: ["翁ュ퉭", "?멨쎊", "?멨퉭", "?먦궧??],
-    "?뚮ℓ湲몄씠": ["熬뽨툑", "獒꾡툑", "?녴걤訝?],
-    "?덈━?⑤㈃": ["?╉궓?밤깉", "?닷쎊"],
-    "?됰뜦?대떒硫?: ["?믡긿??],
-    "?덈쾮吏?⑤㈃": ["?뤵걼??, "歷▲굤", "鸚ゃ굚??],
-    "諛묒쐞": ["?▽툓"],
-    "諛묐떒?⑤㈃": ["獒얍퉭", "?쇻걹亮?],
-    "諛쒕낵": ["??궎??, "擁녑퉭"],
-    "援쎈넂??: ["?믡꺖?ラ쳵", "?믡꺖??],
-}
-
-
-def _format_measure_value(v: str) -> str:
-    try:
-        f = float(v)
-        if abs(f - round(f)) < 1e-9:
-            return str(int(round(f)))
-        return f"{f:.1f}".rstrip("0").rstrip(".")
-    except Exception:
-        return (v or "").strip()
-
-
-def _extract_actual_measure_map(actual_size_text: str) -> Dict[str, str]:
-    raw = (actual_size_text or "").strip()
-    if not raw:
-        return {}
-    out: Dict[str, str] = {}
-    for key in MEASURE_LABEL_KEYWORDS.keys():
-        m = re.search(rf"{re.escape(key)}\s*([-+]?\d+(?:\.\d+)?)", raw)
-        if m:
-            out[key] = _format_measure_value(m.group(1))
-    return out
-
-
-def _normalize_actual_size_for_upload(actual_size_text: str) -> str:
-    text = (actual_size_text or "").strip()
-    lowered = text.lower()
-    if not text or lowered in {"none", "n/a", "na", "-", "?놁쓬"}:
-        return ""
-    return text
-
-
-def _fill_size_edit_details(driver, panel, actual_size_text: str, max_rows: int = 0) -> int:
-    """?ъ씠利?渶③썓 ?앹뾽?먯꽌 ?쇰꺼-?ㅼ륫 留ㅼ묶?쇰줈 媛믪쓣 ?낅젰?쒕떎."""
-    measure_map = _extract_actual_measure_map(actual_size_text)
-    if not measure_map:
-        return 0
-    try:
-        rows = panel.find_elements(By.CSS_SELECTOR, ".sell-size-table tbody tr")
-        if not rows:
-            return 0
-        if max_rows > 0:
-            rows = rows[:max_rows]
-
-        filled_rows = 0
-        for row in rows:
-            try:
-                edit_btn = None
-                for c in row.find_elements(By.CSS_SELECTOR, "a, button, [role='button']"):
-                    t = (c.text or "").strip()
-                    if "渶③썓" in t or "?몄쭛" in t:
-                        edit_btn = c
-                        break
-                if edit_btn is None:
-                    continue
-
-                _scroll_and_click(driver, edit_btn)
-                _sleep(0.5)
-
-                modal_root = None
-                for root in driver.find_elements(By.CSS_SELECTOR, ".ReactModalPortal, .bmm-c-modal, [role='dialog']"):
-                    try:
-                        if root.is_displayed():
-                            modal_root = root
-                            break
-                    except Exception:
-                        continue
-                if modal_root is None:
-                    modal_root = driver
-
-                input_pairs: List[Tuple[object, str]] = []
-                for ipt in modal_root.find_elements(By.CSS_SELECTOR, "input.bmm-c-text-field, input[type='text'], input[type='number']"):
-                    try:
-                        if not ipt.is_displayed() or not ipt.is_enabled():
-                            continue
-                    except Exception:
-                        continue
-                    label_text = driver.execute_script(
-                        "var el=arguments[0];"
-                        "var row=el.closest('tr,li,.bmm-l-grid,.bmm-c-field,div')||el.parentElement;"
-                        "if(!row) return '';"
-                        "var lbl=row.querySelector('th,label,.bmm-c-field__label,p,span,td');"
-                        "var txt=(lbl?lbl.textContent:row.textContent)||'';"
-                        "return txt.replace(/\\s+/g,' ').trim();",
-                        ipt
-                    ) or ""
-                    input_pairs.append((ipt, str(label_text)))
-
-                if not input_pairs:
-                    continue
-
-                used_keys = set()
-                ok_count = 0
-                unmatched_inputs: List[object] = []
-
-                for ipt, lbl in input_pairs:
-                    label = (lbl or "").strip()
-                    matched_key = None
-                    for key, jp_keys in MEASURE_LABEL_KEYWORDS.items():
-                        if key in used_keys:
-                            continue
-                        if any(jk in label for jk in jp_keys):
-                            matched_key = key
-                            break
-                    if matched_key and matched_key in measure_map:
-                        val = measure_map[matched_key]
-                        ok = driver.execute_script(
-                            "var el=arguments[0], val=arguments[1];"
-                            "el.removeAttribute('disabled');"
-                            "el.removeAttribute('readonly');"
-                            "var setter=Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype,'value').set;"
-                            "setter.call(el, val);"
-                            "el.dispatchEvent(new Event('input',{bubbles:true}));"
-                            "el.dispatchEvent(new Event('change',{bubbles:true}));"
-                            "el.dispatchEvent(new Event('blur',{bubbles:true}));"
-                            "return ((el.value||'').trim()===(val||'').trim());",
-                            ipt, val
-                        )
-                        if ok:
-                            ok_count += 1
-                            used_keys.add(matched_key)
-                    else:
-                        unmatched_inputs.append(ipt)
-
-                remaining_values = [v for k, v in measure_map.items() if k not in used_keys]
-                for i, ipt in enumerate(unmatched_inputs):
-                    if i >= len(remaining_values):
-                        break
-                    val = remaining_values[i]
-                    ok = driver.execute_script(
-                        "var el=arguments[0], val=arguments[1];"
-                        "el.removeAttribute('disabled');"
-                        "el.removeAttribute('readonly');"
-                        "var setter=Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype,'value').set;"
-                        "setter.call(el, val);"
-                        "el.dispatchEvent(new Event('input',{bubbles:true}));"
-                        "el.dispatchEvent(new Event('change',{bubbles:true}));"
-                        "el.dispatchEvent(new Event('blur',{bubbles:true}));"
-                        "return ((el.value||'').trim()===(val||'').trim());",
-                        ipt, val
-                    )
-                    if ok:
-                        ok_count += 1
-
-                for b in modal_root.find_elements(By.CSS_SELECTOR, "button, a, [role='button']"):
-                    bt = (b.text or "").strip()
-                    if any(k in bt for k in ["岳앭춼", "若뚥틙", "OK", "?⑴뵪", "?삯뙯"]):
-                        _scroll_and_click(driver, b)
-                        _sleep(0.3)
-                        break
-
-                if ok_count > 0:
-                    filled_rows += 1
-            except Exception:
-                continue
-        return filled_rows
-    except Exception:
-        return 0
-
-
+# ---- 카테고리 추론 매핑 ----
 FEMALE_KEYWORDS = [
     'women', 'womens', "women's",
-    '?ъ꽦', '?ъ옄',
-    '?с깈?ｃ꺖??,
-    'skirt', '移섎쭏',
-    'dress', '?먰뵾??,
-    'blouse', '釉붾씪?곗뒪',
-    'heel', '??,
-    'crop', '?щ∼',
-    'mini', '誘몃땲'
+    '여성', '여자',
+    'レディース',
+    'skirt', '치마',
+    'dress', '원피스',
+    'blouse', '블라우스',
+    'heel', '힐',
+    'crop', '크롭',
+    'mini', '미니'
 ]
 
 MALE_KEYWORDS = [
     'men', 'mens', "men's",
-    '?⑥꽦', '?⑥옄',
-    '?▲꺍??
+    '남성', '남자',
+    'メンズ'
 ]
 
 BUYMA_GENDER_CATEGORY_MAP = {
-    'F': '?с깈?ｃ꺖?밤깢?▲긿?룔깾??,
-    'M': '?▲꺍?뷩깢?▲긿?룔깾??,
-    'U': '?▲꺍?뷩깢?▲긿?룔깾??,
+    'F': 'レディースファッション',
+    'M': 'メンズファッション',
+    'U': 'メンズファッション',
 }
 
 
 def column_index_to_letter(index: int) -> str:
-    """0-based ???몃뜳?ㅻ? Google Sheets ??臾몄옄濡?蹂?섑븳??"""
+    """0-based 열 인덱스를 Google Sheets 열 문자로 변환한다."""
     if index < 0:
-        raise ValueError("???몃뜳?ㅻ뒗 0 ?댁긽?댁뼱???⑸땲??")
+        raise ValueError("열 인덱스는 0 이상이어야 합니다.")
     result = ""
     current = index + 1
     while current:
@@ -1810,7 +1628,7 @@ def column_index_to_letter(index: int) -> str:
 
 
 def get_sheet_header_map(service, sheet_name: str) -> Dict[str, int]:
-    """1???ㅻ뜑紐낆쓣 ?쎌뼱 ?ㅻ뜑紐?-> 0-based ???몃뜳??留듭쓣 諛섑솚?쒕떎."""
+    """1행 헤더명을 읽어 헤더명 -> 0-based 열 인덱스 맵을 반환한다."""
     try:
         result = service.spreadsheets().values().get(
             spreadsheetId=SPREADSHEET_ID,
@@ -1824,7 +1642,7 @@ def get_sheet_header_map(service, sheet_name: str) -> Dict[str, int]:
                 header_map[header] = idx
         return header_map
     except Exception as e:
-        print(f"?ㅻ뜑 議고쉶 ?ㅽ뙣: {e}")
+        print(f"헤더 조회 실패: {e}")
         return {}
 
 
@@ -1836,7 +1654,7 @@ def update_cell_by_header(
     header_name: str,
     value: str,
 ) -> bool:
-    """?ㅻ뜑紐?湲곗??쇰줈 ?뱀젙 ? 媛믪쓣 ?낅뜲?댄듃?쒕떎."""
+    """헤더명 기준으로 특정 셀 값을 업데이트한다."""
     col_index = header_map.get(header_name)
     if col_index is None:
         return False
@@ -1850,61 +1668,61 @@ def update_cell_by_header(
         ).execute()
         return True
     except Exception as e:
-        print(f"  {row_num}??{header_name} ?낅뜲?댄듃 ?ㅽ뙣: {e}")
+        print(f"  {row_num}행 {header_name} 업데이트 실패: {e}")
         return False
 
 CATEGORY_KEYWORDS = [
-    # ---------------- ?좊컻 ----------------
-    (['indoor', '?몃룄??, '?몃룄?댄솕', 'indoorization', 'libre'], None, '??, '?밤깑?쇈궖??),
-    (['sneaker', '?ㅻ땲而ㅼ쫰', '?대룞??, 'old skool', '?щ뱶?ㅼ엥'], None, '??, '?밤깑?쇈궖??),
-    (['running', '?щ떇??], None, '??, '?⒲꺍?뗣꺍?겹궥?γ꺖??),
-    (['sandal', '?뚮뱾', 'slide', '?щ씪?대뱶'], None, '??, '?듐꺍???),
-    (['boot', '遺痢?, '?뚯빱'], None, '??, '?뽧꺖??),
-    (['loafer', '濡쒗띁'], None, '??, '??꺖?뺛궊??),
+    # ---------------- 신발 ----------------
+    (['indoor', '인도어', '인도어화', 'indoorization', 'libre'], None, '靴', 'スニーカー'),
+    (['sneaker', '스니커즈', '운동화', 'old skool', '올드스쿨'], None, '靴', 'スニーカー'),
+    (['running', '러닝화'], None, '靴', 'ランニングシューズ'),
+    (['sandal', '샌들', 'slide', '슬라이드'], None, '靴', 'サンダル'),
+    (['boot', '부츠', '워커'], None, '靴', 'ブーツ'),
+    (['loafer', '로퍼'], None, '靴', 'ローファー'),
 
-    # ---------------- ?곸쓽 ----------------
-    (['t-shirt', 'tee', '?곗뀛痢?, '諛섑뙏'], None, '?덀긿?쀣궧', 'T?룔깵?꾠꺕?ャ긿?덀궫??),
-    (['long sleeve', '湲댄뙏'], None, '?덀긿?쀣궧', '?룩쥤T?룔깵??),
-    (['hoodie', '?꾨뱶', '?꾨뱶??], None, '?덀긿?쀣궧', '?묆꺖?ャ꺖?삠깢?쇈깈??),
-    (['zip-up', '吏묒뾽'], None, '?덀긿?쀣궧', '?멥긿?쀣깙?쇈궖??),
-    (['sweatshirt', '留⑦닾留?, 'mtm'], None, '?덀긿?쀣궧', '?밤궑?㎯긿??),
-    (['shirt', '?붿툩'], None, '?덀긿?쀣궧', '?룔깵??),
-    (['knit', '?덊듃'], None, '?덀긿?쀣궧', '?뗣긿?덀꺕?삠꺖?욍꺖'),
+    # ---------------- 상의 ----------------
+    (['t-shirt', 'tee', '티셔츠', '반팔'], None, 'トップス', 'Tシャツ・カットソー'),
+    (['long sleeve', '긴팔'], None, 'トップス', '長袖Tシャツ'),
+    (['hoodie', '후드', '후드티'], None, 'トップス', 'パーカー・フーディ'),
+    (['zip-up', '집업'], None, 'トップス', 'ジップパーカー'),
+    (['sweatshirt', '맨투맨', 'mtm'], None, 'トップス', 'スウェット'),
+    (['shirt', '셔츠'], None, 'トップス', 'シャツ'),
+    (['knit', '니트'], None, 'トップス', 'ニット・セーター'),
 
-    # ---------------- ?섏쓽 ----------------
-    (['jeans', 'denim', '泥?컮吏'], None, '?쒌깉?졼궧', '?뉎깑?졼꺕?멥꺖?녈궨'),
-    (['slacks', '?щ옓??], None, '?쒌깉?졼궧', '?밤꺀?껁궚??),
-    (['pants', '?ъ툩'], None, '?쒌깉?졼궧', '?묆꺍??),
-    (['jogger', '議곌굅'], None, '?쒌깉?졼궧', '?멥깾?с꺖?묆꺍??),
-    (['cargo', '移닿퀬'], None, '?쒌깉?졼궧', '?ャ꺖?담깙?녈깂'),
-    (['shorts', '諛섎컮吏'], None, '?쒌깉?졼궧', '?룔깾?쇈깂'),
+    # ---------------- 하의 ----------------
+    (['jeans', 'denim', '청바지'], None, 'ボトムス', 'デニム・ジーンズ'),
+    (['slacks', '슬랙스'], None, 'ボトムス', 'スラックス'),
+    (['pants', '팬츠'], None, 'ボトムス', 'パンツ'),
+    (['jogger', '조거'], None, 'ボトムス', 'ジョガーパンツ'),
+    (['cargo', '카고'], None, 'ボトムス', 'カーゴパンツ'),
+    (['shorts', '반바지'], None, 'ボトムス', 'ショーツ'),
 
-    # ---------------- ?꾩슦??----------------
-    (['padding', '?⑤뵫', '?ㅼ슫'], None, '?㏂궑?욍꺖', '??╉꺍?멥깵?긱긿??),
-    (['coat', '肄뷀듃'], None, '?㏂궑?욍꺖', '?녈꺖??),
-    (['jacket', '?먯폆'], None, '?㏂궑?욍꺖', '?멥깵?긱긿??),
-    (['blazer', '釉붾젅?댁?'], None, '?㏂궑?욍꺖', '?녴꺖?⒲꺖?됥궦?ｃ궞?껁깉'),
-    (['cardigan', '媛?붽굔'], None, '?㏂궑?욍꺖', '?ャ꺖?뉎궍?с꺍'),
-    (['windbreaker', '諛붾엺留됱씠'], None, '?㏂궑?욍꺖', '?듽궎??꺍?멥깵?긱긿??),
+    # ---------------- 아우터 ----------------
+    (['padding', '패딩', '다운'], None, 'アウター', 'ダウンジャケット'),
+    (['coat', '코트'], None, 'アウター', 'コート'),
+    (['jacket', '자켓'], None, 'アウター', 'ジャケット'),
+    (['blazer', '블레이저'], None, 'アウター', 'テーラードジャケット'),
+    (['cardigan', '가디건'], None, 'アウター', 'カーディガン'),
+    (['windbreaker', '바람막이'], None, 'アウター', 'ナイロンジャケット'),
 
-    # ---------------- ?먰뵾??----------------
-    (['dress', '?먰뵾??], '?с깈?ｃ꺖?밤깢?▲긿?룔깾??, '??꺍?붵꺖??, '??꺍?붵꺖??),
+    # ---------------- 원피스 ----------------
+    (['dress', '원피스'], 'レディースファッション', 'ワンピース', 'ワンピース'),
 
-    # ---------------- 媛諛?----------------
-    (['backpack', '諛깊뙥'], None, '?먦긿??, '?먦긿??깙?껁궚'),
-    (['crossbag', '?щ줈?ㅻ갚'], None, '?먦긿??, '?룔깾?ャ??쇈깘?껁궛'),
-    (['tote', '?좏듃'], None, '?먦긿??, '?덀꺖?덀깘?껁궛'),
+    # ---------------- 가방 ----------------
+    (['backpack', '백팩'], None, 'バッグ', 'バックパック'),
+    (['crossbag', '크로스백'], None, 'バッグ', 'ショルダーバッグ'),
+    (['tote', '토트'], None, 'バッグ', 'トートバッグ'),
 
-    # ---------------- ?낆꽭 ----------------
-    (['cap', '紐⑥옄'], None, '?㏂궚?삠궢?ゃ꺖', '躍썲춴'),
-    (['beanie', '鍮꾨땲'], None, '?㏂궚?삠궢?ゃ꺖', '?뗣긿?덂맒'),
-    (['belt', '踰⑦듃'], None, '?㏂궚?삠궢?ゃ꺖', '?쇻꺂??),
-    (['socks', '?묐쭚'], None, '?㏂궚?삠궢?ゃ꺖', '?썬긿??궧'),
+    # ---------------- 악세 ----------------
+    (['cap', '모자'], None, 'アクセサリー', '帽子'),
+    (['beanie', '비니'], None, 'アクセサリー', 'ニット帽'),
+    (['belt', '벨트'], None, 'アクセサリー', 'ベルト'),
+    (['socks', '양말'], None, 'アクセサリー', 'ソックス'),
 ]
 
 
 def detect_gender_raw(title: str) -> str:
-    """?곹뭹紐?湲곕컲?쇰줈 ?깅퀎??M/F/U 濡?遺꾨쪟?쒕떎."""
+    """상품명 기반으로 성별을 M/F/U 로 분류한다."""
     text = (title or '').lower()
 
     if any(keyword in text for keyword in FEMALE_KEYWORDS):
@@ -1917,19 +1735,19 @@ def detect_gender_raw(title: str) -> str:
 
 
 def convert_gender_for_buyma(gender: str) -> str:
-    """?대? ?깅퀎 肄붾뱶瑜?BUYMA ?깅퀎 ?쇰꺼濡?蹂?섑븳??"""
+    """내부 성별 코드를 BUYMA 성별 라벨로 변환한다."""
     if gender == 'F':
-        return '?с깈?ｃ꺖??
+        return 'レディース'
     if gender == 'M':
-        return '?▲꺍??
-    return '?▲꺍??
+        return 'メンズ'
+    return 'メンズ'
 
 
 def detect_gender(title: str) -> str:
-    """?곹뭹紐?湲곕컲 ?깅퀎??BUYMA ?낅줈?쒖슜 ?쇰꺼濡?蹂?섑븳??"""
+    """상품명 기반 성별을 BUYMA 업로드용 라벨로 변환한다."""
     raw_gender = detect_gender_raw(title)
 
-    # TODO: 異뷀썑 AI 遺꾨쪟 ?곌껐 媛??
+    # TODO: 추후 AI 분류 연결 가능
     # if raw_gender == 'U':
     #     raw_gender = detect_gender_ai(title)
 
@@ -1937,28 +1755,18 @@ def detect_gender(title: str) -> str:
 
 
 def _get_buyma_fashion_category_from_gender(title: str) -> str:
-    """?곹뭹紐낆뿉??媛먯????깅퀎??BUYMA ?곸쐞 ?⑥뀡 移댄뀒怨좊━濡?蹂?섑븳??"""
+    """상품명에서 감지한 성별을 BUYMA 상위 패션 카테고리로 변환한다."""
     raw_gender = detect_gender_raw(title)
     return BUYMA_GENDER_CATEGORY_MAP.get(raw_gender, BUYMA_GENDER_CATEGORY_MAP['U'])
 
 
-
-def _get_buyma_fashion_category_from_sheet(category_large: str, fallback_title: str) -> str:
-    text = (category_large or "").strip().lower()
-    if any(k in text for k in ["여성", "여자", "우먼", "women", "lady", "レディース"]):
-        return BUYMA_GENDER_CATEGORY_MAP.get('F', BUYMA_GENDER_CATEGORY_MAP['U'])
-    if any(k in text for k in ["남성", "남자", "맨", "men", "メンズ"]):
-        return BUYMA_GENDER_CATEGORY_MAP.get('M', BUYMA_GENDER_CATEGORY_MAP['U'])
-    return _get_buyma_fashion_category_from_gender(fallback_title)
-
-
-def _infer_buyma_category(product_name_kr: str, product_name_en: str, brand: str = '', musinsa_category_large: str = '') -> Tuple[str, str, str]:
-    """?곹뭹紐낆뿉??BUYMA 移댄뀒怨좊━ 3?④퀎瑜?異붾줎?쒕떎."""
+def _infer_buyma_category(product_name_kr: str, product_name_en: str, brand: str = '') -> Tuple[str, str, str]:
+    """상품명에서 BUYMA 카테고리 3단계를 추론한다."""
     title = f"{product_name_kr} {product_name_en}".strip()
     text = f"{product_name_kr} {product_name_en} {brand}".lower()
-    fashion_category = _get_buyma_fashion_category_from_sheet(musinsa_category_large, title)
-    if any(token in text for token in ['new balance', '?대컻???, 'mr530', '530lg', '530sg', '530ka', 'm1906', '1906r', '2002r', '327', '990v', '991', '992', '993']):
-        return (fashion_category, '??, '?밤깑?쇈궖??)
+    fashion_category = _get_buyma_fashion_category_from_gender(title)
+    if any(token in text for token in ['new balance', '뉴발란스', 'mr530', '530lg', '530sg', '530ka', 'm1906', '1906r', '2002r', '327', '990v', '991', '992', '993']):
+        return (fashion_category, '靴', 'スニーカー')
     for keywords, cat1, cat2, cat3 in CATEGORY_KEYWORDS:
         if any(kw.lower() in text for kw in keywords):
             if cat1 is None:
@@ -1968,7 +1776,7 @@ def _infer_buyma_category(product_name_kr: str, product_name_en: str, brand: str
 
 
 def _get_category_select_el(driver, item_index: int):
-    """item_index???대떦?섎뒗 React-Select ?붿냼瑜?諛섑솚?쒕떎."""
+    """item_index에 해당하는 React-Select 요소를 반환한다."""
     if item_index == 0:
         return driver.find_element(By.CSS_SELECTOR, '.sell-category-select')
     items = driver.find_elements(By.CSS_SELECTOR, '.sell-category__item')
@@ -1978,8 +1786,8 @@ def _get_category_select_el(driver, item_index: int):
 
 
 def _select_category_by_typing(driver, item_index: int, target_label: str) -> bool:
-    """而ㅻ━ ?좏깮 ???낅젰媛믪쑝濡??꾪꽣留곹븳 泥?踰덉㎏ ?듭뀡???대┃?쒕떎.
-    React-Select????댄븨 ?꾪꽣 諛⑹떇??ArrowDown 諛⑹떇蹂대떎 ?⑥뵮 鍮좊Ⅴ怨??덉젙?대떎."""
+    """커리 선택 후 입력값으로 필터링한 첫 번째 옵션을 클릭한다.
+    React-Select의 타이핑 필터 방식이 ArrowDown 방식보다 훨씬 빠르고 안정이다."""
     sel_el = _get_category_select_el(driver, item_index)
     if sel_el is None:
         return False
@@ -1994,7 +1802,7 @@ def _select_category_by_typing(driver, item_index: int, target_label: str) -> bo
     combo.send_keys(target_label)
     _sleep(0.8)
 
-    # ?꾪꽣留곷맂 ?듭뀡?먯꽌 ?뺥솗?쇱튂??癒쇱?, ?ы븿?섎㈃ 洹??ㅼ쓬 ?대┃
+    # 필터링된 옵션에서 정확일치는 먼저, 포함하면 그 다음 클릭
     try:
         options = driver.find_elements(By.CSS_SELECTOR, '.Select-menu-outer .Select-option')
         exact = next((o for o in options if o.text.strip() == target_label), None)
@@ -2007,7 +1815,7 @@ def _select_category_by_typing(driver, item_index: int, target_label: str) -> bo
     except Exception:
         pass
 
-    # ?꾪꽣 ?⑥뒪: ?낅젰 ?쇱튂 留ㅼ슦 ?곸쑝硫?ArrowDown 蹂댁“二쇨린 (80媛??쒗븳)
+    # 필터 패스: 입력 일치 매우 적으면 ArrowDown 보조주기 (80개 제한)
     try:
         for _ in range(len(target_label)):
             combo.send_keys(Keys.BACK_SPACE)
@@ -2044,14 +1852,14 @@ def _select_category_by_typing(driver, item_index: int, target_label: str) -> bo
     return False
 
 
-# ArrowDown ?泥??섎떒: ??댄븨 諛⑹떇 fallback?쇰줈 ?ъ슜, ???덈맆 ???泥?
+# ArrowDown 대체 수단: 타이핑 방식 fallback으로 사용, 잘 안될 때 대체
 _select_category_by_arrow = _select_category_by_typing
 
 
 def _find_best_option_by_arrow(driver, item_index: int, target_keyword: str,
                                fallback_other: bool = True) -> bool:
-    """sell-category__item??Select?먯꽌 ?ㅼ썙???ы븿?섎뒗 ?듭뀡???좏깮?쒕떎.
-    React-Select ??댄븨 ?꾪꽣 癒쇱? ?쒕룄?섍퀬, ?ㅽ뙣 ??ArrowDown ?щ윭 ?? 洹몃옒???ㅽ뙣 ??'?앫겗餓? fallback."""
+    """sell-category__item의 Select에서 키워드 포함하는 옵션을 선택한다.
+    React-Select 타이핑 필터 먼저 시도하고, 실패 시 ArrowDown 여러 회, 그래도 실패 시 'その他' fallback."""
     sel_el = _get_category_select_el(driver, item_index)
     if sel_el is None:
         return False
@@ -2068,7 +1876,7 @@ def _find_best_option_by_arrow(driver, item_index: int, target_keyword: str,
 
     try:
         options = driver.find_elements(By.CSS_SELECTOR, '.Select-menu-outer .Select-option')
-        # ?뺥솗 ?쇱튂 癒쇱?, ?ы븿 留ㅼ묶
+        # 정확 일치 먼저, 포함 매칭
         exact = next((o for o in options if o.text.strip() == target_keyword), None)
         partial = next((o for o in options if target_keyword in o.text), None)
         chosen = exact or partial
@@ -2076,9 +1884,9 @@ def _find_best_option_by_arrow(driver, item_index: int, target_keyword: str,
             _scroll_and_click(driver, chosen)
             _sleep(1.5)
             return True
-        # ?꾪꽣 寃곌낵 ?놁쑝硫?'?앫겗餓? fallback
+        # 필터 결과 없으면 'その他' fallback
         if fallback_other:
-            other = next((o for o in options if '?앫겗餓? in o.text), None)
+            other = next((o for o in options if 'その他' in o.text), None)
             if other:
                 _scroll_and_click(driver, other)
                 _sleep(1.5)
@@ -2086,7 +1894,7 @@ def _find_best_option_by_arrow(driver, item_index: int, target_keyword: str,
     except Exception:
         pass
 
-    # 移댄뀒怨좊━ ?낅젰 媛?吏????ArrowDown 諛⑹떇 ?뚰뵾
+    # 카테고리 입력 값 지울 때 ArrowDown 방식 회피
     try:
         for _ in range(len(target_keyword)):
             combo.send_keys(Keys.BACK_SPACE)
@@ -2122,13 +1930,13 @@ def _find_best_option_by_arrow(driver, item_index: int, target_keyword: str,
     _sleep(0.3)
 
     if fallback_other and seen:
-        return _find_best_option_by_arrow(driver, item_index, '?앫겗餓?,
+        return _find_best_option_by_arrow(driver, item_index, 'その他',
                                           fallback_other=False)
     return False
 
 
 def _dismiss_overlay(driver):
-    """???踰?????踰????嫄?""
+    """?라?버 ?업/?버?이 ?거"""
     driver.execute_script("""
         document.querySelectorAll('#driver-page-overlay, .driver-popover, [id*="driver-"]')
             .forEach(function(el) { el.remove(); });
@@ -2141,7 +1949,7 @@ def _find_section_field(driver, section_title: str, field_css: str):
     sections = driver.find_elements(By.CSS_SELECTOR, "p.bmm-c-summary__ttl")
     for sec in sections:
         if section_title in sec.text:
-            # ?듭뀡 而⑦뀒?대꼫?먯꽌 肄붾뱶 ?먯깋
+            # 옵션 컨테이너에서 코드 탐색
             parent = sec
             for _ in range(5):
                 parent = parent.find_element(By.XPATH, '..')
@@ -2152,13 +1960,13 @@ def _find_section_field(driver, section_title: str, field_css: str):
 
 
 def _click_react_select_option(driver, select_container, keyword: str) -> bool:
-    """React Select 而댄룷?뚰듃?먯꽌 ?듭뀡???대┃?쒕떎"""
+    """React Select 컴포넌트에서 옵션을 클릭한다"""
     try:
-        # Select 而⑦듃濡??대┃?섏뿬 蹂듭옟???쒓린
+        # Select 컨트롤 클릭하여 복잡한 표기
         control = select_container.find_element(By.CSS_SELECTOR, ".Select-control, [class*='Select-control']")
         control.click()
         _sleep(0.5)
-        # ?듭뀡 紐⑸줉?먯꽌 ?ㅼ썙??留ㅼ묶
+        # 옵션 목록에서 키워드 매칭
         options = select_container.find_elements(By.CSS_SELECTOR, ".Select-option, [class*='Select-option']")
         for opt in options:
             if keyword in opt.text:
@@ -2171,16 +1979,16 @@ def _click_react_select_option(driver, select_container, keyword: str) -> bool:
 
 
 def _safe_input(prompt: str) -> str:
-    """鍮꾨??뷀삎 ?ㅽ뻾?먯꽌???낅젰 ?湲????鍮?臾몄옄?댁쓣 諛섑솚?쒕떎."""
+    """비대화형 실행에서는 입력 대기 대신 빈 문자열을 반환한다."""
     try:
         return input(prompt)
     except EOFError:
-        print("  ?낅젰 ?湲곕? 嫄대꼫?곷땲?? (鍮꾨??뷀삎 ?ㅽ뻾)")
+        print("  입력 대기를 건너뜁니다. (비대화형 실행)")
         return ''
 
 
 def _find_buyma_button_by_keywords(driver, keywords: List[str], timeout: float = 0.0):
-    """踰꾪듉/submit ?붿냼 以??띿뒪?몃굹 value ???ㅼ썙?쒓? ?ы븿??泥??붿냼瑜?李얜뒗??"""
+    """버튼/submit 요소 중 텍스트나 value 에 키워드가 포함된 첫 요소를 찾는다."""
     end_time = time.time() + max(0.0, timeout)
     while True:
         try:
@@ -2203,7 +2011,7 @@ def _find_buyma_button_by_keywords(driver, keywords: List[str], timeout: float =
 
 
 def _click_buyma_button(driver, button, success_message: str) -> bool:
-    """踰꾪듉???붾㈃ 以묒븰?쇰줈 ?ㅽ겕濡ㅽ븳 ???덉쟾?섍쾶 ?대┃?쒕떎."""
+    """버튼을 화면 중앙으로 스크롤한 뒤 안전하게 클릭한다."""
     try:
         driver.execute_script("arguments[0].scrollIntoView({block: 'center'});", button)
         _sleep(0.5)
@@ -2220,77 +2028,77 @@ def _click_buyma_button(driver, button, success_message: str) -> bool:
 
 
 def _submit_buyma_listing(driver, row_num: int) -> bool:
-    """?ㅻ쪟 ?놁씠 ???낅젰???앸궃 寃쎌슦 BUYMA ?뺤씤 踰꾪듉???먮룞 ?대┃?쒕떎."""
+    """오류 없이 폼 입력이 끝난 경우 BUYMA 확인 버튼을 자동 클릭한다."""
     try:
         submit_btn = _find_buyma_button_by_keywords(
             driver,
-            ['?ε뒟?끻??믥▶沃띲걲??, '?ε뒟?끻?', '閻븃첀']
+            ['入力内容を確認する', '入力内容', '確認']
         )
         if not submit_btn:
-            raise RuntimeError("?낅젰 ?댁슜 ?뺤씤 踰꾪듉??李얠? 紐삵뻽?듬땲??")
-        if not _click_buyma_button(driver, submit_btn, f"  ??{row_num}??異쒗뭹 ?뺤씤 踰꾪듉 ?먮룞 ?대┃!"):
-            raise RuntimeError("?낅젰 ?댁슜 ?뺤씤 踰꾪듉 ?대┃???ㅽ뙣?덉뒿?덈떎.")
+            raise RuntimeError("입력 내용 확인 버튼을 찾지 못했습니다.")
+        if not _click_buyma_button(driver, submit_btn, f"  ✓ {row_num}행 출품 확인 버튼 자동 클릭!"):
+            raise RuntimeError("입력 내용 확인 버튼 클릭에 실패했습니다.")
         _sleep(3)
         return True
     except Exception as e:
-        print(f"  ??異쒗뭹 踰꾪듉 ?먮룞 ?대┃ ?ㅽ뙣: {e}")
+        print(f"  ✗ 출품 버튼 자동 클릭 실패: {e}")
         return False
 
 
 def _finalize_buyma_listing(driver, row_num: int) -> bool:
-    """?뺤씤 ?섏씠吏?먯꽌 理쒖쥌 異쒗뭹 踰꾪듉??李얠븘 ?먮룞 ?대┃?쒕떎."""
+    """확인 페이지에서 최종 출품 버튼을 찾아 자동 클릭한다."""
     try:
         final_btn = _find_buyma_button_by_keywords(
             driver,
-            ['?볝겗?끻??㎩눣?곥걲??, '?뷴뱚?쇻굥', '?ч뼀?쇻굥', '?삯뙯?쇻굥', '若뚥틙?쇻굥'],
+            ['この内容で出品する', '出品する', '公開する', '登録する', '完了する'],
             timeout=10.0,
         )
         if not final_btn:
-            raise RuntimeError("理쒖쥌 異쒗뭹 踰꾪듉??李얠? 紐삵뻽?듬땲??")
-        if not _click_buyma_button(driver, final_btn, f"  ??{row_num}??理쒖쥌 異쒗뭹 踰꾪듉 ?먮룞 ?대┃!"):
-            raise RuntimeError("理쒖쥌 異쒗뭹 踰꾪듉 ?대┃???ㅽ뙣?덉뒿?덈떎.")
+            raise RuntimeError("최종 출품 버튼을 찾지 못했습니다.")
+        if not _click_buyma_button(driver, final_btn, f"  ✓ {row_num}행 최종 출품 버튼 자동 클릭!"):
+            raise RuntimeError("최종 출품 버튼 클릭에 실패했습니다.")
         _sleep(3)
         return True
     except Exception as e:
-        print(f"  ??理쒖쥌 異쒗뭹 ?먮룞 ?대┃ ?ㅽ뙣: {e}")
+        print(f"  ✗ 최종 출품 자동 클릭 실패: {e}")
         return False
 
 
 def _handle_success_after_fill(driver, row_num: int, upload_mode: str) -> Tuple[bool, bool]:
-    """???낅젰 ?꾨즺 ??review/auto 紐⑤뱶???곕씪 ?ㅼ쓬 ?숈옉??泥섎━?쒕떎."""
-    print(f"\n  ???낅젰???꾨즺?섏뿀?듬땲??")
+    """폼 입력 완료 후 review/auto 모드에 따라 다음 동작을 처리한다."""
+    print(f"\n  폼 입력이 완료되었습니다.")
 
     if upload_mode == 'auto':
-        print("  ?ㅻ쪟媛 ?놁뼱 ?먮룞 ?쒖텧??吏꾪뻾?⑸땲??")
+        print("  오류가 없어 자동 제출을 진행합니다.")
         if not _submit_buyma_listing(driver, row_num):
-            print("  釉뚮씪?곗??먯꽌 吏곸젒 異쒗뭹?댁＜?몄슂.")
-            _safe_input("  異쒗뭹 ??Enter瑜??뚮윭二쇱꽭??.")
+            print("  브라우저에서 직접 출품해주세요.")
+            _safe_input("  출품 후 Enter를 눌러주세요..")
             return True, False
         if not _finalize_buyma_listing(driver, row_num):
-            print("  ?뺤씤 ?섏씠吏?먯꽌 吏곸젒 理쒖쥌 異쒗뭹?댁＜?몄슂.")
-            _safe_input("  理쒖쥌 異쒗뭹 ??Enter瑜??뚮윭二쇱꽭??.")
+            print("  확인 페이지에서 직접 최종 출품해주세요.")
+            _safe_input("  최종 출품 후 Enter를 눌러주세요..")
             return True, False
         return True, True
 
-    print("  ?뺤씤??紐⑤뱶?낅땲?? 釉뚮씪?곗??먯꽌 ?댁슜??寃?좏븳 ???좏깮?댁＜?몄슂.\n")
+    print("  확인용 모드입니다. 브라우저에서 내용을 검토한 뒤 선택해주세요.\n")
     while True:
-        choice = _safe_input("  [Enter] ?ㅼ쓬 ?곹뭹?쇰줈  |  [s] ?쒖텧(異쒗뭹)  |  [q] 醫낅즺: ").strip().lower()
+        choice = _safe_input("  [Enter] 다음 상품으로  |  [s] 제출(출품)  |  [q] 종료: ").strip().lower()
         if choice == '':
-            print(f"  -> {row_num}??嫄대꼫?")
+            print(f"  -> {row_num}행 건너뜀")
             return True, False
         if choice == 's':
             if not _submit_buyma_listing(driver, row_num):
-                print("  釉뚮씪?곗??먯꽌 吏곸젒 異쒗뭹?댁＜?몄슂.")
-                _safe_input("  異쒗뭹 ??Enter瑜??뚮윭二쇱꽭??.")
+                print("  브라우저에서 직접 출품해주세요.")
+                _safe_input("  출품 후 Enter를 눌러주세요..")
             return True, False
         if choice == 'q':
-            print("異쒗뭹??醫낅즺?⑸땲??)
+            print("출품이 종료됩니다")
             return False, False
-        print("  ?섎せ ?낅젰?덉뒿?덈떎. Enter/s/q 以묒뿉???좏깮?댁＜?몄슂.")
+        print("  잘못 입력했습니다. Enter/s/q 중에서 선택해주세요.")
 
 
 def _detect_title_input_issue(name_input, intended_title: str) -> str:
-    """?곹뭹紐??낅젰媛믪씠 湲몄씠 ?쒗븳 ?깆쑝濡??뺤긽 諛섏쁺?섏? ?딆븯?붿? ?뺤씤?쒕떎."""
+    """상품명 입력값이 길이 제한 등으로 정상 반영되지 않았는지 확인한다."""
     try:
         actual_value = (name_input.get_attribute('value') or '').strip()
         maxlength_raw = (name_input.get_attribute('maxlength') or '').strip()
@@ -2298,17 +2106,17 @@ def _detect_title_input_issue(name_input, intended_title: str) -> str:
 
         maxlength = int(maxlength_raw) if maxlength_raw.isdigit() else 0
         if maxlength and len(intended_title) > maxlength:
-            return f"?곹뭹紐?湲몄씠 珥덇낵: {len(intended_title)}??/ ?쒗븳 {maxlength}??
+            return f"상품명 길이 초과: {len(intended_title)}자 / 제한 {maxlength}자"
 
         if actual_value != intended_title:
             if validation_message:
-                return f"?곹뭹紐??낅젰 ?쒗븳: {validation_message}"
+                return f"상품명 입력 제한: {validation_message}"
             if len(actual_value) < len(intended_title):
-                return f"?곹뭹紐??낅젰媛믪씠 ?섎졇?듬땲?? ?낅젰 {len(intended_title)}??/ 諛섏쁺 {len(actual_value)}??
-            return "?곹뭹紐??낅젰媛믪씠 ?붿껌媛믨낵 ?ㅻ쫭?덈떎"
+                return f"상품명 입력값이 잘렸습니다: 입력 {len(intended_title)}자 / 반영 {len(actual_value)}자"
+            return "상품명 입력값이 요청값과 다릅니다"
 
         if validation_message:
-            return f"?곹뭹紐?寃利?硫붿떆吏: {validation_message}"
+            return f"상품명 검증 메시지: {validation_message}"
     except Exception:
         return ""
     return ""
@@ -2379,8 +2187,8 @@ def _build_buyma_product_title(brand_en: str, name_en: str, color_en: str, max_l
 
 
 def fill_buyma_form(driver, row_data: Dict[str, str]) -> str:
-    """諛붿씠留?異쒗뭹 ???곹뭹 ?뺣낫瑜??먮룞 ?낅젰?쒕떎.
-    諛붿씠留덈뒗 React 湲곕컲 bmm-c-* 而댄룷?뚰듃瑜??ъ슜?섎ŉ name/id ?띿꽦???놁쓬."""
+    """바이마 출품 시 상품 정보를 자동 입력한다.
+    바이마는 React 기반 bmm-c-* 컴포넌트를 사용하며 name/id 속성이 없음."""
     try:
         driver.get(BUYMA_SELL_URL)
         WebDriverWait(driver, 15).until(
@@ -2389,41 +2197,40 @@ def fill_buyma_form(driver, row_data: Dict[str, str]) -> str:
         _sleep(3)
 
         row_num = row_data['row_num']
-        print(f"\n--- [{row_num}踰덉㎏ 諛붿씠留?異쒗뭹 ?먮룞?낅젰 ?쒖옉 ---")
-        print(f"  ?곹뭹紐? {row_data['product_name_kr']}")
-        print(f"  釉뚮옖?? {row_data['brand']}")
-        print(f"  諛붿씠留??먮ℓ媛: {row_data['buyma_price']}")
+        print(f"\n--- [{row_num}번째 바이마 출품 자동입력 시작 ---")
+        print(f"  상품명: {row_data['product_name_kr']}")
+        print(f"  브랜드: {row_data['brand']}")
+        print(f"  바이마 판매가: {row_data['buyma_price']}")
 
-        # ---- ?ㅻ쾭?덉씠 ?쒓굅 ----
+        # ---- 오버레이 제거 ----
         _dismiss_overlay(driver)
 
-        # ---- ???????????----
+        # ---- ?テ?リ ?동 ?택 ----
         try:
             cat1, cat2, cat3 = _infer_buyma_category(
                 row_data.get('product_name_kr', ''),
                 row_data.get('product_name_en', ''),
-                row_data.get('brand', ''),
-                row_data.get('musinsa_category_large', ''),
+                row_data.get('brand', '')
             )
             if cat1 and cat2:
-                print(f"  移댄뀒怨좊━ 異붾줎: {cat1} > {cat2} > {cat3}")
-                # ?移댄뀒怨좊━ ???
+                print(f"  카테고리 추론: {cat1} > {cat2} > {cat3}")
+                # ?카테고리 ?택
                 if _select_category_by_arrow(driver, 0, cat1):
-                    print(f"  ?移댄뀒: {cat1}")
-                    # 以묒뭅?뚭퀬由??좏깮
+                    print(f"  대카테: {cat1}")
+                    # 중카테고리 선택
                     if cat2 and _find_best_option_by_arrow(driver, 1, cat2):
-                        # ?뚯뭅?뚭퀬由??좏깮 ?뺤씤
+                        # 소카테고리 선택 확인
                         sel_val = driver.execute_script("""
                             var items = document.querySelectorAll('.sell-category__item');
                             if (items.length < 2) return '';
                             var v = items[1].querySelector('.Select-value-label');
                             return v ? v.textContent.trim() : '';
                         """)
-                        if '?앫겗餓? in sel_val and sel_val != cat2:
-                            print(f"  ??以묒뭅?? {cat2} -> ?앫겗餓?(湲고?)")
+                        if 'その他' in sel_val and sel_val != cat2:
+                            print(f"  ✓ 중카테: {cat2} -> その他 (기타)")
                         else:
-                            print(f"  ??以묒뭅?? {sel_val or cat2}")
-                        # ?뚯뭅?뚭퀬由??좏깮
+                            print(f"  ✓ 중카테: {sel_val or cat2}")
+                        # 소카테고리 선택
                         if cat3:
                             items_count = len(driver.find_elements(By.CSS_SELECTOR, '.sell-category__item'))
                             if items_count >= 3:
@@ -2434,22 +2241,22 @@ def fill_buyma_form(driver, row_data: Dict[str, str]) -> str:
                                         var v = items[2].querySelector('.Select-value-label');
                                         return v ? v.textContent.trim() : '';
                                     """)
-                                    if '?앫겗餓? in (sel_val3 or '') and sel_val3 != cat3:
-                                        print(f"  ???뚯뭅?? {cat3} -> ?앫겗餓?(湲고?)")
+                                    if 'その他' in (sel_val3 or '') and sel_val3 != cat3:
+                                        print(f"  ✓ 소카테: {cat3} -> その他 (기타)")
                                     else:
-                                        print(f"  ???뚯뭅?? {sel_val3 or cat3}")
+                                        print(f"  ✓ 소카테: {sel_val3 or cat3}")
                                 else:
-                                    print(f"  ???뚯뭅??'{cat3}' 誘몃컻寃? ?앫겗餓뽯룄 ?놁쓬")
+                                    print(f"  △ 소카테 '{cat3}' 미발견, その他도 없음")
                     else:
-                        print(f"  ??以묒뭅??'{cat2}' 誘몃컻寃? ?앫겗餓뽯룄 ?놁쓬")
+                        print(f"  △ 중카테 '{cat2}' 미발견, その他도 없음")
                 else:
-                    print(f"  ???移댄뀒 '{cat1}' 誘몃컻寃? ?먮룞 ?좏깮 ?꾩슂")
+                    print(f"  △ 대카테 '{cat1}' 미발견, 자동 선택 필요")
             else:
-                print(f"  ??移댄뀒怨좊━ 異붾줎 遺덇?, ?먮룞 ?좏깮 ?꾩슂")
+                print(f"  ✗ 카테고리 추론 불가, 자동 선택 필요")
         except Exception as e:
-            print(f"  ??移댄뀒怨좊━ ?좏깮 ?ㅽ뙣: {e}")
+            print(f"  ✗ 카테고리 선택 실패: {e}")
 
-        # ---- ?곹뭹紐??낅젰: "[Brand] ProductNameEN ColorEN" ----
+        # ---- 상품명 입력: "[Brand] ProductNameEN ColorEN" ----
         brand_en = row_data.get('brand_en', '') or row_data.get('brand', '')
         name_en = row_data.get('product_name_en') or row_data['product_name_kr']
         color_en = row_data.get('color_en') or row_data.get('color_kr', '')
@@ -2457,7 +2264,7 @@ def fill_buyma_form(driver, row_data: Dict[str, str]) -> str:
         if color_en.lower() == 'none':
             color_en = ''
         try:
-            # 泥ル쾲吏?bmm-c-field ?섏쐞 text input???곹뭹紐??낅젰
+            # 첫번째 bmm-c-field 하위 text input에 상품명 입력
             name_fields = driver.find_elements(By.CSS_SELECTOR,
                 ".bmm-c-field__input > input.bmm-c-text-field"
             )
@@ -2467,37 +2274,37 @@ def fill_buyma_form(driver, row_data: Dict[str, str]) -> str:
                 product_title = _build_buyma_product_title(brand_en, name_en, color_en, title_limit)
                 name_fields[0].clear()
                 name_fields[0].send_keys(product_title)
-                print(f"  ???곹뭹紐??낅젰: {product_title}")
+                print(f"  ✓ 상품명 입력: {product_title}")
                 title_issue = _detect_title_input_issue(name_fields[0], product_title)
                 if title_issue:
-                    print(f"  ! ?곹뭹紐??섎룞 ?뺤씤 ?꾩슂: {title_issue}")
+                    print(f"  ! 상품명 수동 확인 필요: {title_issue}")
                     return "manual_review"
             else:
-                print(f"  ???곹뭹紐??낅젰???李얠쓣 ???놁뒿?덈떎")
+                print(f"  △ 상품명 입력란을 찾을 수 없습니다")
         except Exception as e:
-            print(f"  ???곹뭹紐??낅젰 ?ㅽ뙣: {e}")
+            print(f"  ✗ 상품명 입력 실패: {e}")
             return "manual_review"
 
-        # ---- 釉뚮옖???낅젰 (?곸뼱) ----
+        # ---- 브랜드 입력 (영어) ----
         brand = row_data.get('brand_en', '') or row_data.get('brand', '')
         if brand:
             try:
                 brand_input = driver.find_element(By.CSS_SELECTOR,
-                    "input[placeholder*='?뽧꺀?녈깋?띲굮?ε뒟']"
+                    "input[placeholder*='ブランド名を入力']"
                 )
                 _scroll_and_click(driver, brand_input)
                 brand_input.clear()
                 brand_input.send_keys(brand)
                 _sleep(1.2)
-                # 異붿쿇 紐⑸줉???꾩뿭 ul怨??욎씠??寃쎌슦媛 ?덉뼱 ?낅젰李?湲곗? ?ㅻ낫???좏깮???곗꽑 ?ъ슜
+                # 추천 목록이 전역 ul과 섞이는 경우가 있어 입력창 기준 키보드 선택을 우선 사용
                 brand_input.send_keys(Keys.ARROW_DOWN)
                 _sleep(0.2)
                 brand_input.send_keys(Keys.ENTER)
-                print(f"  ??釉뚮옖???낅젰/?좏깮: {brand}")
+                print(f"  ✓ 브랜드 입력/선택: {brand}")
             except Exception as e:
-                print(f"  ??釉뚮옖???낅젰 ?ㅽ뙣: {e}")
+                print(f"  ✗ 브랜드 입력 실패: {e}")
 
-        # ---- ?됱긽: React Select?먯꽌 ?됱긽 ?좏깮 + ?띿뒪???낅젰 ----
+        # ---- 색상: React Select에서 색상 선택 + 텍스트 입력 ----
         color = row_data.get('color_en') or row_data.get('color_kr', '')
         color = _expand_color_abbreviations(color)
         color_en_input = _expand_color_abbreviations((row_data.get('color_en') or '').strip())
@@ -2510,13 +2317,13 @@ def fill_buyma_form(driver, row_data: Dict[str, str]) -> str:
                 color_system = _infer_color_system(color_for_system)
                 picked = _select_color_system(driver, color_system, row_index=0)
 
-                # 蹂듭닔 ?됱긽??寃쎌슦 異붽? ?됱뿉 怨꾪넻 ?좏깮 ?쒕룄
+                # 복수 색상인 경우 추가 행에 계통 선택 시도
                 if len(color_values) > 1:
                     for idx, cval in enumerate(color_values[1:], start=1):
                         if _try_add_color_row(driver):
                             _select_color_system(driver, _infer_color_system(cval), row_index=idx)
 
-                # ?됱긽?낅젰移몄씠 怨꾪넻 ?좏깮怨??곕룞?섏뼱 ?쒖꽦?붾맆 ?뚮쭔 ?숈옉
+                # 색상입력칸이 계통 선택과 연동되어 활성화될 때만 동작
                 color_name_inputs = driver.find_elements(
                     By.CSS_SELECTOR,
                     ".sell-color-table tbody tr td:nth-child(2) input.bmm-c-text-field, .sell-color-table input.bmm-c-text-field"
@@ -2527,7 +2334,7 @@ def fill_buyma_form(driver, row_data: Dict[str, str]) -> str:
                 ]
 
                 if enabled_inputs:
-                    # ?됱긽媛믪쓣 媛곴컖 蹂꾨룄 移몄뿉 ?낅젰
+                    # 색상값을 각각 별도 칸에 입력
                     for idx, cval in enumerate(color_values):
                         if idx >= len(enabled_inputs):
                             if _try_add_color_row(driver):
@@ -2551,14 +2358,14 @@ def fill_buyma_form(driver, row_data: Dict[str, str]) -> str:
                         _sleep(0.2)
 
                     if picked:
-                        print(f"  ???됱긽 ?낅젰(媛쒕퀎): {', '.join(color_values)}")
+                        print(f"  ✓ 색상 입력(개별): {', '.join(color_values)}")
                     else:
-                        print(f"  ???됱긽怨꾪넻 誘몄꽑?? ?됱긽留?媛쒕퀎 ?낅젰: {', '.join(color_values)}")
+                        print(f"  △ 색상계통 미선택, 색상만 개별 입력: {', '.join(color_values)}")
                 else:
                     forced = False
                     if color_name_inputs and color_values:
                         try:
-                            # 鍮꾪솢??移몃룄 ?덉슜 踰붿쐞?먯꽌 ?됱긽蹂꾨줈 遺꾨━ ?낅젰 ?쒕룄
+                            # 비활성 칸도 허용 범위에서 색상별로 분리 입력 시도
                             forced_count = 0
                             for idx, cval in enumerate(color_values):
                                 if idx >= len(color_name_inputs):
@@ -2580,51 +2387,50 @@ def fill_buyma_form(driver, row_data: Dict[str, str]) -> str:
                             forced = False
 
                     if picked and forced:
-                        print(f"  ???됱긽 ?낅젰(JS媛뺤젣/媛쒕퀎): {', '.join(color_values)}")
+                        print(f"  ✓ 색상 입력(JS강제/개별): {', '.join(color_values)}")
                     elif picked:
                         if _fill_color_supplement(driver, ', '.join(color_values)):
-                            print(f"  ???됱긽怨꾪넻 ?좏깮 + 蹂댁땐?뺣낫 ?낅젰: {color_system} / {', '.join(color_values)}")
+                            print(f"  ✓ 색상계통 선택 + 보충정보 입력: {color_system} / {', '.join(color_values)}")
                         else:
-                            print(f"  ???됱긽怨꾪넻 ?좏깮: {color_system} (?됱긽?낅젰? 鍮꾪솢??")
+                            print(f"  ✓ 색상계통 선택: {color_system} (색상입력란 비활성)")
                     else:
-                        print(f"  ???됱긽 ?낅젰 ?ㅽ뙣(怨꾪넻/?됱긽), ?섎룞 ?좏깮 ?꾩슂: {color}")
+                        print(f"  ✗ 색상 입력 실패(계통/색상), 수동 선택 필요: {color}")
             except Exception as e:
-                print(f"  ???됱긽 ?낅젰 ?ㅽ뙣: {e}")
+                print(f"  ✗ 색상 입력 실패: {e}")
 
-        # ---- ?ъ씠利?而⑦뀒?대꼫 ?대┃ 諛?泥댄겕諛뺤뒪 ?좏깮 ----
-        # 二쇱쓽: 移댄뀒怨좊━ 誘몄꽑?????ъ씠利덈ぉ濡앹씠 ?쒖떆?섏? ?딆쓬
+        # ---- 사이즈 컨테이너 클릭 및 체크박스 선택 ----
+        # 주의: 카테고리 미선택 시 사이즈목록이 표시되지 않음
         size_text = row_data.get('size', '')
-        actual_size_text = _normalize_actual_size_for_upload(row_data.get('actual_size', ''))
         try:
             is_free_size = _is_free_size_text(size_text)
 
-            # '?ъ씠利? ???대┃
+            # '사이즈' 탭 클릭
             size_tabs = driver.find_elements(By.CSS_SELECTOR, ".sell-variation__tab-item")
             handled_size = False
 
-            # ?ъ씠利?紐⑸줉 ???뺣낫 異쒕젰
+            # 사이즈 목록 탭 정보 출력
             all_tab_texts = [(tab.text or '').strip() for tab in size_tabs]
             all_tab_ids = [(tab.get_attribute('aria-controls') or '').strip() for tab in size_tabs]
-            print(f"  [??퀎 ?ъ씠利덈ぉ濡? {list(zip(all_tab_texts, all_tab_ids))}")
+            print(f"  [탭별 사이즈목록: {list(zip(all_tab_texts, all_tab_ids))}")
 
             for tab_idx, tab in enumerate(size_tabs):
                 tab_text = (tab.text or '').strip()
                 tab_panel_id = (tab.get_attribute('aria-controls') or '').strip()
-                is_color_tab = ('?ャ꺀?? in tab_text or 'COLOR' in tab_text.upper()
+                is_color_tab = ('カラー' in tab_text or 'COLOR' in tab_text.upper()
                                 or 'color' in tab_panel_id.lower())
                 is_size_tab = (
-                    '?듐궎?? in tab_text or 'SIZE' in tab_text.upper()
+                    'サイズ' in tab_text or 'SIZE' in tab_text.upper()
                     or tab_panel_id.endswith('-3')
                     or tab_panel_id.endswith('-size')
                     or (not is_color_tab and tab_idx > 0)
                 )
                 if not is_size_tab:
                     continue
-                print(f"  [?? ?ъ씠利덊꺆 ?대┃: '{tab_text}' (aria-controls={tab_panel_id})")
+                print(f"  [탭] 사이즈탭 클릭: '{tab_text}' (aria-controls={tab_panel_id})")
                 driver.execute_script("arguments[0].scrollIntoView({block: 'start'});", tab)
                 driver.execute_script("window.scrollBy(0, -180);")
                 _scroll_and_click(driver, tab)
-                # ?ъ씠利덊뙣?먯씠 ?뚮뜑留곷맆 ?뚭퉴吏 理쒕? 8珥??湲?
+                # 사이즈패널이 렌더링될 때까지 최대 8초 대기
                 for _ in range(16):
                     v_labels = driver.find_elements(By.CSS_SELECTOR, ".sell-variation label")
                     v_selects = driver.find_elements(By.CSS_SELECTOR, ".sell-variation .Select")
@@ -2635,7 +2441,7 @@ def fill_buyma_form(driver, row_data: Dict[str, str]) -> str:
                         ) if i.is_displayed()
                     ]
                     v_table = driver.find_elements(By.CSS_SELECTOR, ".sell-size-table")
-                    # ?ъ씠利늈I 濡쒕뱶??寃껋쑝濡??먮떒
+                    # 사이즈UI 로드된 것으론 판단
                     if len(v_labels) > 0 or len(v_selects) > 1 or len(v_inputs) > 1 or v_table:
                         break
                     _sleep(0.5)
@@ -2650,48 +2456,36 @@ def fill_buyma_form(driver, row_data: Dict[str, str]) -> str:
                     panel = driver.find_element(By.CSS_SELECTOR, ".sell-variation")
 
                 panel_html = panel.text.strip()
-                if '?ャ깇?담꺁?믧겦?? in panel_html:
-                    print(f"  ??移댄뀒怨좊━ 誘몄꽑?앹쑝濡??ъ씠利덈ぉ濡??놁쓬. 移댄뀒怨좊━ ?좏깮 ???먮룞 ?좏깮 ?꾩슂: {size_text}")
+                if 'カテゴリを選択' in panel_html:
+                    print(f"  ✗ 카테고리 미선택으로 사이즈목록 없음. 카테고리 선택 후 자동 선택 필요: {size_text}")
                 else:
-                    # ?ㅼ젣 ?ъ씠利덈씪踰?泥댄겕諛뺤뒪 ?뚮뜑留곷맆 ?뚭퉴吏 理쒕? 5珥?異붽? ?湲?
+                    # 실제 사이즈라벨/체크박스 렌더링될 때까지 최대 5초 추가 대기
                     for _ in range(10):
                         if panel.find_elements(By.CSS_SELECTOR, "label, input[type='checkbox']"):
                             break
                         _sleep(0.5)
                     if is_free_size:
-                        # ?꾨━?ъ씠利덈뒗 ?쇰컲 ?ъ씠利덈ℓ移?寃쎈줈?먯꽌 紐살갼?쇰㈃ 媛뺤젣 遺꾧린
+                        # 프리사이즈는 일반 사이즈매칭 경로에서 못찾으면 강제 분기
                         no_var_ok = _force_select_shitei_nashi_global(driver) or _check_no_variation_option(driver, prefer_shitei_nashi=True)
                         ref_ok = _force_reference_size_shitei_nashi(driver, panel=panel)
                         if no_var_ok or ref_ok:
-                            print(f"  ???꾨━?ъ씠利?媛먯?, ?뉐츣?ゃ걮 ?좏깮 ({size_text})")
-                            if actual_size_text:
-                                detail_filled = _fill_size_edit_details(driver, panel, actual_size_text, max_rows=1)
-                                if detail_filled:
-                                    print(f"  ???ъ씠利?渶③썓 ?곸꽭?낅젰: {detail_filled}媛?)
-                                else:
-                                    print(f"  ???ъ씠利?渶③썓 ?곸꽭?낅젰 ?ㅽ뙣(?섎룞 ?뺤씤 ?꾩슂)")
+                            print(f"  ✓ 프리사이즈 감지, 指定なし 선택 ({size_text})")
                         else:
-                            print(f"  ???꾨━?ъ씠利?媛먯?, ?뉐츣?ゃ걮 ?좏깮 ?ㅽ뙣. ?먮룞 ?좏깮 ?꾩슂: {size_text}")
+                            print(f"  ✗ 프리사이즈 감지, 指定なし 선택 실패. 자동 선택 필요: {size_text}")
                         handled_size = True
                         break
 
-                    # 0) ?뚯씠釉?湲곕컲 ?ъ씠利??쇨큵 ?낅젰 寃쎈줈 ?곗꽑
+                    # 0) 테이블 기반 사이즈 일괄 입력 경로 우선
                     table_filled = _fill_size_table_rows(driver, panel, size_text)
                     if table_filled:
-                        print(f"  ???ъ씠利덉엯???뚯씠釉?: {table_filled}媛?{size_text})")
-                        if actual_size_text:
-                            detail_filled = _fill_size_edit_details(driver, panel, actual_size_text, max_rows=table_filled)
-                            if detail_filled:
-                                print(f"  ???ъ씠利?渶③썓 ?곸꽭?낅젰: {detail_filled}媛?)
-                            else:
-                                print(f"  ???ъ씠利?渶③썓 ?곸꽭?낅젰 ?ㅽ뙣(?섎룞 ?뺤씤 ?꾩슂)")
+                        print(f"  ✓ 사이즈입력(테이블): {table_filled}개({size_text})")
                         handled_size = True
                         break
 
-                    # 1) ?됱긽/?쇰낯?ъ씠利?React Select 湲곕컲 ?ъ씠利??좏깮 ?곗꽑 ?쒕룄
+                    # 1) 색상/일본사이즈 React Select 기반 사이즈 선택 우선 시도
                     select_matched = _select_size_by_select_controls(driver, panel, size_text)
                     if select_matched:
-                        print(f"  ???ъ씠利덉꽑??Select): {select_matched}媛?{size_text})")
+                        print(f"  ✓ 사이즈선택(Select): {select_matched}개({size_text})")
                         handled_size = True
                         break
 
@@ -2717,10 +2511,10 @@ def fill_buyma_form(driver, row_data: Dict[str, str]) -> str:
                                         break
 
                         if matched:
-                            print(f"  ???ъ씠利덉꽑?? {matched}媛?{size_text})")
+                            print(f"  ✓ 사이즈선택: {matched}개({size_text})")
                         else:
                             if not avail:
-                                # 癒쇱? '?ъ씠利? UI 媛뺤젣移섑솚 ?쒕룄
+                                # 먼저 '사이즈' UI 강제치환 시도
                                 expanded = _enable_size_selection_ui(driver)
                                 if expanded:
                                     items2 = driver.find_elements(By.CSS_SELECTOR, ".sell-variation label")
@@ -2741,29 +2535,29 @@ def fill_buyma_form(driver, row_data: Dict[str, str]) -> str:
                                                     _sleep(0.2)
                                                     break
                                     if matched2:
-                                        print(f"  ???ъ씠利덉꽑?? {matched2}媛?{size_text})")
+                                        print(f"  ✓ 사이즈선택: {matched2}개({size_text})")
                                         handled_size = True
                                         break
 
                                 if is_free_size:
                                     if _force_select_shitei_nashi_global(driver) or _force_reference_size_shitei_nashi(driver):
-                                        print(f"  ???꾨━?ъ씠利?媛먯?, ?뉐츣?ゃ걮 ?좏깮 ({size_text})")
+                                        print(f"  ✓ 프리사이즈 감지, 指定なし 선택 ({size_text})")
                                     else:
-                                        print(f"  ???꾨━?ъ씠利?媛먯?, ?좏깮?놁쓬/?ㅽ뙣: {size_text}")
+                                        print(f"  ✗ 프리사이즈 감지, 선택없음/실패: {size_text}")
                                 else:
                                     if _check_no_variation_option(driver):
-                                        print(f"  ???ъ씠利덉샃???놁쓬, 泥댄겕諛뺤뒪留?泥댄겕")
+                                        print(f"  ✗ 사이즈옵션 없음, 체크박스만 체크")
                                     elif size_text and _fill_size_text_inputs(driver, size_text) > 0:
-                                        print(f"  ???ъ씠利덊뀓?ㅽ듃?낅젰: {size_text}")
+                                        print(f"  ✓ 사이즈텍스트입력: {size_text}")
                                     elif size_text and _fill_size_supplement(driver, size_text):
-                                        print(f"  ???ъ씠利덉샃???놁쓬, 蹂댁땐?뺣낫 ?낅젰: {size_text}")
+                                        print(f"  ✓ 사이즈옵션 없음, 보충정보 입력: {size_text}")
                                     else:
-                                        print(f"  ???ъ씠利덉샃???놁쓬(蹂댁땐?뺣낫 泥섎━ ?ㅽ뙣): {size_text}")
+                                        print(f"  ✗ 사이즈옵션 없음(보충정보 처리 실패): {size_text}")
                             else:
                                 if size_text:
-                                    print(f"  ???ъ씠利덈ℓ移??ㅽ뙣 (?듭뀡 ?꾩껜: {avail}), ?먮룞 ?좏깮 ?꾩슂: {size_text}")
+                                    print(f"  ✗ 사이즈매칭 실패 (옵션 전체: {avail}), 자동 선택 필요: {size_text}")
                                 else:
-                                    print(f"  ???ъ씠利덉샃?섏뾾??(?듭뀡: {avail})")
+                                    print(f"  ✗ 사이즈옵션없음 (옵션: {avail})")
                     handled_size = True
                     break
 
@@ -2772,31 +2566,20 @@ def fill_buyma_form(driver, row_data: Dict[str, str]) -> str:
                     no_var_ok = _force_select_shitei_nashi_global(driver) or _check_no_variation_option(driver, prefer_shitei_nashi=True)
                     ref_ok = _force_reference_size_shitei_nashi(driver)
                     if no_var_ok or ref_ok:
-                        print(f"  ???꾨━?ъ씠利?媛먯?, ?뉐츣?ゃ걮 ?좏깮 ({size_text})")
-                        if actual_size_text:
-                            try:
-                                panel_for_edit = driver.find_element(By.CSS_SELECTOR, ".sell-variation")
-                            except Exception:
-                                panel_for_edit = None
-                            if panel_for_edit is not None:
-                                detail_filled = _fill_size_edit_details(driver, panel_for_edit, actual_size_text, max_rows=1)
-                                if detail_filled:
-                                    print(f"  ???ъ씠利?渶③썓 ?곸꽭?낅젰: {detail_filled}媛?)
-                                else:
-                                    print(f"  ???ъ씠利?渶③썓 ?곸꽭?낅젰 ?ㅽ뙣(?섎룞 ?뺤씤 ?꾩슂)")
+                        print(f"  ✓ 프리사이즈 감지, 指定なし 선택 ({size_text})")
                     else:
-                        print(f"  ???꾨━?ъ씠利?媛먯?, ?뉐츣?ゃ걮 ?좏깮 ?ㅽ뙣. ?먮룞 ?좏깮 ?꾩슂: {size_text}")
+                        print(f"  ✗ 프리사이즈 감지, 指定なし 선택 실패. 자동 선택 필요: {size_text}")
                     handled_size = True
 
             if not handled_size:
-                # ?꾩쓽 ?ㅽ뙣 ?꾩뿉 Select 而⑦듃濡ㅼ뿉???ъ씠利??좏깮 癒쇱? ?쒕룄
+                # 위의 실패 후에 Select 컨트롤에서 사이즈 선택 먼저 시도
                 select_matched = _select_size_by_select_controls(
                     driver,
                     driver.find_element(By.CSS_SELECTOR, ".sell-variation"),
                     size_text
                 )
                 if select_matched:
-                    print(f"  ???ъ씠利덉꽑??Select): {select_matched}媛?{size_text})")
+                    print(f"  ✓ 사이즈선택(Select): {select_matched}개({size_text})")
                     handled_size = True
 
             if not handled_size:
@@ -2818,7 +2601,7 @@ def fill_buyma_form(driver, row_data: Dict[str, str]) -> str:
                                 _sleep(0.2)
                                 break
                 if matched:
-                    print(f"  ???ъ씠利덉꽑?? {matched}媛?{size_text})")
+                    print(f"  ✓ 사이즈선택: {matched}개({size_text})")
                 elif not avail:
                     if _enable_size_selection_ui(driver):
                         items2 = driver.find_elements(By.CSS_SELECTOR, ".sell-variation label")
@@ -2838,43 +2621,43 @@ def fill_buyma_form(driver, row_data: Dict[str, str]) -> str:
                                         _sleep(0.2)
                                         break
                         if matched2:
-                            print(f"  ???ъ씠利덉꽑?? {matched2}媛?{size_text})")
+                            print(f"  ✓ 사이즈선택: {matched2}개({size_text})")
                         elif is_free_size and (_force_select_shitei_nashi_global(driver) or _force_reference_size_shitei_nashi(driver)):
-                            print(f"  ???꾨━?ъ씠利?媛먯?, ?뉐츣?ゃ걮 ?좏깮 ({size_text})")
+                            print(f"  ✓ 프리사이즈 감지, 指定なし 선택 ({size_text})")
                         elif _check_no_variation_option(driver):
-                            print(f"  ???ъ씠利덉샃???놁쓬, 泥댄겕諛뺤뒪留?泥댄겕")
+                            print(f"  ✗ 사이즈옵션 없음, 체크박스만 체크")
                         elif (not is_free_size) and size_text and _fill_size_text_inputs(driver, size_text) > 0:
-                            print(f"  ???ъ씠利덊뀓?ㅽ듃?낅젰: {size_text}")
+                            print(f"  ✓ 사이즈텍스트입력: {size_text}")
                         elif (not is_free_size) and size_text and _fill_size_supplement(driver, size_text):
-                            print(f"  ???ъ씠利덉샃???놁쓬, 蹂댁땐?뺣낫 ?낅젰: {size_text}")
+                            print(f"  ✓ 사이즈옵션 없음, 보충정보 입력: {size_text}")
                         else:
-                            print(f"  ???ъ씠利덉샃???좏깮 誘명깘: {size_text}")
+                            print(f"  ✗ 사이즈옵션/선택 미탐: {size_text}")
                     elif is_free_size and (_force_select_shitei_nashi_global(driver) or _force_reference_size_shitei_nashi(driver)):
-                        print(f"  ???꾨━?ъ씠利?媛먯?, ?뉐츣?ゃ걮 ?좏깮 ({size_text})")
+                        print(f"  ✓ 프리사이즈 감지, 指定なし 선택 ({size_text})")
                     elif _check_no_variation_option(driver):
-                        print(f"  ???ъ씠利덉샃???놁쓬, 泥댄겕諛뺤뒪留?泥댄겕")
+                        print(f"  ✗ 사이즈옵션 없음, 체크박스만 체크")
                     elif (not is_free_size) and size_text and _fill_size_text_inputs(driver, size_text) > 0:
-                        print(f"  ???ъ씠利덊뀓?ㅽ듃?낅젰: {size_text}")
+                        print(f"  ✓ 사이즈텍스트입력: {size_text}")
                     elif (not is_free_size) and size_text and _fill_size_supplement(driver, size_text):
-                        print(f"  ???ъ씠利덉샃???놁쓬, 蹂댁땐?뺣낫 ?낅젰: {size_text}")
+                        print(f"  ✓ 사이즈옵션 없음, 보충정보 입력: {size_text}")
                     else:
-                        print(f"  ???ъ씠利덉샃???좏깮 誘명깘: {size_text}")
+                        print(f"  ✗ 사이즈옵션/선택 미탐: {size_text}")
                 else:
                     if size_text:
-                        print(f"  ???ъ씠利덈ℓ移??ㅽ뙣 (?듭뀡: {avail}), ?먮룞 ?좏깮 ?꾩슂: {size_text}")
+                        print(f"  ✗ 사이즈매칭 실패 (옵션: {avail}), 자동 선택 필요: {size_text}")
                     else:
-                        print(f"  ???ъ씠利덉샃?섏뾾??(?듭뀡: {avail})")
+                        print(f"  ✗ 사이즈옵션없음 (옵션: {avail})")
         except Exception as e:
-            print(f"  ???ъ씠利덉꽑???ㅽ뙣: {e}")
+            print(f"  ✗ 사이즈선택 실패: {e}")
 
-        # ---- 援ъ엯湲고븳: react-datepicker (.sell-term) +89??理쒕? ?ㅼ젙 媛??湲곌컙) ----
+        # ---- 구입기한: react-datepicker (.sell-term) +89일(최대 설정 가능 기간) ----
         try:
             deadline_date = datetime.now() + timedelta(days=89)
             deadline_str = deadline_date.strftime('%Y/%m/%d')
             deadline_input = driver.find_element(By.CSS_SELECTOR, "input.sell-term")
             driver.execute_script("arguments[0].scrollIntoView({block: 'center'});", deadline_input)
             _sleep(0.3)
-            # react-datepicker??JS濡??ㅼ젙
+            # react-datepicker에 JS로 설정
             driver.execute_script(
                 "var el = arguments[0]; "
                 "var nativeInputValueSetter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value').set; "
@@ -2884,21 +2667,21 @@ def fill_buyma_form(driver, row_data: Dict[str, str]) -> str:
                 deadline_input, deadline_str
             )
             _sleep(0.5)
-            print(f"  ??援ъ엯湲고븳 ?낅젰: {deadline_str}")
+            print(f"  ✓ 구입기한 입력: {deadline_str}")
         except Exception as e:
-            print(f"  ??援ъ엯湲고븳 ?낅젰 ?ㅽ뙣, ?섎룞 ?낅젰 ?꾩슂: {e}")
+            print(f"  ✗ 구입기한 입력 실패, 수동 입력 필요: {e}")
 
-        # ---- ????紐??????: ???????恙낂젅) textarea ----
+        # ---- ?품 ?명(?メ?ト): ?品?メ?ト(必須) textarea ----
         try:
             target_comment = driver.execute_script("""
                 function isProductCommentField(field) {
                     if (!field) return false;
                     var label = field.querySelector('.bmm-c-field__label, label, p');
                     var txt = label ? (label.textContent || '').replace(/\\s+/g, ' ').trim() : '';
-                    return txt.indexOf('???????) >= 0;
+                    return txt.indexOf('?品?メ?ト') >= 0;
                 }
 
-                // 1) ?곹뭹肄붾찘???쇰꺼??遺숈? ?꾨뱶??textarea瑜?理쒖슦???ъ슜
+                // 1) 상품코멘트 라벨이 붙은 필드의 textarea를 최우선 사용
                 var fields = document.querySelectorAll('.bmm-c-field');
                 for (var i = 0; i < fields.length; i++) {
                     if (isProductCommentField(fields[i])) {
@@ -2907,35 +2690,35 @@ def fill_buyma_form(driver, row_data: Dict[str, str]) -> str:
                     }
                 }
 
-                // 2) ?꾨옒履?議곌툑 ?대젮媛???곹뭹肄붾찘??鍮꾩듂???꾨뱶?먯꽌 ?먯깋
+                // 2) 아래쪽 조금 내려가도 상품코멘트 비슷한 필드에서 탐색
                 var allFields = document.querySelectorAll('.bmm-c-field');
                 for (var j = 0; j < allFields.length; j++) {
                     if (allFields[j].closest('.sell-variation')) continue;
                     var label2 = allFields[j].querySelector('.bmm-c-field__label, label, p');
                     var txt2 = label2 ? (label2.textContent || '').trim() : '';
-                    if (txt2.indexOf('???????) >= 0) {
+                    if (txt2.indexOf('?品?メ?ト') >= 0) {
                         var ta2 = allFields[j].querySelector('textarea.bmm-c-textarea, textarea');
                         if (ta2) return ta2;
                     }
                 }
 
-                // 3) ?踰?for ???湲곕컲 ?寃?textarea ???
+                // 3) ?벨 for ?성 기반 ?결 textarea ?색
                 var labels = document.querySelectorAll('label[for], .bmm-c-field__label[for]');
                 for (var k = 0; k < labels.length; k++) {
                     var lt = (labels[k].textContent || '').trim();
-                    if (lt.indexOf('?녶뱚?녈깳?녈깉') < 0) continue;
+                    if (lt.indexOf('商品コメント') < 0) continue;
                     var forId = labels[k].getAttribute('for') || '';
                     if (!forId) continue;
                     var ta3 = document.getElementById(forId);
                     if (ta3 && ta3.tagName === 'TEXTAREA') return ta3;
                 }
 
-                // 4) ?띿뒪???몃뱶 洹쇱젒 ?먯깋: '?녶뱚?녈깳?녈깉' 臾멸뎄 二쇰? 議곗긽?먯꽌 textarea 異붿쟻
+                // 4) 텍스트 노드 근접 탐색: '商品コメント' 문구 주변 조상에서 textarea 추적
                 var walker = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT, null);
                 var node;
                 while ((node = walker.nextNode())) {
                     var t = (node.nodeValue || '').replace(/\\s+/g, ' ').trim();
-                    if (!t || t.indexOf('?녶뱚?녈깳?녈깉') < 0) continue;
+                    if (!t || t.indexOf('商品コメント') < 0) continue;
                     var cur = node.parentElement;
                     for (var depth = 0; cur && depth < 8; depth++) {
                         if (!cur.closest('.sell-variation')) {
@@ -2965,18 +2748,18 @@ def fill_buyma_form(driver, row_data: Dict[str, str]) -> str:
                     target_comment, BUYMA_COMMENT_TEMPLATE
                 )
                 if wrote:
-                    print(f"  ???곹뭹肄붾찘??恙낂젅) ?낅젰 (怨좎젙 ?쒗뵆由?")
+                    print(f"  ✓ 상품코멘트(必須) 입력 (고정 템플릿)")
                 else:
-                    print(f"  ???곹뭹肄붾찘???낅젰 ?쒕룄?덉쑝???뺤씤 ?ㅽ뙣")
+                    print(f"  ✗ 상품코멘트 입력 시도했으나 확인 실패")
             else:
-                print(f"  ???녶뱚?녈깳?녈깉 ?꾨뱶瑜?李얠? 紐삵뻽?듬땲?? ?섎룞 ?낅젰 ?꾩슂")
+                print(f"  △ 商品コメント 필드를 찾지 못했습니다. 수동 입력 필요")
         except Exception as e:
-            print(f"  ???곹뭹 ?ㅻ챸 ?낅젰 ?ㅽ뙣: {e}")
+            print(f"  ✗ 상품 설명 입력 실패: {e}")
 
-        # ---- 諛곗넚諛⑸쾿: OCS 泥댄겕諛뺤뒪 泥댄겕 ----
+        # ---- 배송방법: OCS 체크박스 체크 ----
         try:
             ocs_checked = driver.execute_script("""
-                // OCS 諛곗넚???ы븿?섎뒗 tr?먯꽌 泥댄겕諛뺤뒪瑜?李얠븘 泥댄겕?쒕떎
+                // OCS 배송을 포함하는 tr에서 체크박스를 찾아 체크한다
                 var rows = document.querySelectorAll('.bmm-c-form-table__table tbody tr');
                 for (var i = 0; i < rows.length; i++) {
                     if (rows[i].textContent.indexOf('OCS') >= 0) {
@@ -2992,22 +2775,22 @@ def fill_buyma_form(driver, row_data: Dict[str, str]) -> str:
                 return 'not_found';
             """)
             if ocs_checked == 'clicked':
-                print(f"  ??諛곗넚諛⑸쾿 OCS 泥댄겕")
+                print(f"  ✓ 배송방법 OCS 체크")
             elif ocs_checked == 'already':
-                print(f"  ??諛곗넚諛⑸쾿 OCS ?대? 泥댄겕??)
+                print(f"  ✓ 배송방법 OCS 이미 체크됨")
             else:
-                print(f"  ??OCS 泥댄겕諛뺤뒪瑜?李얠? 紐삵뻽?듬땲?? ?섎룞 ?좏깮 ?꾩슂")
+                print(f"  △ OCS 체크박스를 찾지 못했습니다. 수동 선택 필요")
         except Exception as e:
-            print(f"  ??諛곗넚諛⑸쾿 ?좏깮 ?ㅽ뙣: {e}")
+            print(f"  ✗ 배송방법 선택 실패: {e}")
 
-        # ---- 媛寃??낅젰: half-size-char ?꾨뱶 (M??媛? ----
+        # ---- 가격 입력: half-size-char 필드 (M열 값) ----
         buyma_price = re.sub(r'[^\d]', '', row_data.get('buyma_price', ''))
         if buyma_price:
             try:
                 adjusted_price = max(0, int(buyma_price) - 10)
                 filled_count = 0
 
-                # '?녶뱚堊→졏' ?쇰꺼???곌껐???낅젰 ?꾨뱶留??낅젰 (?섎웾 ?꾨뱶 ?ㅼ뿼 諛⑹?)
+                # '商品価格' 라벨에 연결된 입력 필드만 입력 (수량 필드 오염 방지)
                 product_price_input = driver.execute_script("""
                     function findInputFromField(field) {
                         if (!field) return null;
@@ -3015,8 +2798,8 @@ def fill_buyma_form(driver, row_data: Dict[str, str]) -> str:
                         for (var k = 0; k < candidates.length; k++) {
                             var c = candidates[k];
                             var meta = ((c.getAttribute('name') || '') + ' ' + (c.getAttribute('id') || '') + ' ' + (c.getAttribute('placeholder') || '') + ' ' + (c.getAttribute('class') || '')).toLowerCase();
-                            // ?섎웾/?ш퀬 ?낅젰移몄? ?쒖쇅
-                            if (meta.indexOf('?곈뇧') >= 0 || meta.indexOf('qty') >= 0 || meta.indexOf('stock') >= 0 || meta.indexOf('?ⓨ벴') >= 0) {
+                            // 수량/재고 입력칸은 제외
+                            if (meta.indexOf('数量') >= 0 || meta.indexOf('qty') >= 0 || meta.indexOf('stock') >= 0 || meta.indexOf('在庫') >= 0) {
                                 continue;
                             }
                             return c;
@@ -3028,25 +2811,25 @@ def fill_buyma_form(driver, row_data: Dict[str, str]) -> str:
                         return (t || '').replace(/\s+/g, ' ').trim();
                     }
 
-                    // 1) bmm-c-field 湲곕컲 ?먯깋
+                    // 1) bmm-c-field 기반 탐색
                     var fields = document.querySelectorAll('.bmm-c-field, .bmm-c-form-table__body tr, .bmm-c-form-table tr');
                     for (var i = 0; i < fields.length; i++) {
                         var root = fields[i];
                         var txt = normText(root.textContent || '');
-                        var hasPriceKeyword = (txt.indexOf('?녶뱚堊→졏') >= 0 || txt.indexOf('縕⒴２堊→졏') >= 0 || txt.indexOf('堊→졏') >= 0);
-                        var hasQtyKeyword = (txt.indexOf('縕룝퍡?㎯걤?뗥릦鼇덃빊??) >= 0 || txt.indexOf('?덅쮫?곈뇧') >= 0 || txt.indexOf('?곈뇧') >= 0 || txt.indexOf('?ⓨ벴') >= 0);
+                        var hasPriceKeyword = (txt.indexOf('商品価格') >= 0 || txt.indexOf('販売価格') >= 0 || txt.indexOf('価格') >= 0);
+                        var hasQtyKeyword = (txt.indexOf('買付できる合計数量') >= 0 || txt.indexOf('合計数量') >= 0 || txt.indexOf('数量') >= 0 || txt.indexOf('在庫') >= 0);
                         if (hasPriceKeyword && !hasQtyKeyword) {
                             var ipt = findInputFromField(fields[i]);
                             if (ipt) return ipt;
                         }
                     }
 
-                    // 2) ?쇰꺼 for ?띿꽦 湲곕컲 fallback
+                    // 2) 라벨 for 속성 기반 fallback
                     var labels = document.querySelectorAll('label[for], .bmm-c-field__label[for]');
                     for (var j = 0; j < labels.length; j++) {
                         var lt = normText(labels[j].textContent || '');
-                        var isPrice = (lt.indexOf('?녶뱚堊→졏') >= 0 || lt.indexOf('縕⒴２堊→졏') >= 0 || lt.indexOf('堊→졏') >= 0);
-                        var isQty = (lt.indexOf('縕룝퍡?㎯걤?뗥릦鼇덃빊??) >= 0 || lt.indexOf('?덅쮫?곈뇧') >= 0 || lt.indexOf('?곈뇧') >= 0 || lt.indexOf('?ⓨ벴') >= 0);
+                        var isPrice = (lt.indexOf('商品価格') >= 0 || lt.indexOf('販売価格') >= 0 || lt.indexOf('価格') >= 0);
+                        var isQty = (lt.indexOf('買付できる合計数量') >= 0 || lt.indexOf('合計数量') >= 0 || lt.indexOf('数量') >= 0 || lt.indexOf('在庫') >= 0);
                         if (!isPrice || isQty) continue;
                         var idv = labels[j].getAttribute('for') || '';
                         if (!idv) continue;
@@ -3054,13 +2837,13 @@ def fill_buyma_form(driver, row_data: Dict[str, str]) -> str:
                         if (ipt2 && ipt2.tagName === 'INPUT') return ipt2;
                     }
 
-                    // 3) input 硫뷀? 湲곕컲 fallback (媛寃??ㅼ썙???ы븿 + ?섎웾/?ш퀬 ?ㅼ썙???쒖쇅)
+                    // 3) input 메타 기반 fallback (가격 키워드 포함 + 수량/재고 키워드 제외)
                     var allInputs = document.querySelectorAll('input.bmm-c-text-field, input[type="text"], input[type="number"]');
                     for (var m = 0; m < allInputs.length; m++) {
                         var ii = allInputs[m];
                         var mm = ((ii.getAttribute('name') || '') + ' ' + (ii.getAttribute('id') || '') + ' ' + (ii.getAttribute('placeholder') || '') + ' ' + (ii.getAttribute('class') || '')).toLowerCase();
-                        var mmPrice = (mm.indexOf('?녶뱚堊→졏') >= 0 || mm.indexOf('縕⒴２堊→졏') >= 0 || mm.indexOf('price') >= 0 || mm.indexOf('堊→졏') >= 0);
-                        var mmQty = (mm.indexOf('qty') >= 0 || mm.indexOf('quantity') >= 0 || mm.indexOf('?곈뇧') >= 0 || mm.indexOf('stock') >= 0 || mm.indexOf('?ⓨ벴') >= 0);
+                        var mmPrice = (mm.indexOf('商品価格') >= 0 || mm.indexOf('販売価格') >= 0 || mm.indexOf('price') >= 0 || mm.indexOf('価格') >= 0);
+                        var mmQty = (mm.indexOf('qty') >= 0 || mm.indexOf('quantity') >= 0 || mm.indexOf('数量') >= 0 || mm.indexOf('stock') >= 0 || mm.indexOf('在庫') >= 0);
                         if (mmPrice && !mmQty) return ii;
                     }
                     return null;
@@ -3075,12 +2858,12 @@ def fill_buyma_form(driver, row_data: Dict[str, str]) -> str:
                     except Exception:
                         pass
 
-                # fallback: placeholder 湲곕컲 媛寃??꾨뱶 寃??
+                # fallback: placeholder 기반 가격 필드 검색
                 if filled_count == 0:
                     try:
                         price_by_placeholder = driver.find_element(
                             By.CSS_SELECTOR,
-                            "input[placeholder*='?녶뱚堊→졏'], input[placeholder*='縕⒴２堊→졏'], input[placeholder*='堊→졏']"
+                            "input[placeholder*='商品価格'], input[placeholder*='販売価格'], input[placeholder*='価格']"
                         )
                         if price_by_placeholder.is_displayed() and price_by_placeholder.is_enabled():
                             _scroll_and_click(driver, price_by_placeholder)
@@ -3091,13 +2874,13 @@ def fill_buyma_form(driver, row_data: Dict[str, str]) -> str:
                         pass
 
                 if filled_count:
-                    print(f"  ???먮ℓ媛 ?낅젰: 짜{adjusted_price} (?묒?媛?10)")
+                    print(f"  ✓ 판매가 입력: ¥{adjusted_price} (엑셀값-10)")
                 else:
-                    print(f"  ??媛寃??낅젰 ?꾨뱶瑜?李얠쓣 ???놁뒿?덈떎")
+                    print(f"  ✗ 가격 입력 필드를 찾을 수 없습니다")
             except Exception as e:
-                print(f"  ???먮ℓ媛 ?낅젰 ?ㅽ뙣: {e}")
+                print(f"  ✗ 판매가 입력 실패: {e}")
 
-        # ---- 縕룝퍡?㎯걤?뗥릦鼇덃빊???낅젰 (怨좎젙 100) ----
+        # ---- 買付できる合計数量 입력 (고정 100) ----
         try:
             qty_value = "100"
             qty_filled = False
@@ -3133,20 +2916,20 @@ def fill_buyma_form(driver, row_data: Dict[str, str]) -> str:
                 }
 
                 function hasQtyHint(text) {
-                    return text.indexOf('縕룝퍡?㎯걤?뗥릦鼇덃빊??) >= 0 ||
-                           text.indexOf('?덅쮫?곈뇧') >= 0 ||
-                           text.indexOf('縕룝퍡??꺗?곈뇧') >= 0 ||
-                           text.indexOf('蘊쇔뀯??꺗?곈뇧') >= 0 ||
-                           text.indexOf('?곈뇧') >= 0 ||
+                    return text.indexOf('買付できる合計数量') >= 0 ||
+                           text.indexOf('合計数量') >= 0 ||
+                           text.indexOf('買付可能数量') >= 0 ||
+                           text.indexOf('購入可能数量') >= 0 ||
+                           text.indexOf('数量') >= 0 ||
                            text.indexOf('quantity') >= 0 ||
                            text.indexOf('qty') >= 0;
                 }
 
-                // 1) placeholder 吏곸젒 留ㅼ묶
-                var byPlaceholder = document.querySelector("input[placeholder*='縕룝퍡?㎯걤?뗥릦鼇덃빊??], input[placeholder*='?덅쮫?곈뇧'], input[placeholder*='縕룝퍡??꺗?곈뇧'], input[placeholder*='蘊쇔뀯??꺗?곈뇧'], input[aria-label*='縕룝퍡?㎯걤?뗥릦鼇덃빊??], input[aria-label*='?덅쮫?곈뇧'], input[aria-label*='縕룝퍡??꺗?곈뇧'], input[aria-label*='蘊쇔뀯??꺗?곈뇧']");
+                // 1) placeholder 직접 매칭
+                var byPlaceholder = document.querySelector("input[placeholder*='買付できる合計数量'], input[placeholder*='合計数量'], input[placeholder*='買付可能数量'], input[placeholder*='購入可能数量'], input[aria-label*='買付できる合計数量'], input[aria-label*='合計数量'], input[aria-label*='買付可能数量'], input[aria-label*='購入可能数量']");
                 if (byPlaceholder && isVisible(byPlaceholder)) return byPlaceholder;
 
-                // 2) ?쇰꺼 ?띿뒪??湲곕컲 留ㅼ묶
+                // 2) 라벨 텍스트 기반 매칭
                 var fields = document.querySelectorAll('.bmm-c-field, .bmm-c-form-table__body tr, .bmm-c-form-table tr');
                 for (var i = 0; i < fields.length; i++) {
                     var root = fields[i];
@@ -3177,13 +2960,13 @@ def fill_buyma_form(driver, row_data: Dict[str, str]) -> str:
                     }
                 }
 
-                // 3) ?꾩껜 input???뚮ŉ 二쇰? ?띿뒪?멸? ?⑷퀎?섎웾??媛由ы궎?붿? ?뺤씤
+                // 3) 전체 input을 돌며 주변 텍스트가 합계수량을 가리키는지 확인
                 var allInputs = document.querySelectorAll("input.bmm-c-text-field, input[type='text'], input[type='number']");
                 for (var j = 0; j < allInputs.length; j++) {
                     var ip = allInputs[j];
                     if (!isVisible(ip)) continue;
                     var meta = metaText(ip).toLowerCase();
-                    if (meta.indexOf('price') >= 0 || meta.indexOf('?녶뱚堊→졏') >= 0 || meta.indexOf('縕⒴２堊→졏') >= 0) continue;
+                    if (meta.indexOf('price') >= 0 || meta.indexOf('商品価格') >= 0 || meta.indexOf('販売価格') >= 0) continue;
                     var around = nearestText(ip);
                     if (hasQtyHint(around.toLowerCase())) {
                         return ip;
@@ -3193,25 +2976,25 @@ def fill_buyma_form(driver, row_data: Dict[str, str]) -> str:
                     }
                 }
 
-                // 4) 留덉?留?fallback: ?쒖떆???レ옄 ?낅젰 以?媛寃??ш퀬 愿?⑥씠 ?꾨땶 ?꾨뱶
+                // 4) 마지막 fallback: 표시된 숫자 입력 중 가격/재고 관련이 아닌 필드
                 for (var k = 0; k < allInputs.length; k++) {
                     var ip2 = allInputs[k];
                     if (!isVisible(ip2)) continue;
                     var meta2 = metaText(ip2).toLowerCase();
-                    if (meta2.indexOf('price') >= 0 || meta2.indexOf('?녶뱚堊→졏') >= 0 || meta2.indexOf('縕⒴２堊→졏') >= 0) continue;
-                    if (meta2.indexOf('stock') >= 0 || meta2.indexOf('?ⓨ벴') >= 0) continue;
+                    if (meta2.indexOf('price') >= 0 || meta2.indexOf('商品価格') >= 0 || meta2.indexOf('販売価格') >= 0) continue;
+                    if (meta2.indexOf('stock') >= 0 || meta2.indexOf('在庫') >= 0) continue;
                     if ((ip2.type || '').toLowerCase() === 'number' || (ip2.getAttribute('inputmode') || '').toLowerCase() === 'numeric' || hasQtyHint(meta2)) {
                         return ip2;
                     }
                 }
 
-                // 5) 媛寃??꾨뱶? 媛숈? ?뚯씠釉??뱀뀡???덈뒗 ?ㅼ쓬 ?レ옄 ?낅젰 fallback
+                // 5) 가격 필드와 같은 테이블/섹션에 있는 다음 숫자 입력 fallback
                 var priceInput = null;
                 for (var p = 0; p < allInputs.length; p++) {
                     var cand = allInputs[p];
                     var metaP = metaText(cand);
                     var aroundP = nearestText(cand);
-                    if (metaP.indexOf('?녶뱚堊→졏') >= 0 || metaP.indexOf('縕⒴２堊→졏') >= 0 || aroundP.indexOf('?녶뱚堊→졏') >= 0 || aroundP.indexOf('縕⒴２堊→졏') >= 0) {
+                    if (metaP.indexOf('商品価格') >= 0 || metaP.indexOf('販売価格') >= 0 || aroundP.indexOf('商品価格') >= 0 || aroundP.indexOf('販売価格') >= 0) {
                         priceInput = cand;
                         break;
                     }
@@ -3224,7 +3007,7 @@ def fill_buyma_form(driver, row_data: Dict[str, str]) -> str:
                             var n = nearby[q];
                             if (n === priceInput || !isVisible(n)) continue;
                             var metaN = metaText(n).toLowerCase();
-                            if (metaN.indexOf('stock') >= 0 || metaN.indexOf('?ⓨ벴') >= 0) continue;
+                            if (metaN.indexOf('stock') >= 0 || metaN.indexOf('在庫') >= 0) continue;
                             return n;
                         }
                         container = container.parentElement;
@@ -3294,33 +3077,33 @@ def fill_buyma_form(driver, row_data: Dict[str, str]) -> str:
                 """)
 
             if qty_filled:
-                print("  ??縕룝퍡?㎯걤?뗥릦鼇덃빊???낅젰: 100")
+                print("  ✓ 買付できる合計数量 입력: 100")
             else:
-                print("  ??縕룝퍡?㎯걤?뗥릦鼇덃빊???낅젰移몄쓣 李얠? 紐삵뻽?듬땲?? ?섎룞 ?낅젰 ?꾩슂")
+                print("  △ 買付できる合計数量 입력칸을 찾지 못했습니다. 수동 입력 필요")
                 if qty_candidates:
                     for idx, cand in enumerate(qty_candidates[:8], 1):
                         around = (cand.get('around') or '')[:120]
                         print(
-                            f"    ?꾨낫 {idx}: type={cand.get('type','')} name={cand.get('name','')} id={cand.get('id','')} "
+                            f"    후보 {idx}: type={cand.get('type','')} name={cand.get('name','')} id={cand.get('id','')} "
                             f"placeholder={cand.get('placeholder','')} aria={cand.get('aria','')} inputmode={cand.get('inputmode','')} around={around}"
                         )
         except Exception as e:
-            print(f"  ???덅쮫?곈뇧 ?낅젰 ?ㅽ뙣: {e}")
+            print(f"  △ 合計数量 입력 실패: {e}")
 
-        # ---- 援щℓ/諛쒖넚: 紐⑤뱺 ?꾩떆/援??濡?湲곕낯 ?ㅼ젙?섏뼱 ?덉쓬 ----
-        # ?꾩떆(?쒖슱) Select ?좏깮: Select-value-label??"?멩뒢?ゃ걮"?대㈃ ?썬궑???좏깮
+        # ---- 구매/발송: 모든 도시/국가로 기본 설정되어 있음 ----
+        # 도시(서울) Select 선택: Select-value-label이 "選択なし"이면 ソウル 선택
         try:
             selects = driver.find_elements(By.CSS_SELECTOR, ".Select")
             city_count = 0
             for sel_container in selects:
                 try:
                     val_label = sel_container.find_element(By.CSS_SELECTOR, ".Select-value-label")
-                    if '?멩뒢?ゃ걮' in val_label.text:
+                    if '選択なし' in val_label.text:
                         _scroll_and_click(driver, sel_container.find_element(By.CSS_SELECTOR, ".Select-control"))
                         _sleep(0.5)
                         opts = driver.find_elements(By.CSS_SELECTOR, ".Select-option")
                         for opt in opts:
-                            if '?썬궑?? in opt.text:
+                            if 'ソウル' in opt.text:
                                 opt.click()
                                 city_count += 1
                                 _sleep(0.3)
@@ -3328,78 +3111,78 @@ def fill_buyma_form(driver, row_data: Dict[str, str]) -> str:
                 except Exception:
                     continue
             if city_count:
-                print(f"  ???꾩떆 ?좏깮: ?썬궑??{city_count}媛?")
+                print(f"  ✓ 도시 선택: ソウル({city_count}개)")
         except Exception as e:
-            print(f"  ???꾩떆 ?좏깮 ?ㅽ뙣, ?먮룞 ?좏깮 ?꾩슂: {e}")
+            print(f"  ✗ 도시 선택 실패, 자동 선택 필요: {e}")
 
-        # ---- ?대?吏 ?낅줈??----
+        # ---- 이미지 업로드 ----
         image_files = resolve_image_files(row_data.get('image_paths', ''))
         if image_files:
             try:
                 file_inputs = driver.find_elements(By.CSS_SELECTOR, "input[type='file']")
                 if file_inputs:
-                    # 泥?踰덉㎏ file input??紐⑤뱺 ?대?吏 寃쎈줈瑜?以꾨컮轅덉쑝濡??꾨떖
+                    # 첫 번째 file input에 모든 이미지 경로를 줄바꿈으로 전달
                     file_input = file_inputs[0]
                     file_paths_str = "\n".join(image_files)
                     file_input.send_keys(file_paths_str)
-                    print(f"  ???대?吏 ?낅줈?? {len(image_files)}??)
+                    print(f"  ✓ 이미지 업로드: {len(image_files)}장")
                     _sleep(2)
                 else:
-                    print(f"  ???뚯씪 ?낅줈???꾨뱶瑜?李얠쓣 ???놁뒿?덈떎")
+                    print(f"  ✗ 파일 업로드 필드를 찾을 수 없습니다")
             except Exception as e:
-                print(f"  ???대?吏 ?낅줈???ㅽ뙣: {e}")
+                print(f"  ✗ 이미지 업로드 실패: {e}")
         else:
-            print(f"  ???낅줈?쒗븷 ?대?吏媛 ?놁뒿?덈떎")
+            print(f"  △ 업로드할 이미지가 없습니다")
 
         return "success"
 
     except Exception as e:
-        print(f"  ???대?吏 ?낅줈???ㅻ쪟: {e}")
+        print(f"  ✗ 이미지 업로드 오류: {e}")
         return "error"
 
 
 def upload_products(specific_row: int = 0, upload_mode: str = 'auto', max_items: int = 0):
-    """硫붿씤 ?낅줈??猷⑦봽: ?쒗듃 ?쎄린 ??濡쒓렇 ??媛??됰퀎 ?낅젰 ?먮룞???뷀듃由?""
-    print("諛붿씠留?異쒗뭹 ?먮룞???쒖옉?⑸땲??n")
-    print(f"?낅줈??紐⑤뱶: {upload_mode}\n")
+    """메인 업로드 루프: 시트 읽기 → 로그 → 각 행별 입력 자동화 엔트리"""
+    print("바이마 출품 자동화 시작합니다\n")
+    print(f"업로드 모드: {upload_mode}\n")
 
-    # 1. ?쒗듃?먯꽌 異쒗뭹 ???쎄린
+    # 1. 시트에서 출품 행 읽기
     service = get_sheets_service()
     sheet_name = get_sheet_name(service)
     header_map = get_sheet_header_map(service, sheet_name)
-    print(f"??? {sheet_name}")
+    print(f"?트: {sheet_name}")
 
     rows = read_upload_rows(service, sheet_name, specific_row)
 
     if not rows:
-        print("異쒗뭹 ??곸씠 ?놁뒿?덈떎. (BUYMA URL + DB?곹뭹 + KEY 諛붿씠留덊뙋留ㅺ? ?꾩슂)")
+        print("출품 대상이 없습니다. (BUYMA URL + DB상품 + KEY 바이마판매가 필요)")
         return
 
-    print(f"異쒗뭹 ?됱닔: {len(rows)}媛쒗뭹\n")
+    print(f"출품 행수: {len(rows)}개품\n")
     for r in rows:
-        print(f"  {r['row_num']}??{r['brand']} - {r['product_name_kr']} (JPY {r['buyma_price']})")
+        print(f"  {r['row_num']}행 {r['brand']} - {r['product_name_kr']} (JPY {r['buyma_price']})")
     print()
 
-    # 2. 釉뚮씪?곗? ?닿린 + 濡쒓렇????
+    # 2. 브라우저 열기 + 로그인 등
     driver = setup_visible_chrome_driver()
     keep_browser_open = False
     try:
         if not wait_for_buyma_login(driver):
-            print("濡쒓렇???ㅽ뙣. 醫낅즺?⑸땲??")
+            print("로그인 실패. 종료합니다.")
             return
 
-        # 3. ?됰퀎 泥섎━
+        # 3. 행별 처리
         processed = 0
         for i, row_data in enumerate(rows):
             if max_items > 0 and processed >= max_items:
                 break
             row_num = row_data['row_num']
             print(f"\n{'='*60}")
-            print(f"  [{i+1}/{len(rows)}] {row_num}??泥섎━ 以?)
+            print(f"  [{i+1}/{len(rows)}] {row_num}행 처리 중")
             print(f"{'='*60}")
 
             if update_cell_by_header(service, sheet_name, row_num, header_map, PROGRESS_STATUS_HEADER, STATUS_UPLOADING):
-                print(f"  {row_num}???곹깭 ?낅뜲?댄듃: {STATUS_UPLOADING}")
+                print(f"  {row_num}행 상태 업데이트: {STATUS_UPLOADING}")
             processed += 1
 
             fill_result = fill_buyma_form(driver, row_data)
@@ -3410,44 +3193,44 @@ def upload_products(specific_row: int = 0, upload_mode: str = 'auto', max_items:
                     return
                 if fully_submitted:
                     if update_cell_by_header(service, sheet_name, row_num, header_map, PROGRESS_STATUS_HEADER, STATUS_COMPLETED):
-                        print(f"  {row_num}???곹깭 ?낅뜲?댄듃: {STATUS_COMPLETED}")
+                        print(f"  {row_num}행 상태 업데이트: {STATUS_COMPLETED}")
                 elif upload_mode == 'auto':
-                    if update_cell_by_header(service, sheet_name, row_num, header_map, PROGRESS_STATUS_HEADER, "?ㅻ쪟"):
-                        print(f"  {row_num}???곹깭 ?낅뜲?댄듃: ?ㅻ쪟")
+                    if update_cell_by_header(service, sheet_name, row_num, header_map, PROGRESS_STATUS_HEADER, "오류"):
+                        print(f"  {row_num}행 상태 업데이트: 오류")
             elif fill_result == "manual_review":
-                print(f"  {row_num}?됱? ?곹뭹紐????섎룞 ?뺤씤???꾩슂?⑸땲?? ?꾩옱 釉뚮씪?곗? ?붾㈃???뺤씤?댁＜?몄슂.")
+                print(f"  {row_num}행은 상품명 등 수동 확인이 필요합니다. 현재 브라우저 화면을 확인해주세요.")
                 keep_browser_open = True
-                _safe_input("  ?섏젙 ?먮뒗 ?뺤씤 ??Enter瑜??뚮윭二쇱꽭??.")
+                _safe_input("  수정 또는 확인 후 Enter를 눌러주세요..")
                 return
             else:
-                print(f"  {row_num}???곹뭹?낅젰 ?ㅽ뙣. 嫄대꼫?곷땲??)
-                if update_cell_by_header(service, sheet_name, row_num, header_map, PROGRESS_STATUS_HEADER, "?ㅻ쪟"):
-                    print(f"  {row_num}???곹깭 ?낅뜲?댄듃: ?ㅻ쪟")
-                _safe_input("  Enter瑜??뚮윭 ?ㅼ쓬?쇰줈 吏꾪뻾...")
+                print(f"  {row_num}행 상품입력 실패. 건너뜁니다")
+                if update_cell_by_header(service, sheet_name, row_num, header_map, PROGRESS_STATUS_HEADER, "오류"):
+                    print(f"  {row_num}행 상태 업데이트: 오류")
+                _safe_input("  Enter를 눌러 다음으로 진행...")
 
-        print(f"\n紐⑤뱺 ?곹뭹 泥섎━ ?꾨즺! ({len(rows)}嫄?")
+        print(f"\n모든 상품 처리 완료! ({len(rows)}건)")
 
     finally:
         if keep_browser_open:
-            print("\n釉뚮씪?곗?瑜??댁뼱???곹깭濡??좎??⑸땲?? ?뺤씤 ??吏곸젒 ?レ븘二쇱꽭??")
+            print("\n브라우저를 열어둔 상태로 유지합니다. 확인 후 직접 닫아주세요.")
         else:
-            _safe_input("\n釉뚮씪?곗?瑜?紐⑤몢 ?レ쑝硫?Enter瑜??뚮윭二쇱꽭??..")
+            _safe_input("\n브라우저를 모두 닫으면 Enter를 눌러주세요...")
             driver.quit()
-            print("釉뚮씪?곗?媛 醫낅즺?섏뿀?듬땲??")
+            print("브라우저가 종료되었습니다.")
 
 
 def main():
-    parser = argparse.ArgumentParser(description="諛붿씠留?異쒗뭹 ?먮룞??)
-    parser.add_argument("--scan", action="store_true", help="異쒗뭹 ?섏씠吏 ??援ъ“ ?ㅼ틪 (媛쒕컻??")
-    parser.add_argument("--row", type=int, default=0, help="?뱀젙 ?됰쭔 異쒗뭹 (?? --row 3)")
+    parser = argparse.ArgumentParser(description="바이마 출품 자동화")
+    parser.add_argument("--scan", action="store_true", help="출품 페이지 폼 구조 스캔 (개발용)")
+    parser.add_argument("--row", type=int, default=0, help="특정 행만 출품 (예: --row 3)")
     parser.add_argument(
         "--mode",
         choices=["review", "auto"],
         default="auto",
-        help="review=?щ엺 ?뺤씤 ???쒖텧, auto=?ㅻ쪟 ?놁쑝硫??먮룞 ?쒖텧",
+        help="review=사람 확인 후 제출, auto=오류 없으면 자동 제출",
     )
-    parser.add_argument("--watch", action="store_true", help="?낅줈???뚯빱 媛먯떆 紐⑤뱶")
-    parser.add_argument("--interval", type=int, default=20, help="媛먯떆 媛꾧꺽(珥?")
+    parser.add_argument("--watch", action="store_true", help="업로드 워커 감시 모드")
+    parser.add_argument("--interval", type=int, default=20, help="감시 간격(초)")
     args = parser.parse_args()
 
     if args.scan:
@@ -3457,15 +3240,15 @@ def main():
                 return
             scan_form_structure(driver)
         finally:
-            _safe_input("\nEnter瑜??뚮윭 釉뚮씪?곗?瑜??レ뒿?덈떎...")
+            _safe_input("\nEnter를 눌러 브라우저를 닫습니다...")
             driver.quit()
     else:
         if args.watch:
             interval = max(5, int(args.interval))
-            print(f"?낅줈???뚯빱 媛먯떆 ?쒖옉: {interval}珥?媛꾧꺽")
+            print(f"업로드 워커 감시 시작: {interval}초 간격")
             while True:
                 upload_products(specific_row=args.row, upload_mode=args.mode, max_items=1)
-                print(f"?ㅼ쓬 ?낅줈???먭?源뚯? {interval}珥??湲?..")
+                print(f"다음 업로드 점검까지 {interval}초 대기...")
                 time.sleep(interval)
         else:
             upload_products(specific_row=args.row, upload_mode=args.mode)
@@ -3473,7 +3256,4 @@ def main():
 
 if __name__ == "__main__":
     main()
-
-
-
 
