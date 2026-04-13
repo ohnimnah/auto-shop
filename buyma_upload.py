@@ -1,4 +1,4 @@
-"""
+﻿"""
 BUYMA 출품 자동화 모듈.
 
 Google Sheets의 상품 정보를 BUYMA 출품 페이지에 자동 입력한다.
@@ -1589,6 +1589,95 @@ def _fill_size_table_rows(driver, panel, size_text: str) -> int:
         return 0
 
 
+def _normalize_actual_size_for_upload(value: str) -> str:
+    text = (value or "").strip()
+    if not text:
+        return ""
+    lowered = text.lower()
+    if lowered in {"none", "n/a", "na"}:
+        return ""
+    if text in {"못찾음", "없음", "-"}:
+        return ""
+    return text
+
+
+def _extract_actual_measure_map(actual_size_text: str) -> Dict[str, str]:
+    if not actual_size_text:
+        return {}
+
+    pairs: Dict[str, str] = {}
+    normalized = actual_size_text.replace("\n", " ").replace("\r", " ")
+    for key, val in re.findall(r"([가-힣A-Za-z ]{1,20})\s*[:：]?\s*(-?\d+(?:\.\d+)?)", normalized):
+        k = key.strip()
+        v = val.strip()
+        if k and v and k not in pairs:
+            pairs[k] = v
+    return pairs
+
+
+def _fill_size_edit_details(driver, actual_size_text: str) -> int:
+    pairs = _extract_actual_measure_map(actual_size_text)
+    if not pairs:
+        return 0
+
+    try:
+        edit_buttons = driver.find_elements(
+            By.XPATH,
+            "//button[contains(normalize-space(.), '編集')] | //a[contains(normalize-space(.), '編集')]",
+        )
+        filled_count = 0
+        for btn in edit_buttons:
+            try:
+                if not btn.is_displayed():
+                    continue
+                _scroll_and_click(driver, btn)
+                _sleep(0.3)
+
+                dialogs = driver.find_elements(By.CSS_SELECTOR, "[role='dialog'], .ReactModal__Content, .bmm-c-modal")
+                dialog = dialogs[-1] if dialogs else driver
+                rows = dialog.find_elements(By.CSS_SELECTOR, "tr")
+                local_filled = 0
+                for row in rows:
+                    try:
+                        label = (row.text or "").strip()
+                        if not label:
+                            continue
+                        target_key = None
+                        for key in pairs.keys():
+                            if key in label or label in key:
+                                target_key = key
+                                break
+                        if not target_key:
+                            continue
+                        inputs = row.find_elements(By.CSS_SELECTOR, "input[type='text'], input[type='number']")
+                        if not inputs:
+                            continue
+                        target = next((i for i in inputs if i.is_displayed() and i.is_enabled()), None)
+                        if not target:
+                            continue
+                        target.clear()
+                        target.send_keys(pairs[target_key])
+                        local_filled += 1
+                    except Exception:
+                        continue
+
+                if local_filled > 0:
+                    filled_count += local_filled
+                    save_buttons = dialog.find_elements(
+                        By.XPATH,
+                        ".//button[contains(normalize-space(.), '保存')] | .//button[contains(normalize-space(.), 'OK')]",
+                    )
+                    if save_buttons:
+                        _scroll_and_click(driver, save_buttons[0])
+                        _sleep(0.2)
+            except Exception:
+                continue
+
+        return filled_count
+    except Exception:
+        return 0
+
+
 # ---- 카테고리 추론 매핑 ----
 FEMALE_KEYWORDS = [
     'women', 'womens', "women's",
@@ -2401,6 +2490,7 @@ def fill_buyma_form(driver, row_data: Dict[str, str]) -> str:
         # ---- 사이즈 컨테이너 클릭 및 체크박스 선택 ----
         # 주의: 카테고리 미선택 시 사이즈목록이 표시되지 않음
         size_text = row_data.get('size', '')
+        actual_size_text = _normalize_actual_size_for_upload(row_data.get('actual_size', ''))
         try:
             is_free_size = _is_free_size_text(size_text)
 
@@ -2468,7 +2558,11 @@ def fill_buyma_form(driver, row_data: Dict[str, str]) -> str:
                         # 프리사이즈는 일반 사이즈매칭 경로에서 못찾으면 강제 분기
                         no_var_ok = _force_select_shitei_nashi_global(driver) or _check_no_variation_option(driver, prefer_shitei_nashi=True)
                         ref_ok = _force_reference_size_shitei_nashi(driver, panel=panel)
-                        if no_var_ok or ref_ok:
+                        if no_var_ok or ref_ok:
+                            if actual_size_text:
+                                filled_detail = _fill_size_edit_details(driver, actual_size_text)
+                                if filled_detail:
+                                    print(f"  actual size detail filled: {filled_detail}")
                             print(f"  ✓ 프리사이즈 감지, 指定なし 선택 ({size_text})")
                         else:
                             print(f"  ✗ 프리사이즈 감지, 指定なし 선택 실패. 자동 선택 필요: {size_text}")
@@ -2477,7 +2571,11 @@ def fill_buyma_form(driver, row_data: Dict[str, str]) -> str:
 
                     # 0) 테이블 기반 사이즈 일괄 입력 경로 우선
                     table_filled = _fill_size_table_rows(driver, panel, size_text)
-                    if table_filled:
+                    if table_filled:
+                        if actual_size_text:
+                            filled_detail = _fill_size_edit_details(driver, actual_size_text)
+                            if filled_detail:
+                                print(f"  actual size detail filled: {filled_detail}")
                         print(f"  ✓ 사이즈입력(테이블): {table_filled}개({size_text})")
                         handled_size = True
                         break
@@ -2565,7 +2663,11 @@ def fill_buyma_form(driver, row_data: Dict[str, str]) -> str:
                 if is_free_size:
                     no_var_ok = _force_select_shitei_nashi_global(driver) or _check_no_variation_option(driver, prefer_shitei_nashi=True)
                     ref_ok = _force_reference_size_shitei_nashi(driver)
-                    if no_var_ok or ref_ok:
+                    if no_var_ok or ref_ok:
+                        if actual_size_text:
+                            filled_detail = _fill_size_edit_details(driver, actual_size_text)
+                            if filled_detail:
+                                print(f"  actual size detail filled: {filled_detail}")
                         print(f"  ✓ 프리사이즈 감지, 指定なし 선택 ({size_text})")
                     else:
                         print(f"  ✗ 프리사이즈 감지, 指定なし 선택 실패. 자동 선택 필요: {size_text}")

@@ -2590,7 +2590,7 @@ def scrape_musinsa_product(
                 'product_name_kr': product_name,
                 'color_kr': '',
                 'size': '',
-                'actual_size': '',
+                'actual_size': '못찾음',
                 'price': '',
                 'buyma_price': '',
                 'musinsa_sku': existing_sku.strip() if existing_sku else '',
@@ -2632,6 +2632,8 @@ def scrape_musinsa_product(
         color_from_api = extract_color_from_api(goods_options)
         size_text, color_from_size = extract_sizes_from_api(goods_no, goods_sale_type, opt_kind_cd)
         actual_size_text = extract_actual_size_text(goods_no)
+        if not actual_size_text:
+            actual_size_text = "못찾음"
 
         # 실제 옵션 색상을 우선 반영한다. (size 파싱 > 옵션 API > 상품명)
         if color_from_size:
@@ -2734,7 +2736,7 @@ def scrape_musinsa_product(
             'product_name_kr': '상품명 미확인',
             'color_kr': 'none',
             'size': '',
-            'actual_size': '',
+            'actual_size': '못찾음',
             'price': '가격 미확인',
             'buyma_price': '',
             'musinsa_sku': '',
