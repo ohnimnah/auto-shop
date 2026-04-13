@@ -106,12 +106,20 @@ def _blur_faces(pil_img: Image.Image, blur_radius: int = 14) -> Image.Image:
 
 
 def _paste_cover(canvas: Image.Image, src: Path, box, blur_faces: bool = False, blur_radius: int = 14):
+    """Legacy name kept for compatibility.
+    Preserve the full source image (no crop) and fill remaining area with a soft background.
+    """
     x, y, w, h = box
     with _open_rgb(src) as im:
-        fitted = ImageOps.fit(im, (w, h), method=Image.Resampling.LANCZOS, centering=(0.5, 0.5))
+        fitted = ImageOps.contain(im, (w, h), method=Image.Resampling.LANCZOS)
+        # Use a resized blurred backdrop to avoid harsh empty bands while keeping full image visible.
+        bg = im.resize((w, h), Image.Resampling.LANCZOS).filter(ImageFilter.GaussianBlur(radius=18))
     if blur_faces:
         fitted = _blur_faces(fitted, blur_radius=blur_radius)
-    canvas.paste(fitted, (x, y))
+    px = (w - fitted.width) // 2
+    py = (h - fitted.height) // 2
+    bg.paste(fitted, (px, py))
+    canvas.paste(bg, (x, y))
 
 
 def _paste_contain(canvas: Image.Image, src: Path, box, bg=(255, 255, 255), blur_faces: bool = False, blur_radius: int = 14):
@@ -186,7 +194,14 @@ def compose_split_style(
         ty = left_box[1] + max(10, size // 40)
         # 상단에서 너무 내려가지 않게 최소한의 여백만 유지
         ty = min(ty, left_box[1] + max(10, (left_box[3] - th) // 6))
-        draw.text((tx, ty), title, fill=(245, 245, 245), font=title_font)
+        draw.text(
+            (tx, ty),
+            title,
+            fill=(255, 255, 255),
+            font=title_font,
+            stroke_width=max(2, title_size // 18),
+            stroke_fill=(0, 0, 0),
+        )
 
     draw.rectangle((0, size - footer_h, size, size), fill=(255, 255, 255))
     footer_font = _load_font(max(22, size // 24), bold=True)
