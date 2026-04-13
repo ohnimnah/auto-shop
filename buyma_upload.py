@@ -67,6 +67,17 @@ STATUS_UPLOAD_READY = "썸네일완료"
 STATUS_THUMBNAILS_DONE = "썸네일완료"
 STATUS_UPLOADING = "업로드중"
 STATUS_COMPLETED = "출품완료"
+JP_SHITEI_NASHI = "\u6307\u5b9a\u306a\u3057"  # 指定なし
+JP_SIZE_SHITEI_NASHI = "\u30b5\u30a4\u30ba\u6307\u5b9a\u306a\u3057"  # サイズ指定なし
+
+
+def _normalize_jp_match_text(text: str) -> str:
+    return (text or "").strip().replace(" ", "").replace("\u3000", "")
+
+
+def _is_shitei_nashi_text(text: str) -> bool:
+    normalized = _normalize_jp_match_text(text)
+    return JP_SHITEI_NASHI in normalized or JP_SIZE_SHITEI_NASHI in normalized
 
 
 def _load_sheet_runtime_config() -> None:
@@ -1164,17 +1175,18 @@ def _force_select_shitei_nashi(driver) -> bool:
     try:
         variation = driver.find_element(By.CSS_SELECTOR, ".sell-variation")
 
-        # 1) ?벨 ?확 ?치 ?선
+        # 1) 라벨 텍스트 기반 클릭
         labels = variation.find_elements(By.CSS_SELECTOR, "label")
         for lb in labels:
-            txt = (lb.text or '').strip().replace('?', ' ')
-            if txt == '?定?し':
+            if _is_shitei_nashi_text(lb.text or ''):
                 _scroll_and_click(driver, lb)
                 return True
 
-        # 2) 사이즈 드롭다운에서 '지정なし' 위치 클릭
-        nodes = variation.find_elements(By.XPATH, ".//*[normalize-space(text())='?定?し']")
+        # 2) 텍스트 노드 기반 클릭
+        nodes = variation.find_elements(By.XPATH, ".//*[normalize-space(text())!='']")
         for node in nodes:
+            if not _is_shitei_nashi_text(node.text or ''):
+                continue
             clicked = driver.execute_script(
                 "var el=arguments[0];"
                 "while(el){"
@@ -1192,7 +1204,9 @@ def _force_select_shitei_nashi(driver) -> bool:
         # 3) React Select에서 정확 옵션 선택
         selects = variation.find_elements(By.CSS_SELECTOR, ".Select")
         for sel in selects:
-            if _select_option_in_select_control(driver, sel, '?定?し'):
+            if _select_option_in_select_control(driver, sel, JP_SHITEI_NASHI):
+                return True
+            if _select_option_in_select_control(driver, sel, JP_SIZE_SHITEI_NASHI):
                 return True
     except Exception:
         return False
@@ -1209,15 +1223,19 @@ def _force_select_shitei_nashi_global(driver) -> bool:
     try:
         selects = driver.find_elements(By.CSS_SELECTOR, ".sell-size-table .Select, .sell-variation .Select")
         for sel in selects:
-            if _select_option_in_select_control(driver, sel, '?定?し'):
+            if _select_option_in_select_control(driver, sel, JP_SHITEI_NASHI):
+                return True
+            if _select_option_in_select_control(driver, sel, JP_SIZE_SHITEI_NASHI):
                 return True
     except Exception:
         pass
 
     # 3) 영역 사이즈 정확 일치 클릭 시도
     try:
-        nodes = driver.find_elements(By.XPATH, "//*[normalize-space(text())='?定?し']")
+        nodes = driver.find_elements(By.XPATH, "//*[normalize-space(text())!='']")
         for node in nodes:
+            if not _is_shitei_nashi_text(node.text or ''):
+                continue
             clicked = driver.execute_script(
                 "var el=arguments[0];"
                 "while(el){"
@@ -1253,12 +1271,15 @@ def _force_reference_size_shitei_nashi(driver, panel=None) -> bool:
             try:
                 # 값 없을 때 skip
                 current = sel.find_elements(By.CSS_SELECTOR, ".Select-value-label")
-                if current and (current[0].text or '').strip() == '?定?し':
+                if current and _is_shitei_nashi_text(current[0].text or ''):
                     changed += 1
                     continue
 
                 # 1? ?반 ?택 ?수
-                if _select_option_in_select_control(driver, sel, '?定?し'):
+                if _select_option_in_select_control(driver, sel, JP_SHITEI_NASHI):
+                    changed += 1
+                    continue
+                if _select_option_in_select_control(driver, sel, JP_SIZE_SHITEI_NASHI):
                     changed += 1
                     continue
 
@@ -1269,12 +1290,12 @@ def _force_reference_size_shitei_nashi(driver, panel=None) -> bool:
                     _sleep(0.2)
                     inp = sel.find_element(By.CSS_SELECTOR, ".Select-input input")
                     inp.clear()
-                    inp.send_keys('?定?し')
+                    inp.send_keys(JP_SHITEI_NASHI)
                     _sleep(0.35)
                     opts = driver.find_elements(By.CSS_SELECTOR, ".Select-menu-outer .Select-option")
                     exact = None
                     for o in opts:
-                        if (o.text or '').strip() == '?定?し':
+                        if _is_shitei_nashi_text(o.text or ''):
                             exact = o
                             break
                     if exact is not None:
@@ -1284,7 +1305,7 @@ def _force_reference_size_shitei_nashi(driver, panel=None) -> bool:
                     inp.send_keys(Keys.ENTER)
                     _sleep(0.2)
                     current2 = sel.find_elements(By.CSS_SELECTOR, ".Select-value-label")
-                    if current2 and (current2[0].text or '').strip() == '?定?し':
+                    if current2 and _is_shitei_nashi_text(current2[0].text or ''):
                         changed += 1
                         continue
                 except Exception:
@@ -1456,7 +1477,7 @@ def _infer_reference_jp_size(size_raw: str) -> str:
     """?이?문자?을 ?日?サ?ズ Select ?벨?매핑?다."""
     # 프리사이즈 NONE 계열은 반드시 '指定なし' 고정
     if _is_free_size_text(size_raw):
-        return '?定?し'
+        return JP_SHITEI_NASHI
 
     s = (size_raw or '').strip().upper()
     if not s:
