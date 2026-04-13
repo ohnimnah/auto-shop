@@ -230,7 +230,7 @@ def read_upload_rows(service, sheet_name: str, specific_row: int = 0) -> List[Di
         # 최소 조건: URL + 상품명 + 바이마 판매가 있어야 출품 대상
         url = cell('B')
         product_name = cell('E')
-        buyma_price = cell('L')
+        buyma_price = cell('M')
 
         if not url or not product_name or not buyma_price:
             continue
@@ -258,10 +258,11 @@ def read_upload_rows(service, sheet_name: str, specific_row: int = 0) -> List[Di
             'color_kr': cell('H'),
             'color_en': cell('I'),
             'size': cell('J'),
-            'price_krw': cell('K'),
+            'actual_size': cell('K'),
+            'price_krw': cell('L'),
             'buyma_price': buyma_price,
-            'image_paths': cell('M'),
-            'shipping_cost': cell('N'),
+            'image_paths': cell('N'),
+            'shipping_cost': cell('O'),
             'progress_status': progress_status,
         })
 
@@ -2782,7 +2783,7 @@ def fill_buyma_form(driver, row_data: Dict[str, str]) -> str:
         except Exception as e:
             print(f"  ✗ 배송방법 선택 실패: {e}")
 
-        # ---- 가격 입력: half-size-char 필드 (K열 값) ----
+        # ---- 가격 입력: half-size-char 필드 (M열 값) ----
         buyma_price = re.sub(r'[^\d]', '', row_data.get('buyma_price', ''))
         if buyma_price:
             try:

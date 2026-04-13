@@ -75,10 +75,11 @@ MUSINSA_SKU_COLUMN = "G"
 COLOR_KR_COLUMN = "H"
 COLOR_EN_COLUMN = "I"
 SIZE_COLUMN = "J"
-PRICE_COLUMN = "K"
-BAIMA_SELL_PRICE_COLUMN = "L"
-IMAGE_PATHS_COLUMN = "M"
-SHIPPING_COST_COLUMN = "N"
+ACTUAL_SIZE_COLUMN = "K"
+PRICE_COLUMN = "L"
+BAIMA_SELL_PRICE_COLUMN = "M"
+IMAGE_PATHS_COLUMN = "N"
+SHIPPING_COST_COLUMN = "O"
 CATEGORY_LARGE_COLUMN = "V"
 CATEGORY_MIDDLE_COLUMN = "W"
 CATEGORY_SMALL_COLUMN = "X"
@@ -752,6 +753,47 @@ def fetch_actual_size(goods_no: str) -> Dict[str, object]:
         return {}
 
 
+def extract_actual_size_text(goods_no: str) -> str:
+    """무신사 실측 API에서 실측표 텍스트를 추출해 한 줄 문자열로 반환한다."""
+    data = fetch_actual_size(goods_no)
+    if not isinstance(data, dict):
+        return ""
+
+    rows = data.get("sizes")
+    if not isinstance(rows, list):
+        return ""
+
+    result_rows: List[str] = []
+    for row in rows:
+        if not isinstance(row, dict):
+            continue
+
+        size_name = str(row.get("name", "")).strip()
+        values = row.get("values")
+        if not isinstance(values, list) or not values:
+            continue
+
+        parts: List[str] = []
+        for item in values:
+            if not isinstance(item, dict):
+                continue
+            measure_name = str(item.get("name", "")).strip()
+            measure_value = str(item.get("value", "")).strip()
+            if not measure_name or not measure_value:
+                continue
+            parts.append(f"{measure_name} {measure_value}")
+
+        if not parts:
+            continue
+
+        if size_name:
+            result_rows.append(f"{size_name}: {', '.join(parts)}")
+        else:
+            result_rows.append(", ".join(parts))
+
+    return " | ".join(result_rows)
+
+
 def extract_product_json(soup: BeautifulSoup) -> Dict[str, object]:
     """페이지 내 JSON-LD Product 데이터를 추출한다"""
     for script in soup.find_all('script', attrs={'type': 'application/ld+json'}):
@@ -1359,7 +1401,7 @@ def extract_musinsa_sku(
 
 
 def get_existing_row_values(service, sheet_name: str, row_num: int) -> Dict[str, str]:
-    """현재 행의 A~L 값을 읽어 컬럼별로 반환한다"""
+    """현재 행의 A~X 값을 읽어 컬럼별로 반환한다"""
     try:
         result = service.spreadsheets().values().get(
             spreadsheetId=SPREADSHEET_ID,
@@ -1379,10 +1421,11 @@ def get_existing_row_values(service, sheet_name: str, row_num: int) -> Dict[str,
             COLOR_KR_COLUMN: row[7] if len(row) > 7 else "",
             COLOR_EN_COLUMN: row[8] if len(row) > 8 else "",
             SIZE_COLUMN: row[9] if len(row) > 9 else "",
-            PRICE_COLUMN: row[10] if len(row) > 10 else "",
-            BAIMA_SELL_PRICE_COLUMN: row[11] if len(row) > 11 else "",
-            IMAGE_PATHS_COLUMN: row[12] if len(row) > 12 else "",
-            SHIPPING_COST_COLUMN: row[13] if len(row) > 13 else "",
+            ACTUAL_SIZE_COLUMN: row[10] if len(row) > 10 else "",
+            PRICE_COLUMN: row[11] if len(row) > 11 else "",
+            BAIMA_SELL_PRICE_COLUMN: row[12] if len(row) > 12 else "",
+            IMAGE_PATHS_COLUMN: row[13] if len(row) > 13 else "",
+            SHIPPING_COST_COLUMN: row[14] if len(row) > 14 else "",
             CATEGORY_LARGE_COLUMN: row[21] if len(row) > 21 else "",
             CATEGORY_MIDDLE_COLUMN: row[22] if len(row) > 22 else "",
             CATEGORY_SMALL_COLUMN: row[23] if len(row) > 23 else "",
@@ -1398,7 +1441,7 @@ def get_existing_rows_bulk(
     sheet_name: str,
     row_numbers: List[int],
 ) -> Dict[int, Dict[str, str]]:
-    """여러 행의 A~L 값을 한 번에 읽어 행 번호별 맵으로 반환한다"""
+    """여러 행의 A~X 값을 한 번에 읽어 행 번호별 맵으로 반환한다"""
     if not row_numbers:
         return {}
 
@@ -1408,6 +1451,7 @@ def get_existing_rows_bulk(
         SEQUENCE_COLUMN, URL_COLUMN, BRAND_COLUMN, BRAND_EN_COLUMN,
         PRODUCT_NAME_KR_COLUMN, PRODUCT_NAME_EN_COLUMN, MUSINSA_SKU_COLUMN,
         COLOR_KR_COLUMN, COLOR_EN_COLUMN, SIZE_COLUMN,
+        ACTUAL_SIZE_COLUMN,
         PRICE_COLUMN, BAIMA_SELL_PRICE_COLUMN, IMAGE_PATHS_COLUMN, SHIPPING_COST_COLUMN,
         CATEGORY_LARGE_COLUMN, CATEGORY_MIDDLE_COLUMN, CATEGORY_SMALL_COLUMN,
     ]
@@ -1433,10 +1477,11 @@ def get_existing_rows_bulk(
             mapped[COLOR_KR_COLUMN] = row_values[7] if len(row_values) > 7 else ""
             mapped[COLOR_EN_COLUMN] = row_values[8] if len(row_values) > 8 else ""
             mapped[SIZE_COLUMN] = row_values[9] if len(row_values) > 9 else ""
-            mapped[PRICE_COLUMN] = row_values[10] if len(row_values) > 10 else ""
-            mapped[BAIMA_SELL_PRICE_COLUMN] = row_values[11] if len(row_values) > 11 else ""
-            mapped[IMAGE_PATHS_COLUMN] = row_values[12] if len(row_values) > 12 else ""
-            mapped[SHIPPING_COST_COLUMN] = row_values[13] if len(row_values) > 13 else ""
+            mapped[ACTUAL_SIZE_COLUMN] = row_values[10] if len(row_values) > 10 else ""
+            mapped[PRICE_COLUMN] = row_values[11] if len(row_values) > 11 else ""
+            mapped[BAIMA_SELL_PRICE_COLUMN] = row_values[12] if len(row_values) > 12 else ""
+            mapped[IMAGE_PATHS_COLUMN] = row_values[13] if len(row_values) > 13 else ""
+            mapped[SHIPPING_COST_COLUMN] = row_values[14] if len(row_values) > 14 else ""
             mapped[CATEGORY_LARGE_COLUMN] = row_values[21] if len(row_values) > 21 else ""
             mapped[CATEGORY_MIDDLE_COLUMN] = row_values[22] if len(row_values) > 22 else ""
             mapped[CATEGORY_SMALL_COLUMN] = row_values[23] if len(row_values) > 23 else ""
@@ -1464,6 +1509,7 @@ def build_incremental_payload(
         (MUSINSA_SKU_COLUMN, product_info.get('musinsa_sku', '')),
         (COLOR_KR_COLUMN, product_info.get('color_kr', '')),
         (SIZE_COLUMN, product_info.get('size', '')),
+        (ACTUAL_SIZE_COLUMN, product_info.get('actual_size', '')),
         (PRICE_COLUMN, product_info.get('price', '')),
         (BAIMA_SELL_PRICE_COLUMN, product_info.get('buyma_price', '')),
         (IMAGE_PATHS_COLUMN, product_info.get('image_paths', '')),
@@ -1490,7 +1536,7 @@ def build_incremental_payload(
 def row_needs_update(existing_values: Dict[str, str], require_image_paths: bool = True) -> bool:
     """자동 입력 대상 열 중 빈 칸이 있으면 True.
 
-    require_image_paths=False면 M열(image_paths) 빈칸은 대상에서 제외한다.
+    require_image_paths=False면 N열(image_paths) 빈칸은 대상에서 제외한다.
     """
     target_columns = [
         BRAND_COLUMN,
@@ -1499,6 +1545,7 @@ def row_needs_update(existing_values: Dict[str, str], require_image_paths: bool 
         MUSINSA_SKU_COLUMN,
         COLOR_KR_COLUMN,
         SIZE_COLUMN,
+        ACTUAL_SIZE_COLUMN,
         PRICE_COLUMN,
         BAIMA_SELL_PRICE_COLUMN,
         SHIPPING_COST_COLUMN,
@@ -1521,6 +1568,7 @@ def row_has_existing_output(existing_values: Dict[str, str]) -> bool:
         MUSINSA_SKU_COLUMN,
         COLOR_KR_COLUMN,
         SIZE_COLUMN,
+        ACTUAL_SIZE_COLUMN,
         PRICE_COLUMN,
         BAIMA_SELL_PRICE_COLUMN,
         IMAGE_PATHS_COLUMN,
@@ -1533,7 +1581,7 @@ def row_has_existing_output(existing_values: Dict[str, str]) -> bool:
 
 
 def row_needs_image_download(existing_values: Dict[str, str]) -> bool:
-    """M열(image_paths)이 비어있으면 이미지 저장 대상으로 본다."""
+    """N열(image_paths)이 비어있으면 이미지 저장 대상으로 본다."""
     return is_empty_cell(existing_values.get(IMAGE_PATHS_COLUMN, ""))
 
 
@@ -1544,16 +1592,16 @@ def write_image_paths_only(
     image_paths: str,
     existing_values: Dict[str, str] = None,
 ):
-    """이미지 저장 모드는 M열(image_paths)만 업데이트한다."""
+    """이미지 저장 모드는 N열(image_paths)만 업데이트한다."""
     if is_empty_cell(image_paths):
-        print(f" {sheet_name} {row_num}행: 저장할 이미지 경로가 없어 M열 업데이트를 건너뜁니다")
+        print(f" {sheet_name} {row_num}행: 저장할 이미지 경로가 없어 N열 업데이트를 건너뜁니다")
         return
 
     if existing_values is None:
         existing_values = get_existing_row_values(service, sheet_name, row_num)
 
     if not is_empty_cell(existing_values.get(IMAGE_PATHS_COLUMN, "")):
-        print(f" {sheet_name} {row_num}행: M열이 이미 채워져 있어 건너뜁니다")
+        print(f" {sheet_name} {row_num}행: N열이 이미 채워져 있어 건너뜁니다")
         return
 
     try:
@@ -1563,9 +1611,9 @@ def write_image_paths_only(
             valueInputOption='USER_ENTERED',
             body={'values': [[image_paths]]},
         ).execute()
-        print(f" {sheet_name} {row_num}행 저장: M열(image_paths) 업데이트")
+        print(f" {sheet_name} {row_num}행 저장: N열(image_paths) 업데이트")
     except Exception as e:
-        print(f" {sheet_name} {row_num}행 M열 저장 실패: {e}")
+        print(f" {sheet_name} {row_num}행 N열 저장 실패: {e}")
 
 
 def write_to_sheet(
@@ -1575,7 +1623,7 @@ def write_to_sheet(
     product_info: Dict[str, str],
     existing_values: Dict[str, str] = None,
 ):
-    """Google Sheets의 A, C~L 열에 한 행 데이터를 쓴다"""
+    """Google Sheets의 A, C~O 열에 한 행 데이터를 쓴다"""
     try:
         if existing_values is None:
             existing_values = get_existing_row_values(service, sheet_name, row_num)
@@ -1678,7 +1726,7 @@ def process_sheet_once(
         return
 
     if download_images:
-        print(f"'{sheet_name}' 시트: 이미지 저장 모드(M열 기준)로 처리합니다.")
+        print(f"'{sheet_name}' 시트: 이미지 저장 모드(N열 기준)로 처리합니다.")
         for idx, url in target_rows:
             print(f"[{sheet_name}] {idx}행 이미지 저장 중: {url}")
             existing_values_for_row = existing_rows_map.get(idx, {})
@@ -1708,7 +1756,7 @@ def process_sheet_once(
 
     shipping_table = read_shipping_table(service, sheet_name)
     if not shipping_table:
-        print(f"'{sheet_name}' 시트: 배송비 기준표(Y/Z/AA)를 읽지 못해 N열 배송비는 비워집니다.")
+        print(f"'{sheet_name}' 시트: 배송비 기준표(Y/Z/AA)를 읽지 못해 O열 배송비는 비워집니다.")
     for idx, url in target_rows:
         print(f"[{sheet_name}] {idx}행 처리 중: {url}")
         existing_values_for_row = existing_rows_map.get(idx, {})
@@ -1804,7 +1852,7 @@ def parse_args():
     parser.add_argument(
         "--download-images",
         action="store_true",
-        help="링크 기반 이미지를 로컬에 저장하고 M열(image_paths)을 채움",
+        help="링크 기반 이미지를 로컬에 저장하고 N열(image_paths)을 채움",
     )
     parser.add_argument(
         "--make-thumbnails",
@@ -2508,7 +2556,7 @@ def scrape_musinsa_product(
     download_images: bool = False,
     images_only: bool = False,
 ) -> dict:
-    """Selenium을 사용하여 무신사 상품 페이지에서 A~L 구조용 정보를 추출"""
+    """Selenium을 사용하여 무신사 상품 페이지에서 A~O 구조용 정보를 추출"""
     try:
         print(f"    페이지 로드 중... {url}")
         driver.get(url)
@@ -2542,6 +2590,7 @@ def scrape_musinsa_product(
                 'product_name_kr': product_name,
                 'color_kr': '',
                 'size': '',
+                'actual_size': '',
                 'price': '',
                 'buyma_price': '',
                 'musinsa_sku': existing_sku.strip() if existing_sku else '',
@@ -2582,6 +2631,7 @@ def scrape_musinsa_product(
         color_from_name = normalize_korean_color(extract_color_from_name(raw_product_name))
         color_from_api = extract_color_from_api(goods_options)
         size_text, color_from_size = extract_sizes_from_api(goods_no, goods_sale_type, opt_kind_cd)
+        actual_size_text = extract_actual_size_text(goods_no)
 
         # 실제 옵션 색상을 우선 반영한다. (size 파싱 > 옵션 API > 상품명)
         if color_from_size:
@@ -2666,6 +2716,7 @@ def scrape_musinsa_product(
             'product_name_kr': product_name,
             'color_kr': color_kr,
             'size': size_text,
+            'actual_size': actual_size_text,
             'price': price_text,
             'buyma_price': buyma_price_text,
             'musinsa_sku': musinsa_sku,
@@ -2683,6 +2734,7 @@ def scrape_musinsa_product(
             'product_name_kr': '상품명 미확인',
             'color_kr': 'none',
             'size': '',
+            'actual_size': '',
             'price': '가격 미확인',
             'buyma_price': '',
             'musinsa_sku': '',
