@@ -63,7 +63,7 @@ SHEET_NAME = "시트1"
 ROW_START = 2
 HEADER_ROW = 1
 PROGRESS_STATUS_HEADER = "진행상태"
-STATUS_UPLOAD_READY = "업로드진행대기"
+STATUS_UPLOAD_READY = "썸네일완료"
 STATUS_THUMBNAILS_DONE = "썸네일완료"
 STATUS_UPLOADING = "업로드중"
 STATUS_COMPLETED = "출품완료"
@@ -244,7 +244,7 @@ def read_upload_rows(service, sheet_name: str, specific_row: int = 0) -> List[Di
         if normalized_status in {STATUS_UPLOADING, "UPLOADING"}:
             continue
 
-        if status_index is not None and normalized_status not in {STATUS_UPLOAD_READY, STATUS_THUMBNAILS_DONE, "THUMBNAILS_DONE"}:
+        if status_index is not None and normalized_status not in {STATUS_UPLOAD_READY, STATUS_THUMBNAILS_DONE, "THUMBNAILS_DONE", "업로드진행대기"}:
             continue
 
         rows_data.append({

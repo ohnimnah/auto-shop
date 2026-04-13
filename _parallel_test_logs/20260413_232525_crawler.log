@@ -1,0 +1,6 @@
+데이터 폴더: C:\Users\gksal\AppData\Local\auto_shop
+자격증명 파일: C:\Users\gksal\AppData\Local\auto_shop\credentials.json
+Starting Musinsa data extraction
+ 시트 메타데이터 조회 실패: Error connecting to HTTP proxy 127.0.0.1:9: [WinError 10061] 대상 컴퓨터에서 연결을 거부했으므로 연결하지 못했습니다
+ GID 1698424449에 해당하는 시트 이름을 찾을 수 없습니다
+ GID 기반 시트 이름 찾기에 실패했습니다. 기본 시트 이름 '업로드정리(민호)자동화'을(를) 사용합니다.

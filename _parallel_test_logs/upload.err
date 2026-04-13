@@ -1,0 +1,157 @@
+http://127.0.0.1:9= : 'http://127.0.0.1:9=' ¿ë¾î°¡ cmdlet, ÇÔ¼ö, ½ºÅ©¸³Æ® ÆÄÀÏ ¶Ç´Â ½ÇÇàÇÒ ¼ö ÀÖ´Â ÇÁ·Î±×·¥ ÀÌ¸§À¸·Î ÀÎ
+½ÄµÇÁö ¾Ê½À´Ï´Ù. ÀÌ¸§ÀÌ Á¤È®ÇÑÁö È®ÀÎÇÏ°í °æ·Î°¡ Æ÷ÇÔµÈ °æ¿ì °æ·Î°¡ ¿Ã¹Ù¸¥Áö °ËÁõÇÑ ´ÙÀ½ ´Ù½Ã ½ÃµµÇÏ½Ê½Ã¿À.
+À§Ä¡ ÁÙ:1 ¹®ÀÚ:1
++ http://127.0.0.1:9=''; http://127.0.0.1:9=''; http://127.0.0.1:9='';  ...
++ ~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : ObjectNotFound: (http://127.0.0.1:9=:String) [], CommandNotFoundException
+    + FullyQualifiedErrorId : CommandNotFoundException
+ 
+http://127.0.0.1:9= : 'http://127.0.0.1:9=' ¿ë¾î°¡ cmdlet, ÇÔ¼ö, ½ºÅ©¸³Æ® ÆÄÀÏ ¶Ç´Â ½ÇÇàÇÒ ¼ö ÀÖ´Â ÇÁ·Î±×·¥ ÀÌ¸§À¸·Î ÀÎ
+½ÄµÇÁö ¾Ê½À´Ï´Ù. ÀÌ¸§ÀÌ Á¤È®ÇÑÁö È®ÀÎÇÏ°í °æ·Î°¡ Æ÷ÇÔµÈ °æ¿ì °æ·Î°¡ ¿Ã¹Ù¸¥Áö °ËÁõÇÑ ´ÙÀ½ ´Ù½Ã ½ÃµµÇÏ½Ê½Ã¿À.
+À§Ä¡ ÁÙ:1 ¹®ÀÚ:24
++ http://127.0.0.1:9=''; http://127.0.0.1:9=''; http://127.0.0.1:9='';  ...
++                        ~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : ObjectNotFound: (http://127.0.0.1:9=:String) [], CommandNotFoundException
+    + FullyQualifiedErrorId : CommandNotFoundException
+ 
+http://127.0.0.1:9= : 'http://127.0.0.1:9=' ¿ë¾î°¡ cmdlet, ÇÔ¼ö, ½ºÅ©¸³Æ® ÆÄÀÏ ¶Ç´Â ½ÇÇàÇÒ ¼ö ÀÖ´Â ÇÁ·Î±×·¥ ÀÌ¸§À¸·Î ÀÎ
+½ÄµÇÁö ¾Ê½À´Ï´Ù. ÀÌ¸§ÀÌ Á¤È®ÇÑÁö È®ÀÎÇÏ°í °æ·Î°¡ Æ÷ÇÔµÈ °æ¿ì °æ·Î°¡ ¿Ã¹Ù¸¥Áö °ËÁõÇÑ ´ÙÀ½ ´Ù½Ã ½ÃµµÇÏ½Ê½Ã¿À.
+À§Ä¡ ÁÙ:1 ¹®ÀÚ:47
++ ... /127.0.0.1:9=''; http://127.0.0.1:9=''; http://127.0.0.1:9=''; http:/ ...
++                                             ~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : ObjectNotFound: (http://127.0.0.1:9=:String) [], CommandNotFoundException
+    + FullyQualifiedErrorId : CommandNotFoundException
+ 
+http://127.0.0.1:9= : 'http://127.0.0.1:9=' ¿ë¾î°¡ cmdlet, ÇÔ¼ö, ½ºÅ©¸³Æ® ÆÄÀÏ ¶Ç´Â ½ÇÇàÇÒ ¼ö ÀÖ´Â ÇÁ·Î±×·¥ ÀÌ¸§À¸·Î ÀÎ
+½ÄµÇÁö ¾Ê½À´Ï´Ù. ÀÌ¸§ÀÌ Á¤È®ÇÑÁö È®ÀÎÇÏ°í °æ·Î°¡ Æ÷ÇÔµÈ °æ¿ì °æ·Î°¡ ¿Ã¹Ù¸¥Áö °ËÁõÇÑ ´ÙÀ½ ´Ù½Ã ½ÃµµÇÏ½Ê½Ã¿À.
+À§Ä¡ ÁÙ:1 ¹®ÀÚ:70
++ ... /127.0.0.1:9=''; http://127.0.0.1:9=''; http://127.0.0.1:9=''; http:/ ...
++                                             ~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : ObjectNotFound: (http://127.0.0.1:9=:String) [], CommandNotFoundException
+    + FullyQualifiedErrorId : CommandNotFoundException
+ 
+http://127.0.0.1:9= : 'http://127.0.0.1:9=' ¿ë¾î°¡ cmdlet, ÇÔ¼ö, ½ºÅ©¸³Æ® ÆÄÀÏ ¶Ç´Â ½ÇÇàÇÒ ¼ö ÀÖ´Â ÇÁ·Î±×·¥ ÀÌ¸§À¸·Î ÀÎ
+½ÄµÇÁö ¾Ê½À´Ï´Ù. ÀÌ¸§ÀÌ Á¤È®ÇÑÁö È®ÀÎÇÏ°í °æ·Î°¡ Æ÷ÇÔµÈ °æ¿ì °æ·Î°¡ ¿Ã¹Ù¸¥Áö °ËÁõÇÑ ´ÙÀ½ ´Ù½Ã ½ÃµµÇÏ½Ê½Ã¿À.
+À§Ä¡ ÁÙ:1 ¹®ÀÚ:93
++ ... /127.0.0.1:9=''; http://127.0.0.1:9=''; http://127.0.0.1:9=''; http:/ ...
++                                             ~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : ObjectNotFound: (http://127.0.0.1:9=:String) [], CommandNotFoundException
+    + FullyQualifiedErrorId : CommandNotFoundException
+ 
+http://127.0.0.1:9= : 'http://127.0.0.1:9=' ¿ë¾î°¡ cmdlet, ÇÔ¼ö, ½ºÅ©¸³Æ® ÆÄÀÏ ¶Ç´Â ½ÇÇàÇÒ ¼ö ÀÖ´Â ÇÁ·Î±×·¥ ÀÌ¸§À¸·Î ÀÎ
+½ÄµÇÁö ¾Ê½À´Ï´Ù. ÀÌ¸§ÀÌ Á¤È®ÇÑÁö È®ÀÎÇÏ°í °æ·Î°¡ Æ÷ÇÔµÈ °æ¿ì °æ·Î°¡ ¿Ã¹Ù¸¥Áö °ËÁõÇÑ ´ÙÀ½ ´Ù½Ã ½ÃµµÇÏ½Ê½Ã¿À.
+À§Ä¡ ÁÙ:1 ¹®ÀÚ:116
++ ... /127.0.0.1:9=''; http://127.0.0.1:9=''; http://127.0.0.1:9=''; python ...
++                                             ~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : ObjectNotFound: (http://127.0.0.1:9=:String) [], CommandNotFoundException
+    + FullyQualifiedErrorId : CommandNotFoundException
+ 
+C:\Users\gksal\iCloudDrive\°³¹ß\auto_shop\buyma_upload.py:2761: SyntaxWarning: "\s" is an invalid escape sequence. Such sequences will not work in the future. Did you mean "\\s"? A raw string is also an option.
+  return (t || '').replace(/\s+/g, ' ').trim();
+C:\Users\gksal\iCloudDrive\°³¹ß\auto_shop\buyma_upload.py:2849: SyntaxWarning: "\s" is an invalid escape sequence. Such sequences will not work in the future. Did you mean "\\s"? A raw string is also an option.
+  var txt = (cur.textContent || '').replace(/\s+/g, ' ').trim();
+C:\Users\gksal\iCloudDrive\°³¹ß\auto_shop\buyma_upload.py:3004: SyntaxWarning: "\s" is an invalid escape sequence. Such sequences will not work in the future. Did you mean "\\s"? A raw string is also an option.
+  var txt = (cur.textContent || '').replace(/\s+/g, ' ').trim();
+Traceback (most recent call last):
+  File "C:\Users\gksal\AppData\Local\Python\pythoncore-3.14-64\Lib\site-packages\socks.py", line 787, in connect
+    super(socksocket, self).connect(proxy_addr)
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^
+ConnectionRefusedError: [WinError 10061] ëŒ€ìƒ ì»´í“¨í„°ì—ì„œ ì—°ê²°ì„ ê±°ë¶€í–ˆìœ¼ë¯€ë¡œ ì—°ê²°í•˜ì§€ ëª»í–ˆìŠµë‹ˆë‹¤
+
+During handling of the above exception, another exception occurred:
+
+Traceback (most recent call last):
+  File "C:\Users\gksal\iCloudDrive\ê°œë°œ\auto_shop\buyma_upload.py", line 3208, in <module>
+    main()
+    ~~~~^^
+  File "C:\Users\gksal\iCloudDrive\ê°œë°œ\auto_shop\buyma_upload.py", line 3200, in main
+    upload_products(specific_row=args.row, upload_mode=args.mode, max_items=1)
+    ~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\gksal\iCloudDrive\ê°œë°œ\auto_shop\buyma_upload.py", line 3101, in upload_products
+    sheet_name = get_sheet_name(service)
+  File "C:\Users\gksal\iCloudDrive\ê°œë°œ\auto_shop\buyma_upload.py", line 193, in get_sheet_name
+    meta = service.spreadsheets().get(spreadsheetId=SPREADSHEET_ID).execute()
+  File "C:\Users\gksal\AppData\Local\Python\pythoncore-3.14-64\Lib\site-packages\googleapiclient\_helpers.py", line 130, in positional_wrapper
+    return wrapped(*args, **kwargs)
+  File "C:\Users\gksal\AppData\Local\Python\pythoncore-3.14-64\Lib\site-packages\googleapiclient\http.py", line 923, in execute
+    resp, content = _retry_request(
+                    ~~~~~~~~~~~~~~^
+        http,
+        ^^^^^
+    ...<7 lines>...
+        headers=self.headers,
+        ^^^^^^^^^^^^^^^^^^^^^
+    )
+    ^
+  File "C:\Users\gksal\AppData\Local\Python\pythoncore-3.14-64\Lib\site-packages\googleapiclient\http.py", line 191, in _retry_request
+    resp, content = http.request(uri, method, *args, **kwargs)
+                    ~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\gksal\AppData\Local\Python\pythoncore-3.14-64\Lib\site-packages\google_auth_httplib2.py", line 207, in request
+    self.credentials.before_request(self._request, method, uri, request_headers)
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\gksal\AppData\Local\Python\pythoncore-3.14-64\Lib\site-packages\google\auth\credentials.py", line 230, in before_request
+    self._blocking_refresh(request)
+    ~~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^
+  File "C:\Users\gksal\AppData\Local\Python\pythoncore-3.14-64\Lib\site-packages\google\auth\credentials.py", line 193, in _blocking_refresh
+    self.refresh(request)
+    ~~~~~~~~~~~~^^^^^^^^^
+  File "C:\Users\gksal\AppData\Local\Python\pythoncore-3.14-64\Lib\site-packages\google\auth\credentials.py", line 367, in refresh
+    self._perform_refresh_token(request)
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^
+  File "C:\Users\gksal\AppData\Local\Python\pythoncore-3.14-64\Lib\site-packages\google\oauth2\service_account.py", line 457, in _perform_refresh_token
+    access_token, expiry, _ = _client.jwt_grant(
+                              ~~~~~~~~~~~~~~~~~^
+        request, self._token_uri, assertion
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    )
+    ^
+  File "C:\Users\gksal\AppData\Local\Python\pythoncore-3.14-64\Lib\site-packages\google\oauth2\_client.py", line 303, in jwt_grant
+    response_data = _token_endpoint_request(
+        request,
+    ...<5 lines>...
+        },
+    )
+  File "C:\Users\gksal\AppData\Local\Python\pythoncore-3.14-64\Lib\site-packages\google\oauth2\_client.py", line 263, in _token_endpoint_request
+    ) = _token_endpoint_request_no_throw(
+        ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^
+        request,
+        ^^^^^^^^
+    ...<6 lines>...
+        **kwargs
+        ^^^^^^^^
+    )
+    ^
+  File "C:\Users\gksal\AppData\Local\Python\pythoncore-3.14-64\Lib\site-packages\google\oauth2\_client.py", line 192, in _token_endpoint_request_no_throw
+    response = request(
+        method="POST", url=token_uri, headers=headers_to_use, body=body, **kwargs
+    )
+  File "C:\Users\gksal\AppData\Local\Python\pythoncore-3.14-64\Lib\site-packages\google_auth_httplib2.py", line 117, in __call__
+    response, data = self.http.request(
+                     ~~~~~~~~~~~~~~~~~^
+        url, method=method, body=body, headers=headers, **kwargs
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    )
+    ^
+  File "C:\Users\gksal\AppData\Local\Python\pythoncore-3.14-64\Lib\site-packages\httplib2\__init__.py", line 1727, in request
+    (response, content) = self._request(
+                          ~~~~~~~~~~~~~^
+        conn, authority, uri, request_uri, method, body, headers, redirections, cachekey,
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    )
+    ^
+  File "C:\Users\gksal\AppData\Local\Python\pythoncore-3.14-64\Lib\site-packages\httplib2\__init__.py", line 1447, in _request
+    (response, content) = self._conn_request(conn, request_uri, method, body, headers)
+                          ~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\gksal\AppData\Local\Python\pythoncore-3.14-64\Lib\site-packages\httplib2\__init__.py", line 1369, in _conn_request
+    conn.connect()
+    ~~~~~~~~~~~~^^
+  File "C:\Users\gksal\AppData\Local\Python\pythoncore-3.14-64\Lib\site-packages\httplib2\__init__.py", line 1205, in connect
+    raise socket_err
+  File "C:\Users\gksal\AppData\Local\Python\pythoncore-3.14-64\Lib\site-packages\httplib2\__init__.py", line 1159, in connect
+    sock.connect((self.host, self.port))
+    ~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\gksal\AppData\Local\Python\pythoncore-3.14-64\Lib\site-packages\socks.py", line 47, in wrapper
+    return function(*args, **kwargs)
+  File "C:\Users\gksal\AppData\Local\Python\pythoncore-3.14-64\Lib\site-packages\socks.py", line 800, in connect
+    raise ProxyConnectionError(msg, error)
+socks.ProxyConnectionError: Error connecting to HTTP proxy 127.0.0.1:9: [WinError 10061] ëŒ€ìƒ ì»´í“¨í„°ì—ì„œ ì—°ê²°ì„ ê±°ë¶€í–ˆìœ¼ë¯€ë¡œ ì—°ê²°í•˜ì§€ ëª»í–ˆìŠµë‹ˆë‹¤

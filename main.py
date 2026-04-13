@@ -49,6 +49,7 @@ MARGIN_RATE_HEADER = "마진률"
 PROGRESS_STATUS_HEADER = "진행상태"
 MARGIN_THRESHOLD_PERCENT = 9.0
 STATUS_HOLD = "보류"
+# 레거시 호환용 상태 (읽기 전용)
 STATUS_WAITING = "대기"
 STATUS_IMAGE_READY = "이미지진행대기"
 STATUS_THUMBNAIL_READY = "썸네일진행대기"
@@ -402,26 +403,25 @@ def parse_margin_rate(value: str) -> float | None:
 
 def determine_progress_status(margin_rate: float | None) -> str:
     """마진률 기준으로 다음 진행상태를 계산한다."""
-    if margin_rate is None:
-        return STATUS_WAITING
-    if margin_rate < MARGIN_THRESHOLD_PERCENT:
+    if margin_rate is not None and margin_rate < MARGIN_THRESHOLD_PERCENT:
         return STATUS_HOLD
-    return STATUS_IMAGE_READY
+    return STATUS_CRAWLED
 
 
 def is_crawler_ready_status(status: str) -> bool:
     normalized = (status or "").strip()
-    return normalized in {"", STATUS_WAITING, STATUS_HOLD, STATUS_NEW, "NEW"}
+    # 신규만 정찰 대상으로 삼되, 기존 데이터 호환을 위해 일부 레거시 값을 허용
+    return normalized in {"", STATUS_WAITING, STATUS_NEW, "NEW"}
 
 
 def is_image_ready_status(status: str) -> bool:
     normalized = (status or "").strip()
-    return normalized in {STATUS_IMAGE_READY, STATUS_CRAWLED, "CRAWLED"}
+    return normalized in {STATUS_CRAWLED, "CRAWLED", STATUS_IMAGE_READY}
 
 
 def is_thumbnail_ready_status(status: str) -> bool:
     normalized = (status or "").strip()
-    return normalized in {STATUS_THUMBNAIL_READY, STATUS_IMAGES_SAVED, "IMAGES_SAVED"}
+    return normalized in {STATUS_IMAGES_SAVED, "IMAGES_SAVED", STATUS_THUMBNAIL_READY}
 
 
 def resolve_image_folder_from_paths(image_paths: str) -> str:
