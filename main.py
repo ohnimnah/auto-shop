@@ -2446,6 +2446,60 @@ def extract_musinsa_categories(soup: BeautifulSoup, mss_state: Dict[str, object]
     return cats[0], cats[1], cats[2]
 
 
+def _normalize_gender_label(raw_value: str) -> str:
+    value = (raw_value or "").strip().lower()
+    if not value:
+        return ""
+
+    male_tokens = ("남", "남성", "male", "man", "men", "mens", "m")
+    female_tokens = ("여", "여성", "female", "woman", "women", "womens", "w")
+
+    if value in male_tokens:
+        return "남성"
+    if value in female_tokens:
+        return "여성"
+    if any(t in value for t in ("남성", "male", "mens", " men")):
+        return "남성"
+    if any(t in value for t in ("여성", "female", "womens", " women")):
+        return "여성"
+    if value.startswith("m_") or value.endswith("_m"):
+        return "남성"
+    if value.startswith("w_") or value.endswith("_w"):
+        return "여성"
+    return ""
+
+
+def extract_musinsa_gender_large(
+    mss_state: Dict[str, object],
+    cat_large: str = "",
+    cat_middle: str = "",
+    cat_small: str = "",
+) -> str:
+    """무신사 상태값/카테고리 텍스트에서 성별 대분류(남성/여성)를 추출한다."""
+    keys = (
+        "sex", "gender", "goodsSex", "goodsGender", "targetSex", "targetGender",
+        "displaySex", "sexCd", "genderCd", "sexCode", "genderCode",
+    )
+
+    values: List[str] = []
+    for k in keys:
+        values.append(str(mss_state.get(k, "")).strip())
+
+    for container_key in ("category", "categoryInfo", "itemCategory", "displayCategory", "goods"):
+        container = mss_state.get(container_key)
+        if not isinstance(container, dict):
+            continue
+        for k in keys:
+            values.append(str(container.get(k, "")).strip())
+
+    values.extend([cat_large, cat_middle, cat_small])
+    for v in values:
+        label = _normalize_gender_label(v)
+        if label:
+            return label
+    return ""
+
+
 def scrape_musinsa_product(
     driver,
     url: str,
@@ -2585,6 +2639,15 @@ def scrape_musinsa_product(
             image_paths = download_thumbnail_images(image_urls, image_folder_name)
         buyma_price_text = fetch_buyma_lowest_price(driver, product_name, brand, musinsa_sku)
         cat_large, cat_middle, cat_small = extract_musinsa_categories(soup, mss_state)
+        gender_large = extract_musinsa_gender_large(mss_state, cat_large, cat_middle, cat_small)
+        if gender_large:
+            orig_large, orig_middle, orig_small = cat_large, cat_middle, cat_small
+            cat_large = gender_large
+            # 성별이 대분류로 올라가면, 소분류가 비어있는 경우에만
+            # 기존 (대, 중)을 (중, 소)로 한 칸씩 이동한다.
+            if not (orig_small or "").strip():
+                cat_middle = orig_large
+                cat_small = orig_middle
         if cat_large or cat_middle or cat_small:
             print(f"    무신사 카테고리 추출: 대='{cat_large}' / 중='{cat_middle}' / 소='{cat_small}'")
         else:
