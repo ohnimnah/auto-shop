@@ -2569,7 +2569,7 @@ def _finalize_buyma_listing(driver, row_num: int) -> bool:
         return False
 
 
-def _handle_success_after_fill(driver, row_num: int, upload_mode: str) -> Tuple[bool, bool]:
+def _handle_success_after_fill(driver, row_num: int, upload_mode: str, interactive: bool = True) -> Tuple[bool, bool]:
     """폼 입력 완료 후 review/auto 모드에 따라 다음 동작을 처리한다."""
     print(f"\n  폼 입력이 완료되었습니다.")
 
@@ -2577,13 +2577,19 @@ def _handle_success_after_fill(driver, row_num: int, upload_mode: str) -> Tuple[
         print("  오류가 없어 자동 제출을 진행합니다.")
         if not _submit_buyma_listing(driver, row_num):
             print("  브라우저에서 직접 출품해주세요.")
-            _safe_input("  출품 후 Enter를 눌러주세요..")
+            if interactive:
+                _safe_input("  출품 후 Enter를 눌러주세요..")
             return True, False
         if not _finalize_buyma_listing(driver, row_num):
             print("  확인 페이지에서 직접 최종 출품해주세요.")
-            _safe_input("  최종 출품 후 Enter를 눌러주세요..")
+            if interactive:
+                _safe_input("  최종 출품 후 Enter를 눌러주세요..")
             return True, False
         return True, True
+
+    if not interactive:
+        print("  감시 모드(review)에서는 제출 대기 없이 다음 점검으로 진행합니다.")
+        return True, False
 
     print("  확인용 모드입니다. 브라우저에서 내용을 검토한 뒤 선택해주세요.\n")
     while True:
@@ -3833,7 +3839,7 @@ def fill_buyma_form(driver, row_data: Dict[str, str]) -> str:
         return "error"
 
 
-def upload_products(specific_row: int = 0, upload_mode: str = 'auto', max_items: int = 0):
+def upload_products(specific_row: int = 0, upload_mode: str = 'auto', max_items: int = 0, interactive: bool = True):
     """메인 업로드 루프: 시트 읽기 → 로그 → 각 행별 입력 자동화 엔트리"""
     print("바이마 출품 자동화 시작합니다\n")
     print(f"업로드 모드: {upload_mode}\n")
@@ -3880,7 +3886,9 @@ def upload_products(specific_row: int = 0, upload_mode: str = 'auto', max_items:
             fill_result = fill_buyma_form(driver, row_data)
 
             if fill_result == "success":
-                should_continue, fully_submitted = _handle_success_after_fill(driver, row_num, upload_mode)
+                should_continue, fully_submitted = _handle_success_after_fill(
+                    driver, row_num, upload_mode, interactive=interactive
+                )
                 if not should_continue:
                     return
                 if fully_submitted:
@@ -3892,13 +3900,15 @@ def upload_products(specific_row: int = 0, upload_mode: str = 'auto', max_items:
             elif fill_result == "manual_review":
                 print(f"  {row_num}행은 상품명 등 수동 확인이 필요합니다. 현재 브라우저 화면을 확인해주세요.")
                 keep_browser_open = True
-                _safe_input("  수정 또는 확인 후 Enter를 눌러주세요..")
+                if interactive:
+                    _safe_input("  수정 또는 확인 후 Enter를 눌러주세요..")
                 return
             else:
                 print(f"  {row_num}행 상품입력 실패. 건너뜁니다")
                 if update_cell_by_header(service, sheet_name, row_num, header_map, PROGRESS_STATUS_HEADER, "오류"):
                     print(f"  {row_num}행 상태 업데이트: 오류")
-                _safe_input("  Enter를 눌러 다음으로 진행...")
+                if interactive:
+                    _safe_input("  Enter를 눌러 다음으로 진행...")
 
         print(f"\n모든 상품 처리 완료! ({len(rows)}건)")
 
@@ -3906,7 +3916,8 @@ def upload_products(specific_row: int = 0, upload_mode: str = 'auto', max_items:
         if keep_browser_open:
             print("\n브라우저를 열어둔 상태로 유지합니다. 확인 후 직접 닫아주세요.")
         else:
-            _safe_input("\n브라우저를 모두 닫으면 Enter를 눌러주세요...")
+            if interactive:
+                _safe_input("\n브라우저를 모두 닫으면 Enter를 눌러주세요...")
             driver.quit()
             print("브라우저가 종료되었습니다.")
 
@@ -3942,11 +3953,11 @@ def main():
             if args.row:
                 print(f"감시 모드에서는 --row({args.row})를 고정하지 않고 전체 대기 행을 순차 처리합니다.")
             while True:
-                upload_products(specific_row=watch_row, upload_mode=args.mode, max_items=1)
+                upload_products(specific_row=watch_row, upload_mode=args.mode, max_items=1, interactive=False)
                 print(f"다음 업로드 점검까지 {interval}초 대기...")
                 time.sleep(interval)
         else:
-            upload_products(specific_row=args.row, upload_mode=args.mode)
+            upload_products(specific_row=args.row, upload_mode=args.mode, interactive=True)
 
 
 if __name__ == "__main__":

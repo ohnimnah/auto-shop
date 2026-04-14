@@ -24,10 +24,10 @@ def setup_spreadsheet_id():
     sheets_id = input("Google Sheets ID를 입력하세요: ").strip()
     
     if not sheets_id or len(sheets_id) < 20:
-        print("❌ 유효하지 않은 ID입니다")
+        print("[오류] 유효하지 않은 ID입니다")
         return None
     
-    print(f"✅ ID 저장: {sheets_id[:20]}...")
+    print(f"[완료] ID 저장: {sheets_id[:20]}...")
     return sheets_id
 
 def setup_sheet_name():
@@ -41,7 +41,7 @@ def setup_sheet_name():
     if not sheet_name:
         sheet_name = "시트1"
     
-    print(f"✅ 시트 이름: {sheet_name}")
+    print(f"[완료] 시트 이름: {sheet_name}")
     return sheet_name
 
 def check_credentials():
@@ -51,11 +51,11 @@ def check_credentials():
     print("="*60)
     
     if os.path.exists('credentials.json'):
-        print("✅ credentials.json 파일 찾음")
+        print("[완료] credentials.json 파일 찾음")
         return True
     else:
         print("""
-❌ credentials.json 파일을 찾을 수 없습니다
+[오류] credentials.json 파일을 찾을 수 없습니다
 
 다음 단계를 따라주세요:
 
@@ -105,11 +105,11 @@ def update_main_py(sheets_id, sheet_name):
         with open('main.py', 'w', encoding='utf-8') as f:
             f.write(content)
         
-        print("✅ main.py 파일 업데이트 완료")
+        print("[완료] main.py 파일 업데이트 완료")
         return True
     
     except Exception as e:
-        print(f"❌ 파일 업데이트 실패: {e}")
+        print(f"[오류] 파일 업데이트 실패: {e}")
         return False
 
 def test_connection():
@@ -140,23 +140,23 @@ def test_connection():
             result = service.spreadsheets().get(
                 spreadsheetId=sheets_id
             ).execute()
-            print(f"✅ Google Sheets 연결 성공!")
+            print(f"[완료] Google Sheets 연결 성공!")
             print(f"   시트 이름: {result['properties']['title']}")
             return True
         else:
-            print("⚠️ SPREADSHEET_ID가 설정되지 않았습니다")
+            print("[경고] SPREADSHEET_ID가 설정되지 않았습니다")
             return False
     
     except Exception as e:
-        print(f"❌ 연결 실패: {e}")
+        print(f"[오류] 연결 실패: {e}")
         return False
 
 def main():
     """메인 설정 함수"""
     print("""
-╔════════════════════════════════════════════════════════════╗
-║     무신사 자동화 스크립트 - 초기 설정 도구              ║
-╚════════════════════════════════════════════════════════════╝
+============================================================
+무신사 자동화 스크립트 - 초기 설정 도구
+============================================================
     """)
     
     # 1. credentials.json 확인
@@ -179,9 +179,9 @@ def main():
     print("\n잠시 기다리세요...")
     if test_connection():
         print("""
-╔════════════════════════════════════════════════════════════╗
-║                  ✅ 설정 완료!                             ║
-╚════════════════════════════════════════════════════════════╝
+============================================================
+[완료] 설정 완료!
+============================================================
 
 다음 단계:
 
@@ -194,13 +194,13 @@ def main():
 
 3. 자동으로 상품 정보가 입력됩니다!
 
-💡 팁:
+팁:
    - 처음에는 몇 개 URL로 테스트해보세요
    - 너무 많은 URL은 시간이 걸릴 수 있습니다
    - 문제가 있으면 README.md 파일을 참고하세요
         """)
     else:
-        print("⚠️ 설정을 다시 확인해주세요")
+        print("[경고] 설정을 다시 확인해주세요")
 
 if __name__ == "__main__":
     main()
