@@ -18,6 +18,7 @@ import os
 import re
 import sys
 import tempfile
+import unicodedata
 
 # Windows cp949 환경에서 유니코드 출력 오류 방지
 if sys.stdout.encoding and sys.stdout.encoding.lower().replace("-", "") in ("cp949", "euckr"):
@@ -2575,14 +2576,16 @@ def _detect_title_input_issue(name_input, intended_title: str) -> str:
         validation_message = (name_input.get_attribute('validationMessage') or '').strip()
 
         maxlength = int(maxlength_raw) if maxlength_raw.isdigit() else 0
-        if maxlength and len(intended_title) > maxlength:
-            return f"상품명 길이 초과: {len(intended_title)}자 / 제한 {maxlength}자"
+        intended_units = _buyma_title_units(intended_title)
+        actual_units = _buyma_title_units(actual_value)
+        if maxlength and intended_units > maxlength:
+            return f"상품명 길이 초과: {intended_units}유닛 / 제한 {maxlength}유닛"
 
         if actual_value != intended_title:
             if validation_message:
                 return f"상품명 입력 제한: {validation_message}"
-            if len(actual_value) < len(intended_title):
-                return f"상품명 입력값이 잘렸습니다: 입력 {len(intended_title)}자 / 반영 {len(actual_value)}자"
+            if actual_units < intended_units:
+                return f"상품명 입력값이 잘렸습니다: 입력 {intended_units}유닛 / 반영 {actual_units}유닛"
             return "상품명 입력값이 요청값과 다릅니다"
 
         if validation_message:
@@ -2598,11 +2601,39 @@ def _normalize_buyma_title_text(text: str) -> str:
 
 def _truncate_buyma_title_text(text: str, limit: int) -> str:
     text = _normalize_buyma_title_text(text)
-    if limit <= 0 or len(text) <= limit:
+    if limit <= 0 or _buyma_title_units(text) <= limit:
         return text
     if limit <= 3:
-        return text[:limit]
-    return text[: limit - 3].rstrip() + "..."
+        return _slice_buyma_title_by_units(text, limit)
+
+    ellipsis = "..."
+    ellipsis_units = _buyma_title_units(ellipsis)
+    body_limit = max(0, limit - ellipsis_units)
+    body = _slice_buyma_title_by_units(text, body_limit).rstrip()
+    return body + ellipsis
+
+
+def _buyma_char_units(ch: str) -> int:
+    # BUYMA rule of thumb: full-width=2, half-width=1
+    return 2 if unicodedata.east_asian_width(ch) in {"F", "W", "A"} else 1
+
+
+def _buyma_title_units(text: str) -> int:
+    return sum(_buyma_char_units(ch) for ch in (text or ""))
+
+
+def _slice_buyma_title_by_units(text: str, limit_units: int) -> str:
+    if limit_units <= 0:
+        return ""
+    out: List[str] = []
+    used = 0
+    for ch in text:
+        u = _buyma_char_units(ch)
+        if used + u > limit_units:
+            break
+        out.append(ch)
+        used += u
+    return "".join(out)
 
 
 def _build_buyma_product_title(brand_en: str, name_en: str, color_en: str, max_length: int = 0) -> str:
@@ -2646,7 +2677,7 @@ def _build_buyma_product_title(brand_en: str, name_en: str, color_en: str, max_l
 
     if max_length > 0:
         for candidate in unique_candidates:
-            if len(candidate) <= max_length:
+            if _buyma_title_units(candidate) <= max_length:
                 return candidate
 
         if name_en:
@@ -2654,6 +2685,66 @@ def _build_buyma_product_title(brand_en: str, name_en: str, color_en: str, max_l
         return _truncate_buyma_title_text(unique_candidates[0] if unique_candidates else "", max_length)
 
     return unique_candidates[0] if unique_candidates else ""
+
+
+def _set_text_input_value(driver, input_el, text: str) -> None:
+    """텍스트 입력칸 값을 최대한 안정적으로 덮어쓴다."""
+    target = text or ""
+    _scroll_and_click(driver, input_el)
+    try:
+        input_el.clear()
+    except Exception:
+        pass
+    try:
+        input_el.send_keys(Keys.CONTROL, "a")
+        input_el.send_keys(Keys.BACKSPACE)
+    except Exception:
+        pass
+    input_el.send_keys(target)
+
+
+def _build_buyma_title_retry_candidates(brand_en: str, name_en: str, color_en: str, max_length: int) -> List[str]:
+    """길이/검증 실패 시 재시도할 제목 후보를 요청 순서대로 생성한다.
+    순서: [브랜드] 이름 색상 -> [브랜드] 이름 -> 이름 -> 이름 truncation
+    """
+    brand = _normalize_buyma_title_text(brand_en)
+    name = _normalize_buyma_title_text(name_en)
+    color = _normalize_buyma_title_text(color_en)
+
+    def _fit(text: str) -> str:
+        text = _normalize_buyma_title_text(text)
+        if not text:
+            return ""
+        if max_length > 0 and _buyma_title_units(text) > max_length:
+            return _truncate_buyma_title_text(text, max_length)
+        return text
+
+    candidates: List[str] = []
+    # 1) [브랜드] 이름 색상
+    candidates.append(_fit(" ".join([p for p in [f"[{brand}]" if brand else "", name, color] if p])))
+    # 2) [브랜드] 이름
+    candidates.append(_fit(" ".join([p for p in [f"[{brand}]" if brand else "", name] if p])))
+    # 3) 이름
+    candidates.append(_fit(name))
+
+    # hard fallback: 강제 자르기
+    base_name = name
+    if max_length > 0:
+        candidates.append(_truncate_buyma_title_text(base_name, max_length))
+        candidates.append(_truncate_buyma_title_text(base_name, max(10, max_length - 3)))
+        candidates.append(_truncate_buyma_title_text(base_name, max(8, max_length - 6)))
+    else:
+        candidates.append(_truncate_buyma_title_text(base_name, 60))
+        candidates.append(_truncate_buyma_title_text(base_name, 45))
+
+    uniq: List[str] = []
+    seen = set()
+    for c in candidates:
+        c = _normalize_buyma_title_text(c)
+        if c and c not in seen:
+            seen.add(c)
+            uniq.append(c)
+    return uniq
 
 
 def fill_buyma_form(driver, row_data: Dict[str, str]) -> str:
@@ -2763,13 +2854,25 @@ def fill_buyma_form(driver, row_data: Dict[str, str]) -> str:
             if name_fields:
                 maxlength_raw = (name_fields[0].get_attribute('maxlength') or '').strip()
                 title_limit = int(maxlength_raw) if maxlength_raw.isdigit() else 0
-                product_title = _build_buyma_product_title(brand_en, name_en, color_en, title_limit)
-                name_fields[0].clear()
-                name_fields[0].send_keys(product_title)
-                print(f"  ✓ 상품명 입력: {product_title}")
-                title_issue = _detect_title_input_issue(name_fields[0], product_title)
-                if title_issue:
-                    print(f"  ! 상품명 수동 확인 필요: {title_issue}")
+                title_candidates = _build_buyma_title_retry_candidates(brand_en, name_en, color_en, title_limit)
+                title_ok = False
+                last_issue = ""
+                final_title = ""
+                for idx, candidate in enumerate(title_candidates, start=1):
+                    _set_text_input_value(driver, name_fields[0], candidate)
+                    _sleep(0.1)
+                    issue = _detect_title_input_issue(name_fields[0], candidate)
+                    if not issue:
+                        title_ok = True
+                        final_title = candidate
+                        break
+                    last_issue = issue
+                    print(f"  △ 상품명 재시도 {idx}/{len(title_candidates)} 실패: {issue} -> '{candidate}'")
+
+                if title_ok:
+                    print(f"  ✓ 상품명 입력: {final_title}")
+                else:
+                    print(f"  ! 상품명 수동 확인 필요: {last_issue or '알 수 없는 제목 입력 오류'}")
                     return "manual_review"
             else:
                 print(f"  △ 상품명 입력란을 찾을 수 없습니다")
@@ -3757,8 +3860,11 @@ def main():
         if args.watch:
             interval = max(5, int(args.interval))
             print(f"업로드 워커 감시 시작: {interval}초 간격")
+            watch_row = 0
+            if args.row:
+                print(f"감시 모드에서는 --row({args.row})를 고정하지 않고 전체 대기 행을 순차 처리합니다.")
             while True:
-                upload_products(specific_row=args.row, upload_mode=args.mode, max_items=1)
+                upload_products(specific_row=watch_row, upload_mode=args.mode, max_items=1)
                 print(f"다음 업로드 점검까지 {interval}초 대기...")
                 time.sleep(interval)
         else:
