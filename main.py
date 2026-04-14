@@ -771,6 +771,9 @@ def extract_actual_size_text(goods_no: str) -> str:
         size_name = str(row.get("name", "")).strip()
         values = row.get("values")
         if not isinstance(values, list) or not values:
+            # Some Musinsa responses use "items" instead of "values"
+            values = row.get("items")
+        if not isinstance(values, list) or not values:
             continue
 
         parts: List[str] = []
@@ -778,7 +781,11 @@ def extract_actual_size_text(goods_no: str) -> str:
             if not isinstance(item, dict):
                 continue
             measure_name = str(item.get("name", "")).strip()
-            measure_value = str(item.get("value", "")).strip()
+            raw_value = item.get("value", "")
+            if isinstance(raw_value, (int, float)):
+                measure_value = f"{raw_value:g}"
+            else:
+                measure_value = str(raw_value).strip()
             if not measure_name or not measure_value:
                 continue
             parts.append(f"{measure_name} {measure_value}")

@@ -173,7 +173,9 @@ BUYMA_COMMENT_TEMPLATE = """
 COL = {
     'A': 0, 'B': 1, 'C': 2, 'D': 3, 'E': 4, 'F': 5,
     'G': 6, 'H': 7, 'I': 8, 'J': 9, 'K': 10, 'L': 11,
-    'M': 12, 'N': 13, 'O': 14,
+    'M': 12, 'N': 13, 'O': 14, 'P': 15, 'Q': 16, 'R': 17,
+    'S': 18, 'T': 19, 'U': 20, 'V': 21, 'W': 22, 'X': 23,
+    'Y': 24, 'Z': 25,
 }
 
 
@@ -212,7 +214,7 @@ def read_upload_rows(service, sheet_name: str, specific_row: int = 0) -> List[Di
     """Read upload target rows from sheet. Only rows with BUYMA price are included."""
     header_map = get_sheet_header_map(service, sheet_name)
     status_index = header_map.get(PROGRESS_STATUS_HEADER)
-    last_index = max(COL['O'], status_index if status_index is not None else COL['O'])
+    last_index = max(COL['Y'], status_index if status_index is not None else COL['Y'])
     last_col_letter = column_index_to_letter(last_index)
 
     try:
@@ -258,6 +260,27 @@ def read_upload_rows(service, sheet_name: str, specific_row: int = 0) -> List[Di
         if status_index is not None and normalized_status not in {STATUS_UPLOAD_READY, STATUS_THUMBNAILS_DONE, "THUMBNAILS_DONE", "업로드진행대기"}:
             continue
 
+        v_cat = cell('V')
+        w_cat = cell('W')
+        x_cat = cell('X')
+        y_cat = cell('Y')
+
+        def _looks_price_like(text: str) -> bool:
+            t = (text or '').strip()
+            if not t:
+                return False
+            if any(sym in t for sym in ['₩', '¥', '$']):
+                return True
+            digits = sum(ch.isdigit() for ch in t)
+            return digits >= max(4, len(t) // 2)
+
+        gender_tokens = {'남성', '여성', 'メンズ', 'レディース'}
+        shifted_category_layout = _looks_price_like(v_cat) and (w_cat in gender_tokens)
+
+        cat_large = w_cat if shifted_category_layout else v_cat
+        cat_middle = x_cat if shifted_category_layout else w_cat
+        cat_small = y_cat if shifted_category_layout else x_cat
+
         rows_data.append({
             'row_num': idx,
             'url': url,
@@ -274,6 +297,9 @@ def read_upload_rows(service, sheet_name: str, specific_row: int = 0) -> List[Di
             'buyma_price': buyma_price,
             'image_paths': cell('N'),
             'shipping_cost': cell('O'),
+            'musinsa_category_large': cat_large,
+            'musinsa_category_middle': cat_middle,
+            'musinsa_category_small': cat_small,
             'progress_status': progress_status,
         })
 
@@ -1636,9 +1662,75 @@ def _extract_actual_measure_map(actual_size_text: str) -> Dict[str, str]:
     return pairs
 
 
+def _extract_actual_size_rows(actual_size_text: str) -> Dict[str, Dict[str, str]]:
+    """'00: 총장 103, 허리단면 35.5 | 01: ...' 형태를 사이즈별 측정 맵으로 파싱."""
+    rows: Dict[str, Dict[str, str]] = {}
+    text = (actual_size_text or "").strip()
+    if not text:
+        return rows
+
+    for chunk in [c.strip() for c in text.split("|") if c.strip()]:
+        m = re.match(r"^([^:]+)\s*:\s*(.+)$", chunk)
+        if not m:
+            continue
+        size_name = m.group(1).strip()
+        body = m.group(2).strip()
+        measure_map: Dict[str, str] = {}
+        for part in [p.strip() for p in body.split(",") if p.strip()]:
+            mm = re.match(r"^(.+?)\s+(-?\d+(?:\.\d+)?)$", part)
+            if not mm:
+                continue
+            measure_map[mm.group(1).strip()] = mm.group(2).strip()
+        if measure_map:
+            rows[size_name] = measure_map
+    return rows
+
+
+MEASURE_ALIASES: Dict[str, List[str]] = {
+    "총장": ["총장", "着丈", "総丈", "全長", "length"],
+    "어깨너비": ["어깨너비", "肩幅", "shoulder"],
+    "가슴단면": ["가슴단면", "가슴", "身幅", "胸囲", "バスト", "chest"],
+    "소매길이": ["소매길이", "袖丈", "裄丈", "sleeve"],
+    "허리단면": ["허리단면", "허리", "ウエスト", "胴囲", "waist"],
+    "엉덩이단면": ["엉덩이단면", "엉덩이", "ヒップ", "hip"],
+    "허벅지단면": ["허벅지단면", "허벅지", "ワタリ", "もも", "thigh"],
+    "밑위": ["밑위", "股上", "rise"],
+    "밑단단면": ["밑단단면", "밑단", "裾幅", "hem"],
+    "발길이": ["발길이", "足長", "アウトソール"],
+    "발볼": ["발볼", "足幅", "ワイズ", "幅"],
+    "굽높이": ["굽높이", "힐", "ヒール高", "heel"],
+}
+
+
+def _pick_measure_value_by_label(label_text: str, measure_map: Dict[str, str]) -> str:
+    if not measure_map:
+        return ""
+    lt = (label_text or "").strip().lower()
+    if not lt:
+        return ""
+
+    # direct key hit
+    for key, value in measure_map.items():
+        if key and key.lower() in lt:
+            return value
+
+    # alias hit (KR/JP mixed)
+    for base_key, aliases in MEASURE_ALIASES.items():
+        if not any(alias.lower() in lt for alias in aliases):
+            continue
+        if base_key in measure_map:
+            return measure_map[base_key]
+        # fallback: alias itself present as key in map
+        for alias in aliases:
+            if alias in measure_map:
+                return measure_map[alias]
+    return ""
+
+
 def _fill_size_edit_details(driver, actual_size_text: str) -> int:
-    pairs = _extract_actual_measure_map(actual_size_text)
-    if not pairs:
+    all_rows = _extract_actual_size_rows(actual_size_text)
+    fallback_pairs = _extract_actual_measure_map(actual_size_text)
+    if not all_rows and not fallback_pairs:
         return 0
 
     try:
@@ -1651,42 +1743,83 @@ def _fill_size_edit_details(driver, actual_size_text: str) -> int:
             try:
                 if not btn.is_displayed():
                     continue
+
+                # try to detect current size row text (e.g. 00/01/02)
+                current_size_key = ""
+                try:
+                    row_node = driver.execute_script(
+                        "let e=arguments[0]; while(e && e.tagName!=='TR'){e=e.parentElement;} return e;", btn
+                    )
+                    row_text = (row_node.text if row_node else "") or ""
+                    for sname in all_rows.keys():
+                        if sname and sname in row_text:
+                            current_size_key = sname
+                            break
+                except Exception:
+                    current_size_key = ""
+
+                selected_pairs = all_rows.get(current_size_key) or (next(iter(all_rows.values())) if all_rows else fallback_pairs)
                 _scroll_and_click(driver, btn)
                 _sleep(0.3)
 
                 dialogs = driver.find_elements(By.CSS_SELECTOR, "[role='dialog'], .ReactModal__Content, .bmm-c-modal")
                 dialog = dialogs[-1] if dialogs else driver
-                rows = dialog.find_elements(By.CSS_SELECTOR, "tr")
+                rows = dialog.find_elements(By.CSS_SELECTOR, "tr, .bmm-c-field, .bmm-c-form-table__table tbody tr")
                 local_filled = 0
+                used_inputs = set()
                 for row in rows:
                     try:
                         label = (row.text or "").strip()
                         if not label:
                             continue
-                        target_key = None
-                        for key in pairs.keys():
-                            if key in label or label in key:
-                                target_key = key
-                                break
-                        if not target_key:
-                            continue
+                        picked_value = _pick_measure_value_by_label(label, selected_pairs)
                         inputs = row.find_elements(By.CSS_SELECTOR, "input[type='text'], input[type='number']")
                         if not inputs:
                             continue
                         target = next((i for i in inputs if i.is_displayed() and i.is_enabled()), None)
                         if not target:
                             continue
-                        target.clear()
-                        target.send_keys(pairs[target_key])
+                        if not picked_value:
+                            continue
+                        target_id = target.get_attribute("id") or target.get_attribute("name") or str(id(target))
+                        if target_id in used_inputs:
+                            continue
+                        _scroll_and_click(driver, target)
+                        target.send_keys(Keys.CONTROL, "a")
+                        target.send_keys(Keys.BACKSPACE)
+                        target.send_keys(picked_value)
+                        used_inputs.add(target_id)
                         local_filled += 1
                     except Exception:
                         continue
+
+                # fallback: no label-matched field found, fill visible inputs in order
+                if local_filled == 0 and selected_pairs:
+                    try:
+                        values_in_order = list(selected_pairs.values())
+                        visible_inputs = [
+                            i for i in dialog.find_elements(By.CSS_SELECTOR, "input[type='text'], input[type='number']")
+                            if i.is_displayed() and i.is_enabled()
+                        ]
+                        for idx, inp in enumerate(visible_inputs):
+                            if idx >= len(values_in_order):
+                                break
+                            _scroll_and_click(driver, inp)
+                            inp.send_keys(Keys.CONTROL, "a")
+                            inp.send_keys(Keys.BACKSPACE)
+                            inp.send_keys(values_in_order[idx])
+                            local_filled += 1
+                    except Exception:
+                        pass
 
                 if local_filled > 0:
                     filled_count += local_filled
                     save_buttons = dialog.find_elements(
                         By.XPATH,
-                        ".//button[contains(normalize-space(.), '保存')] | .//button[contains(normalize-space(.), 'OK')]",
+                        ".//button[contains(normalize-space(.), '保存')]"
+                        " | .//button[contains(normalize-space(.), '完了')]"
+                        " | .//button[contains(normalize-space(.), '決定')]"
+                        " | .//button[contains(normalize-space(.), 'OK')]",
                     )
                     if save_buttons:
                         _scroll_and_click(driver, save_buttons[0])
@@ -1883,6 +2016,69 @@ def _infer_buyma_category(product_name_kr: str, product_name_en: str, brand: str
                 cat1 = fashion_category
             return (cat1, cat2 or '', cat3 or '')
     return ('', '', '')
+
+
+def _normalize_sheet_category_labels(cat1: str, cat2: str, cat3: str) -> Tuple[str, str, str]:
+    """시트 카테고리(한글/혼용)를 BUYMA 라벨 형태로 보정한다."""
+    c1 = (cat1 or '').strip()
+    c2 = (cat2 or '').strip()
+    c3 = (cat3 or '').strip()
+
+    top_map = {
+        '여성': 'レディースファッション',
+        '여자': 'レディースファッション',
+        '레이디스': 'レディースファッション',
+        '레ディース': 'レディースファッション',
+        '남성': 'メンズファッション',
+        '남자': 'メンズファッション',
+        '멘즈': 'メンズファッション',
+        'メンズ': 'メンズファッション',
+        'レディース': 'レディースファッション',
+    }
+    mid_map = {
+        '상의': 'トップス',
+        '하의': 'ボトムス',
+        '바지': 'ボトムス',
+        '신발': '靴',
+        '슈즈': '靴',
+        '운동화': '靴',
+        '아우터': 'アウター',
+        '가방': 'バッグ',
+        '악세서리': 'アクセサリー',
+        '악세사리': 'アクセサリー',
+        '원피스': 'ワンピース',
+    }
+    sub_map = {
+        '데님 팬츠': 'デニム・ジーンズ',
+        '데님팬츠': 'デニム・ジーンズ',
+        '청바지': 'デニム・ジーンズ',
+        '슬랙스': 'スラックス',
+        '팬츠': 'パンツ',
+        '조거팬츠': 'ジョガーパンツ',
+        '카고팬츠': 'カーゴパンツ',
+        '반바지': 'ショーツ',
+        '스니커즈': 'スニーカー',
+        '러닝화': 'ランニングシューズ',
+        '샌들': 'サンダル',
+        '부츠': 'ブーツ',
+        '로퍼': 'ローファー',
+        '티셔츠': 'Tシャツ・カットソー',
+        '후드': 'パーカー・フーディ',
+        '후드티': 'パーカー・フーディ',
+        '맨투맨': 'スウェット',
+        '셔츠': 'シャツ',
+        '니트': 'ニット・セーター',
+        '코트': 'コート',
+        '자켓': 'ジャケット',
+        '블레이저': 'テーラードジャケット',
+        '가디건': 'カーディガン',
+        '바람막이': 'ナイロンジャケット',
+    }
+
+    c1 = top_map.get(c1, c1)
+    c2 = mid_map.get(c2, c2)
+    c3 = sub_map.get(c3, c3)
+    return c1, c2, c3
 
 
 def _get_category_select_el(driver, item_index: int):
@@ -2317,15 +2513,37 @@ def fill_buyma_form(driver, row_data: Dict[str, str]) -> str:
 
         # ---- ?テ?リ ?동 ?택 ----
         try:
-            cat1, cat2, cat3 = _infer_buyma_category(
-                row_data.get('product_name_kr', ''),
-                row_data.get('product_name_en', ''),
-                row_data.get('brand', '')
-            )
+            sheet_cat1 = (row_data.get('musinsa_category_large') or '').strip()
+            sheet_cat2 = (row_data.get('musinsa_category_middle') or '').strip()
+            sheet_cat3 = (row_data.get('musinsa_category_small') or '').strip()
+
+            if sheet_cat1 and sheet_cat2:
+                cat1, cat2, cat3 = _normalize_sheet_category_labels(sheet_cat1, sheet_cat2, sheet_cat3)
+                cat_source = "시트(V/W/X)"
+            else:
+                cat1, cat2, cat3 = _infer_buyma_category(
+                    row_data.get('product_name_kr', ''),
+                    row_data.get('product_name_en', ''),
+                    row_data.get('brand', '')
+                )
+                cat_source = "자동추론"
             if cat1 and cat2:
-                print(f"  카테고리 추론: {cat1} > {cat2} > {cat3}")
+                print(f"  카테고리({cat_source}): {cat1} > {cat2} > {cat3}")
                 # ?카테고리 ?택
-                if _select_category_by_arrow(driver, 0, cat1):
+                selected_cat1 = _select_category_by_arrow(driver, 0, cat1)
+                if (not selected_cat1) and cat_source.startswith("시트"):
+                    # 시트값으로 실패하면 기존 자동추론으로 한 번 fallback
+                    f1, f2, f3 = _infer_buyma_category(
+                        row_data.get('product_name_kr', ''),
+                        row_data.get('product_name_en', ''),
+                        row_data.get('brand', '')
+                    )
+                    if f1 and f2:
+                        print(f"  △ 시트 카테고리 미매칭, 자동추론 fallback: {f1} > {f2} > {f3}")
+                        cat1, cat2, cat3 = f1, f2, f3
+                        selected_cat1 = _select_category_by_arrow(driver, 0, cat1)
+
+                if selected_cat1:
                     print(f"  대카테: {cat1}")
                     # 중카테고리 선택
                     if cat2 and _find_best_option_by_arrow(driver, 1, cat2):
