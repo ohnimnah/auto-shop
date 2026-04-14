@@ -1344,6 +1344,40 @@ def _force_reference_size_shitei_nashi(driver, panel=None) -> bool:
         return False
 
 
+def _force_select_variation_none_sequence(driver, panel=None) -> bool:
+    """요청 순서 강제: サイズ 탭 내 Select(選択してください) -> バリエーションなし 선택."""
+    try:
+        root = panel if panel is not None else driver
+        selects = root.find_elements(By.CSS_SELECTOR, ".sell-variation .Select, .sell-size-table .Select")
+        if not selects:
+            selects = driver.find_elements(By.CSS_SELECTOR, ".sell-variation .Select, .sell-size-table .Select")
+        if not selects:
+            return False
+
+        targets = ["バリエーションなし", "バリエーション無し", "指定なし", "サイズ指定なし"]
+
+        # 1) placeholder/value가 "選択してください"인 Select 우선
+        prioritized = []
+        others = []
+        for sel in selects:
+            try:
+                txt = (sel.text or "").strip()
+                if "選択してください" in txt:
+                    prioritized.append(sel)
+                else:
+                    others.append(sel)
+            except Exception:
+                others.append(sel)
+
+        for sel in prioritized + others:
+            for t in targets:
+                if _select_option_in_select_control(driver, sel, t):
+                    return True
+        return False
+    except Exception:
+        return False
+
+
 def _enable_size_selection_ui(driver) -> bool:
     """사이즈 선택 UI가 접혀 있을 때 '사이즈 지정' 계열 토글을 클릭해 펼친다."""
     keywords = ['サイズを指定', 'サイズあり', 'サイズを選択', 'サイズを入力', 'バリエーションあり']
@@ -2576,10 +2610,30 @@ def _detect_title_input_issue(name_input, intended_title: str) -> str:
         validation_message = (name_input.get_attribute('validationMessage') or '').strip()
 
         maxlength = int(maxlength_raw) if maxlength_raw.isdigit() else 0
+        effective_limit = maxlength if maxlength > 0 else 60  # BUYMA rule fallback
         intended_units = _buyma_title_units(intended_title)
         actual_units = _buyma_title_units(actual_value)
-        if maxlength and intended_units > maxlength:
-            return f"상품명 길이 초과: {intended_units}유닛 / 제한 {maxlength}유닛"
+        if intended_units > effective_limit:
+            return f"상품명 길이 초과: {intended_units}유닛 / 제한 {effective_limit}유닛"
+
+        # UI note fallback: "あと-8文字(半角)" like over-limit hint
+        try:
+            note_text = ""
+            container = name_input.find_element(By.XPATH, "./ancestor::div[contains(@class,'bmm-c-field')][1]")
+            note_nodes = container.find_elements(By.CSS_SELECTOR, ".bmm-c-field__note")
+            for n in note_nodes:
+                t = (n.text or "").strip()
+                if "あと" in t and "文字" in t:
+                    note_text = t
+                    break
+            if note_text:
+                m = re.search(r"あと\s*([+-]?\d+)\s*文字", note_text)
+                if m:
+                    remaining = int(m.group(1))
+                    if remaining < 0:
+                        return f"상품명 길이 초과(UI): 남은 글자 {remaining}"
+        except Exception:
+            pass
 
         if actual_value != intended_title:
             if validation_message:
@@ -2853,7 +2907,7 @@ def fill_buyma_form(driver, row_data: Dict[str, str]) -> str:
             )
             if name_fields:
                 maxlength_raw = (name_fields[0].get_attribute('maxlength') or '').strip()
-                title_limit = int(maxlength_raw) if maxlength_raw.isdigit() else 0
+                title_limit = int(maxlength_raw) if maxlength_raw.isdigit() else 60
                 title_candidates = _build_buyma_title_retry_candidates(brand_en, name_en, color_en, title_limit)
                 title_ok = False
                 last_issue = ""
@@ -3062,7 +3116,11 @@ def fill_buyma_form(driver, row_data: Dict[str, str]) -> str:
                         _sleep(0.5)
                     if is_free_size:
                         # 프리사이즈는 일반 사이즈매칭 경로에서 못찾으면 강제 분기
-                        no_var_ok = _force_select_shitei_nashi_global(driver) or _check_no_variation_option(driver, prefer_shitei_nashi=True)
+                        no_var_ok = (
+                            _force_select_variation_none_sequence(driver, panel=panel)
+                            or _force_select_shitei_nashi_global(driver)
+                            or _check_no_variation_option(driver, prefer_shitei_nashi=True)
+                        )
                         ref_ok = _force_reference_size_shitei_nashi(driver, panel=panel)
                         if no_var_ok or ref_ok:
                             if actual_size_text:
@@ -3148,7 +3206,7 @@ def fill_buyma_form(driver, row_data: Dict[str, str]) -> str:
                                         break
 
                                 if is_free_size:
-                                    if _force_select_shitei_nashi_global(driver) or _force_reference_size_shitei_nashi(driver):
+                                    if _force_select_variation_none_sequence(driver) or _force_select_shitei_nashi_global(driver) or _force_reference_size_shitei_nashi(driver):
                                         print(f"  ✓ 프리사이즈 감지, 指定なし 선택 ({size_text})")
                                     else:
                                         print(f"  ✗ 프리사이즈 감지, 선택없음/실패: {size_text}")
@@ -3171,7 +3229,11 @@ def fill_buyma_form(driver, row_data: Dict[str, str]) -> str:
 
             if not handled_size:
                 if is_free_size:
-                    no_var_ok = _force_select_shitei_nashi_global(driver) or _check_no_variation_option(driver, prefer_shitei_nashi=True)
+                    no_var_ok = (
+                        _force_select_variation_none_sequence(driver)
+                        or _force_select_shitei_nashi_global(driver)
+                        or _check_no_variation_option(driver, prefer_shitei_nashi=True)
+                    )
                     ref_ok = _force_reference_size_shitei_nashi(driver)
                     if no_var_ok or ref_ok:
                         if actual_size_text:
@@ -3236,7 +3298,7 @@ def fill_buyma_form(driver, row_data: Dict[str, str]) -> str:
                                         break
                         if matched2:
                             print(f"  ✓ 사이즈선택: {matched2}개({size_text})")
-                        elif is_free_size and (_force_select_shitei_nashi_global(driver) or _force_reference_size_shitei_nashi(driver)):
+                        elif is_free_size and (_force_select_variation_none_sequence(driver) or _force_select_shitei_nashi_global(driver) or _force_reference_size_shitei_nashi(driver)):
                             print(f"  ✓ 프리사이즈 감지, 指定なし 선택 ({size_text})")
                         elif _check_no_variation_option(driver):
                             print(f"  ✗ 사이즈옵션 없음, 체크박스만 체크")
@@ -3246,7 +3308,7 @@ def fill_buyma_form(driver, row_data: Dict[str, str]) -> str:
                             print(f"  ✓ 사이즈옵션 없음, 보충정보 입력: {size_text}")
                         else:
                             print(f"  ✗ 사이즈옵션/선택 미탐: {size_text}")
-                    elif is_free_size and (_force_select_shitei_nashi_global(driver) or _force_reference_size_shitei_nashi(driver)):
+                    elif is_free_size and (_force_select_variation_none_sequence(driver) or _force_select_shitei_nashi_global(driver) or _force_reference_size_shitei_nashi(driver)):
                         print(f"  ✓ 프리사이즈 감지, 指定なし 선택 ({size_text})")
                     elif _check_no_variation_option(driver):
                         print(f"  ✗ 사이즈옵션 없음, 체크박스만 체크")
@@ -3540,7 +3602,7 @@ def fill_buyma_form(driver, row_data: Dict[str, str]) -> str:
                 }
 
                 // 1) placeholder 직접 매칭
-                var byPlaceholder = document.querySelector("input[placeholder*='買付できる合計数量'], input[placeholder*='合計数量'], input[placeholder*='買付可能数量'], input[placeholder*='購入可能数量'], input[aria-label*='買付できる合計数量'], input[aria-label*='合計数量'], input[aria-label*='買付可能数量'], input[aria-label*='購入可能数量']");
+                var byPlaceholder = document.querySelector("input[placeholder*='買付できる合計数量'], input[placeholder*='合計数量'], input[placeholder*='買付可能数量'], input[placeholder*='購入可能数量'], input[aria-label*='買付できる合計数量'], input[aria-label*='合計数量'], input[aria-label*='買付可能数量'], input[aria-label*='購入可能数量'], input[type='tel'][placeholder*='合計数量'], input[type='tel'][aria-label*='合計数量']");
                 if (byPlaceholder && isVisible(byPlaceholder)) return byPlaceholder;
 
                 // 2) 라벨 텍스트 기반 매칭
@@ -3549,7 +3611,7 @@ def fill_buyma_form(driver, row_data: Dict[str, str]) -> str:
                     var root = fields[i];
                     var txt = (root.textContent || '').replace(/\s+/g, ' ').trim();
                     if (hasQtyHint(txt)) {
-                        var ipt = root.querySelector("input.bmm-c-text-field, input[type='text'], input[type='number']");
+                        var ipt = root.querySelector("input.bmm-c-text-field, input[type='text'], input[type='number'], input[type='tel']");
                         if (ipt && isVisible(ipt)) return ipt;
                     }
                 }
@@ -3564,24 +3626,38 @@ def fill_buyma_form(driver, row_data: Dict[str, str]) -> str:
                         var direct = document.getElementById(forId);
                         if (direct && direct.tagName === 'INPUT' && isVisible(direct)) return direct;
                     }
-                    var labelInput = label.querySelector("input.bmm-c-text-field, input[type='text'], input[type='number']");
+                    var labelInput = label.querySelector("input.bmm-c-text-field, input[type='text'], input[type='number'], input[type='tel']");
                     if (labelInput && isVisible(labelInput)) return labelInput;
                     var parent = label.parentElement;
                     for (var up0 = 0; parent && up0 < 4; up0++) {
-                        var parentInput = parent.querySelector("input.bmm-c-text-field, input[type='text'], input[type='number']");
+                        var parentInput = parent.querySelector("input.bmm-c-text-field, input[type='text'], input[type='number'], input[type='tel']");
                         if (parentInput && isVisible(parentInput)) return parentInput;
                         parent = parent.parentElement;
                     }
                 }
 
+                // 2-1) 합계수량 텍스트 노드 근접 탐색 (라벨 구조가 바뀐 경우 대응)
+                var allNodes = document.querySelectorAll("p, span, div, th, td, label");
+                for (var z = 0; z < allNodes.length; z++) {
+                    var nt = (allNodes[z].textContent || '').replace(/\s+/g, ' ').trim();
+                    if (!hasQtyHint(nt)) continue;
+                    var c = allNodes[z];
+                    for (var upz = 0; c && upz < 6; upz++) {
+                        var near = c.querySelector("input.bmm-c-text-field, input[type='text'], input[type='number'], input[type='tel']");
+                        if (near && isVisible(near)) return near;
+                        c = c.parentElement;
+                    }
+                }
+
                 // 3) 전체 input을 돌며 주변 텍스트가 합계수량을 가리키는지 확인
-                var allInputs = document.querySelectorAll("input.bmm-c-text-field, input[type='text'], input[type='number']");
+                var allInputs = document.querySelectorAll("input.bmm-c-text-field, input[type='text'], input[type='number'], input[type='tel']");
                 for (var j = 0; j < allInputs.length; j++) {
                     var ip = allInputs[j];
                     if (!isVisible(ip)) continue;
                     var meta = metaText(ip).toLowerCase();
                     if (meta.indexOf('price') >= 0 || meta.indexOf('商品価格') >= 0 || meta.indexOf('販売価格') >= 0) continue;
                     var around = nearestText(ip);
+                    if (around.indexOf('あと') >= 0 && around.indexOf('文字') >= 0) continue; // 제목/메모 카운터 제외
                     if (hasQtyHint(around.toLowerCase())) {
                         return ip;
                     }
@@ -3597,6 +3673,8 @@ def fill_buyma_form(driver, row_data: Dict[str, str]) -> str:
                     var meta2 = metaText(ip2).toLowerCase();
                     if (meta2.indexOf('price') >= 0 || meta2.indexOf('商品価格') >= 0 || meta2.indexOf('販売価格') >= 0) continue;
                     if (meta2.indexOf('stock') >= 0 || meta2.indexOf('在庫') >= 0) continue;
+                    var around2 = nearestText(ip2);
+                    if (around2.indexOf('あと') >= 0 && around2.indexOf('文字') >= 0) continue;
                     if ((ip2.type || '').toLowerCase() === 'number' || (ip2.getAttribute('inputmode') || '').toLowerCase() === 'numeric' || hasQtyHint(meta2)) {
                         return ip2;
                     }
@@ -3616,7 +3694,7 @@ def fill_buyma_form(driver, row_data: Dict[str, str]) -> str:
                 if (priceInput) {
                     var container = priceInput.parentElement;
                     for (var up = 0; container && up < 5; up++) {
-                        var nearby = container.querySelectorAll("input.bmm-c-text-field, input[type='text'], input[type='number']");
+                        var nearby = container.querySelectorAll("input.bmm-c-text-field, input[type='text'], input[type='number'], input[type='tel']");
                         for (var q = 0; q < nearby.length; q++) {
                             var n = nearby[q];
                             if (n === priceInput || !isVisible(n)) continue;
