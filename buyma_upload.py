@@ -1731,15 +1731,67 @@ def _fill_size_edit_details(driver, actual_size_text: str) -> int:
     all_rows = _extract_actual_size_rows(actual_size_text)
     fallback_pairs = _extract_actual_measure_map(actual_size_text)
     if not all_rows and not fallback_pairs:
+        print("  [actual-size] skip: no parsed measurement rows")
         return 0
 
     try:
+        debug_dir = os.path.join(os.path.dirname(__file__), "_debug")
+        try:
+            os.makedirs(debug_dir, exist_ok=True)
+        except Exception:
+            debug_dir = os.path.dirname(__file__)
+
+        def _dump_edit_debug(tag: str) -> None:
+            try:
+                ts = datetime.now().strftime("%Y%m%d_%H%M%S_%f")
+                html_path = os.path.join(debug_dir, f"edit_debug_{tag}_{ts}.html")
+                png_path = os.path.join(debug_dir, f"edit_debug_{tag}_{ts}.png")
+                with open(html_path, "w", encoding="utf-8") as f:
+                    f.write(driver.page_source or "")
+                try:
+                    driver.save_screenshot(png_path)
+                except Exception:
+                    pass
+                print(f"  [actual-size] debug dump saved: {html_path}")
+            except Exception:
+                pass
+
+        def _pick_best_dialog(dialogs):
+            if not dialogs:
+                return None
+            best = None
+            best_score = -1
+            for d in dialogs:
+                try:
+                    txt = (d.text or "").strip()
+                    score = 0
+                    if any(k in txt for k in ["着丈", "ウエスト", "股上", "ヒップ", "サイズ", "cm"]):
+                        score += 5
+                    inputs = d.find_elements(By.CSS_SELECTOR, "input[type='text'], input[type='number'], input[type='tel'], textarea")
+                    editable = [i for i in inputs if i.get_attribute("disabled") is None]
+                    score += len(editable)
+                    if score > best_score:
+                        best = d
+                        best_score = score
+                except Exception:
+                    continue
+            return best or dialogs[-1]
+
+        # size table area only (avoid unrelated 編集 buttons in other sections)
         edit_buttons = driver.find_elements(
             By.XPATH,
-            "//button[contains(normalize-space(.), '編集')] | //a[contains(normalize-space(.), '編集')]",
+            "//div[contains(@class,'sell-size-table')]//*[self::button or self::a][contains(normalize-space(.), '編集')]",
         )
+        if not edit_buttons:
+            edit_buttons = driver.find_elements(
+                By.XPATH,
+                "//div[contains(@class,'sell-variation')]//*[self::button or self::a][contains(normalize-space(.), '編集')]",
+            )
+        print(f"  [actual-size] edit buttons found: total={len(edit_buttons)}")
         filled_count = 0
-        for btn in edit_buttons:
+        main_handle = driver.current_window_handle
+        ordered_size_keys = list(all_rows.keys())
+        for btn_idx, btn in enumerate(edit_buttons):
             try:
                 if not btn.is_displayed():
                     continue
@@ -1758,13 +1810,93 @@ def _fill_size_edit_details(driver, actual_size_text: str) -> int:
                 except Exception:
                     current_size_key = ""
 
+                if not current_size_key and btn_idx < len(ordered_size_keys):
+                    current_size_key = ordered_size_keys[btn_idx]
                 selected_pairs = all_rows.get(current_size_key) or (next(iter(all_rows.values())) if all_rows else fallback_pairs)
+                print(f"  [actual-size] open edit: size_key='{current_size_key or 'N/A'}' pairs={len(selected_pairs or {})}")
+                before_handles = set(driver.window_handles)
+                before_modal_count = len(driver.find_elements(By.CSS_SELECTOR, "[role='dialog'], .ReactModal__Content, .bmm-c-modal"))
+                before_url = driver.current_url
                 _scroll_and_click(driver, btn)
-                _sleep(0.3)
+                _sleep(0.25)
 
-                dialogs = driver.find_elements(By.CSS_SELECTOR, "[role='dialog'], .ReactModal__Content, .bmm-c-modal")
-                dialog = dialogs[-1] if dialogs else driver
-                rows = dialog.find_elements(By.CSS_SELECTOR, "tr, .bmm-c-field, .bmm-c-form-table__table tbody tr")
+                dialog = driver
+                popup_handle = None
+                for _ in range(10):
+                    now_handles = set(driver.window_handles)
+                    new_handles = [h for h in now_handles if h not in before_handles]
+                    if new_handles:
+                        popup_handle = new_handles[0]
+                        break
+                    _sleep(0.15)
+                if popup_handle:
+                    driver.switch_to.window(popup_handle)
+                    _sleep(0.5)
+                    print("  [actual-size] popup window detected")
+                    dialog = driver
+                else:
+                    dialogs = driver.find_elements(By.CSS_SELECTOR, "[role='dialog'], .ReactModal__Content, .bmm-c-modal")
+                    dialog = _pick_best_dialog(dialogs) if dialogs else driver
+                    # fallback: if nothing opened, force JS click on edit trigger hierarchy
+                    if len(dialogs) <= before_modal_count and driver.current_url == before_url:
+                        try:
+                            js_opened = driver.execute_script(
+                                "var el=arguments[0];"
+                                "if(!el) return false;"
+                                "el.click();"
+                                "var p=el.parentElement;"
+                                "for(var i=0;i<4 && p;i++){"
+                                " if(p.tagName==='BUTTON' || p.tagName==='A' || p.getAttribute('role')==='button'){ p.click(); }"
+                                " p=p.parentElement;"
+                                "}"
+                                "return true;",
+                                btn
+                            )
+                            if js_opened:
+                                _sleep(0.35)
+                                dialogs = driver.find_elements(By.CSS_SELECTOR, "[role='dialog'], .ReactModal__Content, .bmm-c-modal")
+                                dialog = _pick_best_dialog(dialogs) if dialogs else driver
+                                print(f"  [actual-size] js-click fallback dialogs: {len(dialogs)}")
+                        except Exception:
+                            pass
+                visible_inputs = []
+                for _ in range(10):
+                    visible_inputs = [
+                        i for i in dialog.find_elements(By.CSS_SELECTOR, "input[type='text'], input[type='number'], input[type='tel'], textarea")
+                        if i.get_attribute("disabled") is None
+                    ]
+                    if visible_inputs:
+                        break
+                    _sleep(0.2)
+
+                active_frame = None
+                if not visible_inputs:
+                    # Some edit popups are rendered inside an iframe. Try switching and probing.
+                    try:
+                        driver.switch_to.default_content()
+                        top_frames = driver.find_elements(By.CSS_SELECTOR, "iframe")
+                        for fi, frame in enumerate(top_frames):
+                            try:
+                                driver.switch_to.default_content()
+                                driver.switch_to.frame(frame)
+                                probe_inputs = [
+                                    i for i in driver.find_elements(By.CSS_SELECTOR, "input[type='text'], input[type='number'], input[type='tel'], textarea")
+                                    if i.get_attribute("disabled") is None
+                                ]
+                                if probe_inputs:
+                                    visible_inputs = probe_inputs
+                                    active_frame = fi
+                                    print(f"  [actual-size] iframe inputs detected: frame={fi} count={len(probe_inputs)}")
+                                    break
+                            except Exception:
+                                continue
+                        if active_frame is None and popup_handle is None:
+                            driver.switch_to.default_content()
+                    except Exception:
+                        pass
+                print(f"  [actual-size] dialog inputs: {len(visible_inputs)}")
+                row_scope = driver if active_frame is not None else dialog
+                rows = row_scope.find_elements(By.CSS_SELECTOR, "tr, .bmm-c-field, .bmm-c-form-table__table tbody tr")
                 local_filled = 0
                 used_inputs = set()
                 for row in rows:
@@ -1773,10 +1905,10 @@ def _fill_size_edit_details(driver, actual_size_text: str) -> int:
                         if not label:
                             continue
                         picked_value = _pick_measure_value_by_label(label, selected_pairs)
-                        inputs = row.find_elements(By.CSS_SELECTOR, "input[type='text'], input[type='number']")
+                        inputs = row.find_elements(By.CSS_SELECTOR, "input[type='text'], input[type='number'], textarea")
                         if not inputs:
                             continue
-                        target = next((i for i in inputs if i.is_displayed() and i.is_enabled()), None)
+                        target = next((i for i in inputs if i.get_attribute("disabled") is None), None)
                         if not target:
                             continue
                         if not picked_value:
@@ -1797,10 +1929,11 @@ def _fill_size_edit_details(driver, actual_size_text: str) -> int:
                 if local_filled == 0 and selected_pairs:
                     try:
                         values_in_order = list(selected_pairs.values())
-                        visible_inputs = [
-                            i for i in dialog.find_elements(By.CSS_SELECTOR, "input[type='text'], input[type='number']")
-                            if i.is_displayed() and i.is_enabled()
-                        ]
+                        if not visible_inputs:
+                            visible_inputs = [
+                                i for i in row_scope.find_elements(By.CSS_SELECTOR, "input[type='text'], input[type='number'], textarea")
+                                if i.get_attribute("disabled") is None
+                            ]
                         for idx, inp in enumerate(visible_inputs):
                             if idx >= len(values_in_order):
                                 break
@@ -1814,21 +1947,52 @@ def _fill_size_edit_details(driver, actual_size_text: str) -> int:
 
                 if local_filled > 0:
                     filled_count += local_filled
-                    save_buttons = dialog.find_elements(
+                    print(f"  [actual-size] filled fields: {local_filled}")
+                    save_scope = driver if active_frame is not None else dialog
+                    save_buttons = save_scope.find_elements(
                         By.XPATH,
                         ".//button[contains(normalize-space(.), '保存')]"
                         " | .//button[contains(normalize-space(.), '完了')]"
                         " | .//button[contains(normalize-space(.), '決定')]"
                         " | .//button[contains(normalize-space(.), 'OK')]",
                     )
+                    print(f"  [actual-size] save buttons: {len(save_buttons)}")
                     if save_buttons:
                         _scroll_and_click(driver, save_buttons[0])
                         _sleep(0.2)
+                else:
+                    print("  [actual-size] no fields filled in this dialog")
+                    _dump_edit_debug(f"nofield_{btn_idx}")
+
+                if active_frame is not None and popup_handle is None:
+                    try:
+                        driver.switch_to.default_content()
+                    except Exception:
+                        pass
+
+                if popup_handle:
+                    try:
+                        driver.close()
+                    except Exception:
+                        pass
+                    try:
+                        if main_handle in driver.window_handles:
+                            driver.switch_to.window(main_handle)
+                    except Exception:
+                        pass
             except Exception:
+                try:
+                    if main_handle in driver.window_handles and driver.current_window_handle != main_handle:
+                        driver.switch_to.window(main_handle)
+                except Exception:
+                    pass
                 continue
 
+        if filled_count == 0:
+            print("  [actual-size] result: 0 fields filled")
         return filled_count
     except Exception:
+        print("  [actual-size] failed: unexpected error")
         return 0
 
 
@@ -2802,6 +2966,8 @@ def fill_buyma_form(driver, row_data: Dict[str, str]) -> str:
                                 filled_detail = _fill_size_edit_details(driver, actual_size_text)
                                 if filled_detail:
                                     print(f"  actual size detail filled: {filled_detail}")
+                                else:
+                                    print("  actual size detail not filled")
                             print(f"  ✓ 프리사이즈 감지, 指定なし 선택 ({size_text})")
                         else:
                             print(f"  ✗ 프리사이즈 감지, 指定なし 선택 실패. 자동 선택 필요: {size_text}")
@@ -2815,6 +2981,8 @@ def fill_buyma_form(driver, row_data: Dict[str, str]) -> str:
                             filled_detail = _fill_size_edit_details(driver, actual_size_text)
                             if filled_detail:
                                 print(f"  actual size detail filled: {filled_detail}")
+                            else:
+                                print("  actual size detail not filled")
                         print(f"  ✓ 사이즈입력(테이블): {table_filled}개({size_text})")
                         handled_size = True
                         break
@@ -2907,6 +3075,8 @@ def fill_buyma_form(driver, row_data: Dict[str, str]) -> str:
                             filled_detail = _fill_size_edit_details(driver, actual_size_text)
                             if filled_detail:
                                 print(f"  actual size detail filled: {filled_detail}")
+                            else:
+                                print("  actual size detail not filled")
                         print(f"  ✓ 프리사이즈 감지, 指定なし 선택 ({size_text})")
                     else:
                         print(f"  ✗ 프리사이즈 감지, 指定なし 선택 실패. 자동 선택 필요: {size_text}")
