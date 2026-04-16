@@ -1102,6 +1102,27 @@ def classify_size_token(token: str) -> str:
     return "other"
 
 
+def is_date_like_size_token(token: str) -> bool:
+    """사이즈 토큰으로 보기 어려운 날짜형 문자열을 걸러낸다."""
+    value = (token or "").strip()
+    if not value:
+        return False
+
+    # 2026-04-17 / 2026.04 / 20260417
+    if re.fullmatch(r'(?:19|20)\d{2}[./-]\d{1,2}(?:[./-]\d{1,2})?', value):
+        return True
+    if re.fullmatch(r'(?:19|20)\d{6}', value):
+        return True
+
+    # 2026년 4월 17일 / 4월 17일
+    if re.search(r'(?:19|20)\d{2}\s*년', value):
+        return True
+    if re.search(r'\d{1,2}\s*월\s*\d{1,2}\s*일', value):
+        return True
+
+    return False
+
+
 def normalize_size_tokens(tokens: List[str], option_kind: str = "") -> List[str]:
     """사이즈 토큰을 숫자/영문/한글 한 종류만 남도록 정규화한다"""
     cleaned: List[str] = []
@@ -1109,6 +1130,8 @@ def normalize_size_tokens(tokens: List[str], option_kind: str = "") -> List[str]
     for token in tokens:
         value = re.sub(r'\s+', ' ', str(token)).strip(' ,')
         if not value or value in seen:
+            continue
+        if is_date_like_size_token(value):
             continue
         seen.add(value)
         cleaned.append(value)
