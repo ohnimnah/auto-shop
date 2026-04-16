@@ -80,9 +80,9 @@ PRICE_COLUMN = "L"
 BAIMA_SELL_PRICE_COLUMN = "M"
 IMAGE_PATHS_COLUMN = "N"
 SHIPPING_COST_COLUMN = "O"
-CATEGORY_LARGE_COLUMN = "V"
-CATEGORY_MIDDLE_COLUMN = "W"
-CATEGORY_SMALL_COLUMN = "X"
+CATEGORY_LARGE_COLUMN = "W"
+CATEGORY_MIDDLE_COLUMN = "X"
+CATEGORY_SMALL_COLUMN = "Y"
 ROW_START = 2
 
 
@@ -1472,11 +1472,11 @@ def extract_musinsa_sku(
 
 
 def get_existing_row_values(service, sheet_name: str, row_num: int) -> Dict[str, str]:
-    """현재 행의 A~X 값을 읽어 컬럼별로 반환한다"""
+    """현재 행의 A~Y 값을 읽어 컬럼별로 반환한다"""
     try:
         result = service.spreadsheets().values().get(
             spreadsheetId=SPREADSHEET_ID,
-            range=f"'{sheet_name}'!A{row_num}:X{row_num}"
+            range=f"'{sheet_name}'!A{row_num}:Y{row_num}"
         ).execute()
         rows = result.get('values', [])
         row = rows[0] if rows else []
@@ -1497,9 +1497,9 @@ def get_existing_row_values(service, sheet_name: str, row_num: int) -> Dict[str,
             BAIMA_SELL_PRICE_COLUMN: row[12] if len(row) > 12 else "",
             IMAGE_PATHS_COLUMN: row[13] if len(row) > 13 else "",
             SHIPPING_COST_COLUMN: row[14] if len(row) > 14 else "",
-            CATEGORY_LARGE_COLUMN: row[21] if len(row) > 21 else "",
-            CATEGORY_MIDDLE_COLUMN: row[22] if len(row) > 22 else "",
-            CATEGORY_SMALL_COLUMN: row[23] if len(row) > 23 else "",
+            CATEGORY_LARGE_COLUMN: row[22] if len(row) > 22 else "",
+            CATEGORY_MIDDLE_COLUMN: row[23] if len(row) > 23 else "",
+            CATEGORY_SMALL_COLUMN: row[24] if len(row) > 24 else "",
         }
         return existing
     except Exception as e:
@@ -1512,7 +1512,7 @@ def get_existing_rows_bulk(
     sheet_name: str,
     row_numbers: List[int],
 ) -> Dict[int, Dict[str, str]]:
-    """여러 행의 A~X 값을 한 번에 읽어 행 번호별 맵으로 반환한다"""
+    """여러 행의 A~Y 값을 한 번에 읽어 행 번호별 맵으로 반환한다"""
     if not row_numbers:
         return {}
 
@@ -1530,7 +1530,7 @@ def get_existing_rows_bulk(
     try:
         result = service.spreadsheets().values().get(
             spreadsheetId=SPREADSHEET_ID,
-            range=f"'{sheet_name}'!A{min_row}:X{max_row}"
+            range=f"'{sheet_name}'!A{min_row}:Y{max_row}"
         ).execute()
         values = result.get('values', [])
 
@@ -1553,9 +1553,9 @@ def get_existing_rows_bulk(
             mapped[BAIMA_SELL_PRICE_COLUMN] = row_values[12] if len(row_values) > 12 else ""
             mapped[IMAGE_PATHS_COLUMN] = row_values[13] if len(row_values) > 13 else ""
             mapped[SHIPPING_COST_COLUMN] = row_values[14] if len(row_values) > 14 else ""
-            mapped[CATEGORY_LARGE_COLUMN] = row_values[21] if len(row_values) > 21 else ""
-            mapped[CATEGORY_MIDDLE_COLUMN] = row_values[22] if len(row_values) > 22 else ""
-            mapped[CATEGORY_SMALL_COLUMN] = row_values[23] if len(row_values) > 23 else ""
+            mapped[CATEGORY_LARGE_COLUMN] = row_values[22] if len(row_values) > 22 else ""
+            mapped[CATEGORY_MIDDLE_COLUMN] = row_values[23] if len(row_values) > 23 else ""
+            mapped[CATEGORY_SMALL_COLUMN] = row_values[24] if len(row_values) > 24 else ""
             row_map[row_num] = mapped
 
         return row_map
@@ -2922,4 +2922,5 @@ def main():
 
 if __name__ == "__main__":
     main()
+
 

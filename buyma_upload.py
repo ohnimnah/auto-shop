@@ -275,12 +275,11 @@ def read_upload_rows(service, sheet_name: str, specific_row: int = 0) -> List[Di
             digits = sum(ch.isdigit() for ch in t)
             return digits >= max(4, len(t) // 2)
 
-        gender_tokens = {'남성', '여성', 'メンズ', 'レディース'}
-        shifted_category_layout = _looks_price_like(v_cat) and (w_cat in gender_tokens)
-
-        cat_large = w_cat if shifted_category_layout else v_cat
-        cat_middle = x_cat if shifted_category_layout else w_cat
-        cat_small = y_cat if shifted_category_layout else x_cat
+        # 최신 시트: W/X/Y(대/중/소), 구형 시트: V/W/X
+        if w_cat or x_cat or y_cat:
+            cat_large, cat_middle, cat_small = w_cat, x_cat, y_cat
+        else:
+            cat_large, cat_middle, cat_small = v_cat, w_cat, x_cat
 
         rows_data.append({
             'row_num': idx,
@@ -2875,7 +2874,7 @@ def fill_buyma_form(driver, row_data: Dict[str, str]) -> str:
 
             if sheet_cat1 and sheet_cat2:
                 cat1, cat2, cat3 = _normalize_sheet_category_labels(sheet_cat1, sheet_cat2, sheet_cat3)
-                cat_source = "시트(V/W/X)"
+                cat_source = "시트(W/X/Y)"
             else:
                 cat1, cat2, cat3 = _infer_buyma_category(
                     row_data.get('product_name_kr', ''),
