@@ -1819,6 +1819,10 @@ def process_sheet_once(
                 product_info.get('image_paths', ''),
                 existing_values_for_row,
             )
+            logo_url = (product_info.get('brand_logo_url') or '').strip()
+            if logo_url and product_info.get('image_paths', ''):
+                folder_name = build_image_folder_name(idx, product_info.get('product_name_kr', ''))
+                download_brand_logo(logo_url, folder_name, product_info.get('image_paths', ''))
             if product_info.get('image_paths', '') and has_status_header:
                 if update_cell_by_header(service, sheet_name, idx, header_map, PROGRESS_STATUS_HEADER, STATUS_IMAGES_SAVED):
                     print(f" {sheet_name} {idx}행 상태 업데이트: {STATUS_IMAGES_SAVED}")
@@ -2662,6 +2666,7 @@ def scrape_musinsa_product(
         soup = BeautifulSoup(driver.page_source, 'html.parser')
         title_text = soup.title.string.strip() if soup.title else ""
         product_json = extract_product_json(soup)
+        brand_logo_url = extract_brand_logo_url(soup, product_json)
         mss_state = extract_mss_product_state(soup)
         goods_no = str(mss_state.get('goodsNo', '')).strip()
 
@@ -2690,6 +2695,7 @@ def scrape_musinsa_product(
                 'buyma_price': '',
                 'musinsa_sku': existing_sku.strip() if existing_sku else '',
                 'image_paths': image_paths,
+                'brand_logo_url': brand_logo_url,
                 'opt_kind_cd': '',
                 'musinsa_category_large': '',
                 'musinsa_category_middle': '',
@@ -2814,6 +2820,7 @@ def scrape_musinsa_product(
             'buyma_price': buyma_price_text,
             'musinsa_sku': musinsa_sku,
             'image_paths': image_paths,
+            'brand_logo_url': brand_logo_url,
             'opt_kind_cd': opt_kind_cd,
             'musinsa_category_large': cat_large,
             'musinsa_category_middle': cat_middle,
@@ -2832,6 +2839,7 @@ def scrape_musinsa_product(
             'buyma_price': '',
             'musinsa_sku': '',
             'image_paths': '',
+            'brand_logo_url': '',
             'opt_kind_cd': '',
             'musinsa_category_large': '',
             'musinsa_category_middle': '',
