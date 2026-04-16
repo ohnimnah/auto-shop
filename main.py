@@ -1,4 +1,4 @@
-"""
+﻿"""
 무신사 상품 정보를 크롤링하여 Google Sheets에 자동으로 입력하는 자동화 스크립트
 아래 링크의 스프레드시트 구조와 동일하게 사용할 수 있도록 데이터를 입력합니다.
 - 시트 ID: 1mTV-Fcybov-0uC7tNyM_GXGDoth8F_7wM__zaC1fAjs
@@ -701,6 +701,70 @@ def download_thumbnail_images(image_urls: List[str], folder_name: str) -> str:
             print(f"    이미지 다운로드 스킵: {image_error}")
 
     return ','.join(saved_paths)
+
+
+def extract_brand_logo_url(soup: BeautifulSoup, product_json: Dict[str, object]) -> str:
+    """Extract brand logo URL from Musinsa page/json."""
+    candidates: List[str] = []
+
+    def add_candidate(src: str):
+        normalized = normalize_image_source(src or "")
+        if normalized and normalized not in candidates:
+            candidates.append(normalized)
+
+    if isinstance(product_json, dict):
+        brand_obj = product_json.get('brand')
+        if isinstance(brand_obj, dict):
+            for key in ('logoImageUrl', 'logoImage', 'logoUrl', 'logo', 'imageUrl', 'image', 'thumbnail'):
+                val = brand_obj.get(key)
+                if isinstance(val, str):
+                    add_candidate(val)
+
+    for img in soup.select('a[href*="/brand/"] img'):
+        for attr in ('src', 'data-src', 'data-original', 'data-lazy-src'):
+            src = img.get(attr, '')
+            if src:
+                add_candidate(src)
+
+    for m in soup.select('meta[property="og:image"], meta[name="twitter:image"]'):
+        src = m.get('content', '')
+        if src and ('brand' in src.lower() or 'logo' in src.lower()):
+            add_candidate(src)
+
+    for url in candidates:
+        lower = url.lower()
+        if 'brand' in lower or 'logo' in lower:
+            return url
+    return candidates[0] if candidates else ""
+
+
+def download_brand_logo(logo_url: str, folder_name: str, image_paths: str = "") -> str:
+    """Save brand logo as __brand_logo.* in product image folder."""
+    if not logo_url:
+        return ""
+
+    image_dir = resolve_image_folder_from_paths(image_paths)
+    if not image_dir:
+        from datetime import date as _date
+        date_folder = _date.today().strftime("%Y%m%d")
+        image_dir = os.path.join(IMAGES_ROOT, date_folder, sanitize_path_component(folder_name))
+    os.makedirs(image_dir, exist_ok=True)
+
+    try:
+        parsed = urllib.parse.urlparse(logo_url)
+        ext = os.path.splitext(parsed.path)[1].lower()
+        if ext not in {'.jpg', '.jpeg', '.png', '.webp'}:
+            ext = '.png'
+        logo_path = os.path.join(image_dir, f"__brand_logo{ext}")
+        request = urllib.request.Request(logo_url, headers={'User-Agent': 'Mozilla/5.0'})
+        with urllib.request.urlopen(request, timeout=30) as response:
+            with open(logo_path, 'wb') as f:
+                f.write(response.read())
+        print(f"    브랜드 로고 저장: {logo_path}")
+        return logo_path.replace('\\', '/')
+    except Exception as e:
+        print(f"    브랜드 로고 저장 실패: {e}")
+        return ""
 
 
 COLOR_NAME_MAP = None
@@ -2830,3 +2894,4 @@ def main():
 
 if __name__ == "__main__":
     main()
+

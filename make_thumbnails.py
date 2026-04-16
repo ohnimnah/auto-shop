@@ -2,6 +2,8 @@ import argparse
 import os
 import sys
 from pathlib import Path
+import re
+from typing import Optional
 
 # Windows cp949 터미널에서 유니코드 출력 오류 방지
 if sys.stdout.encoding and sys.stdout.encoding.lower().replace("-", "") in ("cp949", "euckr"):
@@ -20,6 +22,7 @@ except Exception:
 
 
 IMAGE_EXTS = {".jpg", ".jpeg", ".png", ".webp", ".bmp"}
+LOGO_EXTS = (".png", ".webp", ".jpg", ".jpeg")
 
 
 def iter_images(input_path: Path):
@@ -59,6 +62,106 @@ def _open_rgb(path: Path) -> Image.Image:
     if im.mode == "L":
         im = im.convert("RGB")
     return im
+
+
+def _normalize_brand_key(text: str) -> str:
+    return re.sub(r"[^a-z0-9]+", "", (text or "").lower())
+
+
+def _find_brand_logo(
+    brand: str,
+    input_path: Path,
+    explicit_logo: str = "",
+    explicit_logo_dir: str = "",
+) -> Optional[Path]:
+    # Product-folder fixed logo filename (set by crawler) has highest priority.
+    fixed_names = ["__brand_logo", "_brand_logo", "brand_logo", "logo"]
+    if input_path.is_dir():
+        for base in fixed_names:
+            for ext in LOGO_EXTS:
+                p = input_path / f"{base}{ext}"
+                if p.exists() and p.is_file():
+                    return p
+
+    if explicit_logo:
+        p = Path(explicit_logo).expanduser()
+        if not p.is_absolute():
+            p = (Path.cwd() / p).resolve()
+        if p.exists() and p.is_file():
+            return p
+        return None
+
+    script_dir = Path(__file__).resolve().parent
+    search_dirs = []
+    if explicit_logo_dir:
+        d = Path(explicit_logo_dir).expanduser()
+        if not d.is_absolute():
+            d = (Path.cwd() / d).resolve()
+        search_dirs.append(d)
+
+    search_dirs += [
+        script_dir / "logos",
+        script_dir / "brand_logos",
+        script_dir / "images" / "logos",
+        script_dir / "images" / "brand_logos",
+    ]
+
+    if input_path.is_dir():
+        search_dirs += [input_path, input_path.parent]
+    else:
+        search_dirs += [input_path.parent]
+
+    brand_raw = (brand or "").strip()
+    if not brand_raw:
+        return None
+
+    base_names = [brand_raw, brand_raw.replace(" ", "_"), brand_raw.replace(" ", "-")]
+    normalized_target = _normalize_brand_key(brand_raw)
+
+    for d in search_dirs:
+        if not d.exists() or not d.is_dir():
+            continue
+        for base in base_names:
+            for ext in LOGO_EXTS:
+                candidate = d / f"{base}{ext}"
+                if candidate.exists() and candidate.is_file():
+                    return candidate
+        for p in d.iterdir():
+            if not p.is_file() or p.suffix.lower() not in LOGO_EXTS:
+                continue
+            if _normalize_brand_key(p.stem) == normalized_target:
+                return p
+    return None
+
+
+def _paste_brand_logo(canvas: Image.Image, logo_path: Path, left_box, size: int) -> bool:
+    try:
+        lx, ly, lw, lh = left_box
+        with Image.open(logo_path).convert("RGBA") as logo:
+            max_w = max(100, int(lw * 0.68))
+            max_h = max(40, int(lh * 0.22))
+            fitted = ImageOps.contain(logo, (max_w, max_h), method=Image.Resampling.LANCZOS)
+
+        pad_x = max(10, size // 60)
+        pad_y = max(6, size // 90)
+        badge_w = fitted.width + pad_x * 2
+        badge_h = fitted.height + pad_y * 2
+        # Top-left placement with safe margins.
+        outer_margin_x = max(16, size // 28)
+        outer_margin_y = max(14, size // 34)
+        bx = lx + outer_margin_x
+        by = ly + outer_margin_y
+
+        badge = Image.new("RGBA", (badge_w, badge_h), (0, 0, 0, 210))
+        canvas_rgba = canvas.convert("RGBA")
+        canvas_rgba.alpha_composite(badge, (bx, by))
+        px = bx + (badge_w - fitted.width) // 2
+        py = by + (badge_h - fitted.height) // 2
+        canvas_rgba.alpha_composite(fitted, (px, py))
+        canvas.paste(canvas_rgba.convert("RGB"))
+        return True
+    except Exception:
+        return False
 
 
 def _blur_faces(pil_img: Image.Image, blur_radius: int = 14) -> Image.Image:
@@ -144,6 +247,7 @@ def compose_split_style(
     bg=(255, 255, 255),
     blur_faces: bool = False,
     blur_radius: int = 14,
+    brand_logo: Optional[Path] = None,
 ):
     """예시의 의류형 썸네일 스타일: 좌측 메인컷 + 우측 2컷 + 하단 블랙 바."""
     if len(images) < 1:
@@ -174,7 +278,11 @@ def compose_split_style(
 
     draw = ImageDraw.Draw(canvas)
 
-    if title:
+    logo_applied = False
+    if brand_logo:
+        logo_applied = _paste_brand_logo(canvas, brand_logo, left_box, size)
+
+    if title and not logo_applied:
         # 첫 번째 큰 사진 박스 내부 상단 중앙(좌우대칭) 정렬
         title_size = max(44, size // 9)
         title_font = _load_font(title_size, bold=True)
@@ -275,6 +383,8 @@ def main():
     parser.add_argument("--style", choices=["split", "banner"], default="split", help="Layout style")
     parser.add_argument("--title", default="", help="Top-left title text (split style)")
     parser.add_argument("--brand", default="", help="Brand name text (if set, used as title)")
+    parser.add_argument("--brand-logo", default="", help="Brand logo image path (optional)")
+    parser.add_argument("--logo-dir", default="", help="Directory to search brand logo file (optional)")
     parser.add_argument("--footer", default="", help="Bottom/footer text")
     parser.add_argument("--first-name", default="00_thumb_main.jpg", help="Filename when saving into source folder")
     parser.add_argument("--blur-face", action="store_true", help="Apply Gaussian blur on detected faces")
@@ -301,6 +411,14 @@ def main():
 
     title_text = (args.brand.strip() or args.title.strip())
     footer_text = args.footer.strip() or f"{(args.brand.strip() or input_path.name)} / angduss k-closet"
+    logo_path = _find_brand_logo(
+        brand=args.brand.strip() or title_text,
+        input_path=input_path,
+        explicit_logo=args.brand_logo,
+        explicit_logo_dir=args.logo_dir,
+    )
+    if logo_path:
+        print(f"Brand logo found: {logo_path}")
     bg = (255, 255, 255)
 
     if args.style == "split":
@@ -313,6 +431,7 @@ def main():
             bg=bg,
             blur_faces=args.blur_face,
             blur_radius=args.blur_radius,
+            brand_logo=logo_path,
         )
     else:
         compose_banner_style(
