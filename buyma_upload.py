@@ -2280,6 +2280,44 @@ def _normalize_sheet_category_labels(cat1: str, cat2: str, cat3: str) -> Tuple[s
     return c1, c2, c3
 
 
+def _normalize_gender_label_for_sheet(text: str) -> str:
+    t = (text or '').strip().lower()
+    if not t:
+        return ''
+    if t in {'여성', '여자', '레ディース', 'レディース', 'w', 'female', 'women', 'womens'}:
+        return '여성'
+    if t in {'남성', '남자', 'メンズ', 'm', 'male', 'men', 'mens'}:
+        return '남성'
+    if '여성' in t or 'レディース' in t or 'women' in t or 'female' in t:
+        return '여성'
+    if '남성' in t or 'メンズ' in t or 'men' in t or 'male' in t:
+        return '남성'
+    return ''
+
+
+def _remap_sheet_categories_with_gender(cat1: str, cat2: str, cat3: str) -> Tuple[str, str, str]:
+    """시트 카테고리를 대=성별, 중/소=나머지 순으로 재배치한다."""
+    values = [(cat1 or '').strip(), (cat2 or '').strip(), (cat3 or '').strip()]
+    gender = ''
+    rest: List[str] = []
+    for v in values:
+        if not v:
+            continue
+        g = _normalize_gender_label_for_sheet(v)
+        if g and not gender:
+            gender = g
+            continue
+        if g:
+            continue
+        rest.append(v)
+
+    if not gender:
+        return cat1, cat2, cat3
+    new_mid = rest[0] if len(rest) > 0 else ''
+    new_small = rest[1] if len(rest) > 1 else ''
+    return gender, new_mid, new_small
+
+
 def _get_category_select_el(driver, item_index: int):
     """item_index에 해당하는 React-Select 요소를 반환한다."""
     if item_index == 0:
@@ -2831,6 +2869,9 @@ def fill_buyma_form(driver, row_data: Dict[str, str]) -> str:
             sheet_cat1 = (row_data.get('musinsa_category_large') or '').strip()
             sheet_cat2 = (row_data.get('musinsa_category_middle') or '').strip()
             sheet_cat3 = (row_data.get('musinsa_category_small') or '').strip()
+            sheet_cat1, sheet_cat2, sheet_cat3 = _remap_sheet_categories_with_gender(
+                sheet_cat1, sheet_cat2, sheet_cat3
+            )
 
             if sheet_cat1 and sheet_cat2:
                 cat1, cat2, cat3 = _normalize_sheet_category_labels(sheet_cat1, sheet_cat2, sheet_cat3)

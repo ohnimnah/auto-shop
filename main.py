@@ -227,12 +227,12 @@ def initialize_runtime_paths(data_dir: str = "", credentials_file: str = ""):
 # ==================== 배송비 산출 ====================
 
 def read_shipping_table(service, sheet_name: str) -> List[Tuple[float, int]]:
-    """Y/Z/AA 영역에서 무게(kg)→배송비(원) 기준표를 읽어 리스트로 반환한다.
+    """Z/AA/AB 영역에서 무게(kg)→배송비(원) 기준표를 읽어 리스트로 반환한다.
     반환: [(0.5, 8950), (1.0, 11350), ...] 무게 오름차순"""
     try:
         result = service.spreadsheets().values().get(
             spreadsheetId=SPREADSHEET_ID,
-            range=f"'{sheet_name}'!Y1:AA60"
+            range=f"'{sheet_name}'!Z1:AB60"
         ).execute()
         rows = result.get('values', [])
         table: List[Tuple[float, int]] = []
@@ -246,7 +246,7 @@ def read_shipping_table(service, sheet_name: str) -> List[Tuple[float, int]]:
             except ValueError:
                 continue
 
-            # Z열 배송비를 우선 사용, 없으면 AA열을 보조 사용
+            # AA열 배송비를 우선 사용, 없으면 AB열을 보조 사용
             cost_digits = re.sub(r'[^\d]', '', (row[1] or '').strip()) if len(row) > 1 else ""
             if not cost_digits and len(row) > 2:
                 cost_digits = re.sub(r'[^\d]', '', (row[2] or '').strip())
@@ -1827,7 +1827,7 @@ def process_sheet_once(
 
     shipping_table = read_shipping_table(service, sheet_name)
     if not shipping_table:
-        print(f"'{sheet_name}' 시트: 배송비 기준표(Y/Z/AA)를 읽지 못해 O열 배송비는 비워집니다.")
+        print(f"'{sheet_name}' 시트: 배송비 기준표(Z/AA/AB)를 읽지 못해 O열 배송비는 비워집니다.")
     for idx, url in target_rows:
         print(f"[{sheet_name}] {idx}행 처리 중: {url}")
         existing_values_for_row = existing_rows_map.get(idx, {})
@@ -2619,6 +2619,30 @@ def extract_musinsa_gender_large(
     return ""
 
 
+def remap_categories_with_gender(
+    gender_large: str,
+    cat_large: str,
+    cat_middle: str,
+    cat_small: str,
+) -> Tuple[str, str, str]:
+    """성별을 대분류로 고정하고, 나머지 카테고리를 중/소로 재배치한다."""
+    if not gender_large:
+        return cat_large, cat_middle, cat_small
+
+    rest: List[str] = []
+    for v in (cat_large, cat_middle, cat_small):
+        text = (v or "").strip()
+        if not text:
+            continue
+        if _normalize_gender_label(text):
+            continue
+        rest.append(text)
+
+    new_middle = rest[0] if len(rest) > 0 else ""
+    new_small = rest[1] if len(rest) > 1 else ""
+    return gender_large, new_middle, new_small
+
+
 def scrape_musinsa_product(
     driver,
     url: str,
@@ -2764,13 +2788,9 @@ def scrape_musinsa_product(
         cat_large, cat_middle, cat_small = extract_musinsa_categories(soup, mss_state)
         gender_large = extract_musinsa_gender_large(mss_state, cat_large, cat_middle, cat_small)
         if gender_large:
-            orig_large, orig_middle, orig_small = cat_large, cat_middle, cat_small
-            cat_large = gender_large
-            # 성별이 대분류로 올라가면, 소분류가 비어있는 경우에만
-            # 기존 (대, 중)을 (중, 소)로 한 칸씩 이동한다.
-            if not (orig_small or "").strip():
-                cat_middle = orig_large
-                cat_small = orig_middle
+            cat_large, cat_middle, cat_small = remap_categories_with_gender(
+                gender_large, cat_large, cat_middle, cat_small
+            )
         if cat_large or cat_middle or cat_small:
             print(f"    무신사 카테고리 추출: 대='{cat_large}' / 중='{cat_middle}' / 소='{cat_small}'")
         else:
