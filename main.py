@@ -372,6 +372,58 @@ def get_row_dynamic_values(
     return values
 
 
+def get_rows_dynamic_values_bulk(
+    service,
+    sheet_name: str,
+    row_numbers: List[int],
+    header_map: Dict[str, int],
+    header_names: List[str],
+) -> Dict[int, Dict[str, str]]:
+    """헤더명 기준 동적 컬럼 값을 여러 행에서 한 번에 읽어 반환한다."""
+    if not row_numbers:
+        return {}
+
+    target_indexes = [header_map[name] for name in header_names if name in header_map]
+    if not target_indexes:
+        return {row_num: {} for row_num in row_numbers}
+
+    min_col_index = min(target_indexes)
+    max_col_index = max(target_indexes)
+    start_col = column_index_to_letter(min_col_index)
+    end_col = column_index_to_letter(max_col_index)
+    min_row = min(row_numbers)
+    max_row = max(row_numbers)
+
+    try:
+        result = service.spreadsheets().values().get(
+            spreadsheetId=SPREADSHEET_ID,
+            range=f"'{sheet_name}'!{start_col}{min_row}:{end_col}{max_row}"
+        ).execute()
+        rows = result.get('values', [])
+    except Exception as e:
+        print(f" {sheet_name} 동적 컬럼 일괄 조회 실패: {e}")
+        return {row_num: {} for row_num in row_numbers}
+
+    row_set = set(row_numbers)
+    values_map: Dict[int, Dict[str, str]] = {}
+    for offset, row_num in enumerate(range(min_row, max_row + 1)):
+        if row_num not in row_set:
+            continue
+        row = rows[offset] if offset < len(rows) else []
+        row_values: Dict[str, str] = {}
+        for name in header_names:
+            idx = header_map.get(name)
+            if idx is None:
+                continue
+            local_offset = idx - min_col_index
+            row_values[name] = row[local_offset].strip() if local_offset < len(row) and row[local_offset] else ""
+        values_map[row_num] = row_values
+
+    for row_num in row_numbers:
+        values_map.setdefault(row_num, {})
+    return values_map
+
+
 def update_cell_by_header(
     service,
     sheet_name: str,
@@ -469,7 +521,7 @@ def create_thumbnail_for_folder(folder_path: str, brand: str) -> bool:
         print(f"    썸네일 스킵: 폴더가 없습니다 -> {folder}")
         return False
 
-    style = random.choice(["split", "banner"])
+    style = "split"
     footer = f"{brand} / angduss k-closet"
     command = [
         sys.executable,
@@ -758,7 +810,7 @@ def extract_brand_logo_url(soup: BeautifulSoup, product_json: Dict[str, object])
 
 
 def download_brand_logo(logo_url: str, folder_name: str, image_paths: str = "") -> str:
-    """Save brand logo as __brand_logo.* in product image folder."""
+    """Save brand logo as __brand_logo.png in product image folder."""
     if not logo_url:
         return ""
 
@@ -770,15 +822,20 @@ def download_brand_logo(logo_url: str, folder_name: str, image_paths: str = "") 
     os.makedirs(image_dir, exist_ok=True)
 
     try:
-        parsed = urllib.parse.urlparse(logo_url)
-        ext = os.path.splitext(parsed.path)[1].lower()
-        if ext not in {'.jpg', '.jpeg', '.png', '.webp'}:
-            ext = '.png'
-        logo_path = os.path.join(image_dir, f"__brand_logo{ext}")
+        logo_path = os.path.join(image_dir, "__brand_logo.png")
         request = urllib.request.Request(logo_url, headers={'User-Agent': 'Mozilla/5.0'})
         with urllib.request.urlopen(request, timeout=30) as response:
+            raw_bytes = response.read()
+        try:
+            from io import BytesIO
+            from PIL import Image
+
+            with Image.open(BytesIO(raw_bytes)) as img:
+                img.convert("RGBA").save(logo_path, format="PNG")
+        except Exception:
+            # Pillow 변환 실패 시에도 파일은 남기되, 확장자는 PNG로 고정한다.
             with open(logo_path, 'wb') as f:
-                f.write(response.read())
+                f.write(raw_bytes)
         print(f"    브랜드 로고 저장: {logo_path}")
         return logo_path.replace('\\', '/')
     except Exception as e:
@@ -1811,17 +1868,18 @@ def process_sheet_once(
 
     row_numbers = [row_num for row_num, _ in rows]
     existing_rows_map = get_existing_rows_bulk(service, sheet_name, row_numbers)
+    dynamic_rows_map = get_rows_dynamic_values_bulk(
+        service,
+        sheet_name,
+        row_numbers,
+        header_map,
+        [MARGIN_RATE_HEADER, PROGRESS_STATUS_HEADER],
+    )
 
     target_rows: List[Tuple[int, str]] = []
     for row_num, url in rows:
         existing_values = existing_rows_map.get(row_num, {})
-        dynamic_values = get_row_dynamic_values(
-            service,
-            sheet_name,
-            row_num,
-            header_map,
-            [MARGIN_RATE_HEADER, PROGRESS_STATUS_HEADER],
-        )
+        dynamic_values = dynamic_rows_map.get(row_num, {})
         margin_rate = parse_margin_rate(dynamic_values.get(MARGIN_RATE_HEADER, ""))
         current_status = dynamic_values.get(PROGRESS_STATUS_HEADER, "")
 
@@ -1948,9 +2006,11 @@ def process_sheet_once(
             next_status = determine_progress_status(margin_rate)
 
             # 정찰 단계 입력이 완료되면 다음 단계(CRAWLED)로 전환한다.
-            refreshed_values = get_existing_row_values(service, sheet_name, idx)
-            if not row_needs_update(refreshed_values, require_image_paths=False):
-                next_status = STATUS_CRAWLED
+            # 단, 마진률이 임계값 미만이면 보류 상태를 유지한다.
+            if next_status != STATUS_HOLD:
+                refreshed_values = get_existing_row_values(service, sheet_name, idx)
+                if not row_needs_update(refreshed_values, require_image_paths=False):
+                    next_status = STATUS_CRAWLED
 
             if current_status != next_status:
                 if update_cell_by_header(service, sheet_name, idx, header_map, PROGRESS_STATUS_HEADER, next_status):

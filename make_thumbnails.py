@@ -23,16 +23,21 @@ except Exception:
 
 IMAGE_EXTS = {".jpg", ".jpeg", ".png", ".webp", ".bmp"}
 LOGO_EXTS = (".png", ".webp", ".jpg", ".jpeg")
+LOGO_BASENAMES = {"__brand_logo", "_brand_logo", "brand_logo", "logo"}
 
 
 def iter_images(input_path: Path):
     if input_path.is_file() and input_path.suffix.lower() in IMAGE_EXTS:
+        if input_path.stem.lower() in LOGO_BASENAMES:
+            return
         yield input_path
         return
 
     if input_path.is_dir():
         for p in sorted(input_path.iterdir()):
             if p.is_file() and p.suffix.lower() in IMAGE_EXTS:
+                if p.stem.lower() in LOGO_BASENAMES:
+                    continue
                 yield p
 
 
@@ -138,8 +143,8 @@ def _paste_brand_logo(canvas: Image.Image, logo_path: Path, left_box, size: int)
     try:
         lx, ly, lw, lh = left_box
         with Image.open(logo_path).convert("RGBA") as logo:
-            max_w = max(100, int(lw * 0.68))
-            max_h = max(40, int(lh * 0.22))
+            max_w = max(90, int(lw * 0.27))
+            max_h = max(36, int(lh * 0.09))
             fitted = ImageOps.contain(logo, (max_w, max_h), method=Image.Resampling.LANCZOS)
 
         pad_x = max(10, size // 60)
@@ -152,11 +157,15 @@ def _paste_brand_logo(canvas: Image.Image, logo_path: Path, left_box, size: int)
         bx = lx + outer_margin_x
         by = ly + outer_margin_y
 
-        badge = Image.new("RGBA", (badge_w, badge_h), (0, 0, 0, 210))
         canvas_rgba = canvas.convert("RGBA")
-        canvas_rgba.alpha_composite(badge, (bx, by))
         px = bx + (badge_w - fitted.width) // 2
         py = by + (badge_h - fitted.height) // 2
+        # Add a subtle white outline so logos remain visible on dark/complex backgrounds.
+        alpha = fitted.getchannel("A")
+        outline = alpha.filter(ImageFilter.MaxFilter(3))
+        white_outline = Image.new("RGBA", fitted.size, (255, 255, 255, 0))
+        white_outline.putalpha(outline)
+        canvas_rgba.alpha_composite(white_outline, (px, py))
         canvas_rgba.alpha_composite(fitted, (px, py))
         canvas.paste(canvas_rgba.convert("RGB"))
         return True
@@ -203,8 +212,20 @@ def _blur_faces(pil_img: Image.Image, blur_radius: int = 14) -> Image.Image:
         y2 = min(out.height, y + h + py)
         if x2 <= x1 or y2 <= y1:
             continue
-        face_region = out.crop((x1, y1, x2, y2)).filter(ImageFilter.GaussianBlur(radius=blur_radius))
-        out.paste(face_region, (x1, y1))
+        face_region = out.crop((x1, y1, x2, y2))
+        blurred_region = face_region.filter(ImageFilter.GaussianBlur(radius=blur_radius))
+
+        # Apply blur with an elliptical mask to follow face shape instead of a rectangle.
+        mask = Image.new("L", (x2 - x1, y2 - y1), 0)
+        draw = ImageDraw.Draw(mask)
+        inset_x = max(1, int((x2 - x1) * 0.06))
+        inset_y = max(1, int((y2 - y1) * 0.04))
+        draw.ellipse(
+            (inset_x, inset_y, (x2 - x1) - inset_x, (y2 - y1) - inset_y),
+            fill=255,
+        )
+        mask = mask.filter(ImageFilter.GaussianBlur(radius=max(2, blur_radius // 2)))
+        out.paste(blurred_region, (x1, y1), mask)
     return out
 
 
@@ -375,6 +396,44 @@ def compose_banner_style(
     canvas.save(dst, quality=95, optimize=True)
 
 
+def compose_simple_logo_style(
+    images,
+    dst: Path,
+    size: int,
+    bg=(255, 255, 255),
+    blur_faces: bool = False,
+    blur_radius: int = 14,
+    brand_logo: Optional[Path] = None,
+):
+    """1장/2장 전용 단순 레이아웃:
+    - 1장: 원본 1장만 표시 + 로고 좌상단
+    - 2장: 좌우 50:50 표시 + 로고 좌상단
+    """
+    if len(images) not in (1, 2):
+        raise ValueError("simple 스타일은 1장 또는 2장만 지원합니다")
+
+    canvas = Image.new("RGB", (size, size), bg)
+    margin = max(12, size // 60)
+
+    if len(images) == 1:
+        box = (margin, margin, size - margin * 2, size - margin * 2)
+        _paste_contain(canvas, images[0], box, bg=bg, blur_faces=blur_faces, blur_radius=blur_radius)
+    else:
+        gap = max(4, size // 200)
+        inner_w = size - margin * 2
+        half_w = (inner_w - gap) // 2
+        left_box = (margin, margin, half_w, size - margin * 2)
+        right_box = (margin + half_w + gap, margin, inner_w - half_w - gap, size - margin * 2)
+        _paste_contain(canvas, images[0], left_box, bg=bg, blur_faces=blur_faces, blur_radius=blur_radius)
+        _paste_contain(canvas, images[1], right_box, bg=bg, blur_faces=blur_faces, blur_radius=blur_radius)
+
+    if brand_logo:
+        _paste_brand_logo(canvas, brand_logo, (0, 0, size, size), size)
+
+    dst.parent.mkdir(parents=True, exist_ok=True)
+    canvas.save(dst, quality=95, optimize=True)
+
+
 def main():
     parser = argparse.ArgumentParser(description="Create one style collage thumbnail")
     parser.add_argument("input", help="Input image file or folder")
@@ -421,7 +480,18 @@ def main():
         print(f"Brand logo found: {logo_path}")
     bg = (255, 255, 255)
 
-    if args.style == "split":
+    if len(images) <= 2:
+        compose_simple_logo_style(
+            images,
+            output_file,
+            args.size,
+            bg=bg,
+            blur_faces=args.blur_face,
+            blur_radius=args.blur_radius,
+            brand_logo=logo_path,
+        )
+        style_used = "simple"
+    elif args.style == "split":
         compose_split_style(
             images,
             output_file,
@@ -433,6 +503,7 @@ def main():
             blur_radius=args.blur_radius,
             brand_logo=logo_path,
         )
+        style_used = "split"
     else:
         compose_banner_style(
             images,
@@ -443,8 +514,9 @@ def main():
             blur_faces=args.blur_face,
             blur_radius=args.blur_radius,
         )
+        style_used = "banner"
 
-    print(f"Created 1 {args.style} thumbnail from {len(images)} images: {output_file}")
+    print(f"Created 1 {style_used} thumbnail from {len(images)} images: {output_file}")
 
 
 if __name__ == "__main__":
