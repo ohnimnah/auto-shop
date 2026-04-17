@@ -183,7 +183,6 @@ class AutoShopLauncher(tk.Tk):
 
         # Keep remaining action button objects for existing run/disable logic compatibility.
         hidden_actions = tk.Frame(left, bg="#121a33")
-        self.full_auto_btn = tk.Button(hidden_actions, text="풀 오토 실행", command=lambda: self.run_action("full-auto-upload"))
         self.run_btn = tk.Button(hidden_actions, text="정찰팀 시작", command=lambda: self.run_action("run"))
         self.watch_btn = tk.Button(hidden_actions, text="정찰팀 감시", command=lambda: self.run_action("watch"))
         self.image_save_btn = tk.Button(hidden_actions, text="자료팀 저장", command=lambda: self.run_action("save-images"))
@@ -194,7 +193,7 @@ class AutoShopLauncher(tk.Tk):
         self.upload_auto_btn = tk.Button(hidden_actions, text="판매팀 자동", command=lambda: self.run_action("upload-auto"))
 
         tk.Label(center, text="작전 사무실", bg="#101834", fg="#f7fbff", font=("Segoe UI", 13, "bold")).pack(anchor="w", pady=(0, 10))
-        self._build_stage_card(center, "작전 팀장", "필수 설치 / 초기 설정 / 시트 / 풀 오토", "leader", "#8f6cff")
+        self._build_stage_card(center, "작전 팀장", "필수 설치 / 초기 설정 / 시트", "leader", "#8f6cff")
         self._build_stage_card(center, "정찰팀", "무신사 크롤링", "scout", "#2a67cc")
         self._build_stage_card(center, "자료팀", "이미지 저장", "assets", "#2f9f65")
         self._build_stage_card(center, "디자인팀", "썸네일 작업", "design", "#c0882e")
@@ -388,7 +387,6 @@ class AutoShopLauncher(tk.Tk):
                 ("필수 설치", "install"),
                 ("초기 설정", "setup"),
                 ("시트 설정", "sheet-config"),
-                ("풀 오토 실행", "full-auto-upload"),
             ]
         if team_key == "scout":
             return [
@@ -616,12 +614,6 @@ class AutoShopLauncher(tk.Tk):
             self.current_stage_key = "design"
         elif action in {"upload-review", "upload-auto"}:
             self.current_stage_key = "sales"
-        elif action == "full-auto-upload":
-            self.current_stage_key = "leader"
-            self._set_stage_status("scout", "준비")
-            self._set_stage_status("assets", "준비")
-            self._set_stage_status("design", "준비")
-            self._set_stage_status("sales", "준비")
         else:
             self.current_stage_key = None
         if self.current_stage_key:
@@ -707,20 +699,11 @@ class AutoShopLauncher(tk.Tk):
 
         raise ValueError(f"Unknown action: {action}")
 
-    def _build_full_auto_sequence(self) -> list[list[str]]:
-        return [
-            self._build_command("run"),
-            self._build_command("save-images"),
-            self._build_command("make-thumbnails"),
-            self._build_command("upload-auto"),
-        ]
-
     def _set_running_ui(self, running: bool) -> None:
         normal = tk.DISABLED if running else tk.NORMAL
         self.install_btn.configure(state=normal)
         self.setup_btn.configure(state=normal)
         self.sheet_cfg_btn.configure(state=normal)
-        self.full_auto_btn.configure(state=normal)
         self.run_btn.configure(state=normal)
         self.watch_btn.configure(state=normal)
         self.image_save_btn.configure(state=normal)
@@ -994,7 +977,7 @@ class AutoShopLauncher(tk.Tk):
         self.refresh_first_run_wizard()
 
     def _ensure_sheet_config_before_action(self, action: str) -> bool:
-        if action not in {"run", "watch", "watch-crawler", "watch-images", "watch-thumbnails", "watch-upload", "upload-review", "upload-auto", "save-images", "make-thumbnails", "full-auto-upload"}:
+        if action not in {"run", "watch", "watch-crawler", "watch-images", "watch-thumbnails", "watch-upload", "upload-review", "upload-auto", "save-images", "make-thumbnails"}:
             return True
         cfg = self._load_sheet_config()
         sid = self._normalize_spreadsheet_id(cfg.get("spreadsheet_id", ""))
@@ -1078,10 +1061,6 @@ class AutoShopLauncher(tk.Tk):
         self.status_var.set("작전 준비중")
 
         # BUYMA ?낅줈???≪뀡? 釉뚮씪?곗?/?낅젰 ?뺤씤???꾪빐 ?곕???李쎌뿉??吏곸젒 ?ㅽ뻾
-        if action == "full-auto-upload":
-            self.status_var.set("터미널 시퀀스 실행")
-            self._start_sequence_in_terminal(self._build_full_auto_sequence())
-            return
         if action in {"upload-review", "upload-auto"}:
             self.status_var.set("터미널 업로드 실행")
             self._start_command_in_terminal(action)
