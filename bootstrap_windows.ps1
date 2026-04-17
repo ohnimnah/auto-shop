@@ -39,7 +39,9 @@ if (-not $pythonCmd) {
     }
 }
 
-if (-not (Test-Path '.venv')) {
+$venvPython = Join-Path $PSScriptRoot '.venv\Scripts\python.exe'
+
+function New-Venv {
     Write-Host 'Creating virtual environment (.venv)...'
     if ($pythonCmd -eq 'py -3') {
         py -3 -m venv .venv
@@ -49,9 +51,20 @@ if (-not (Test-Path '.venv')) {
     }
 }
 
-$venvPython = Join-Path $PSScriptRoot '.venv\Scripts\python.exe'
+if (-not (Test-Path '.venv')) {
+    New-Venv
+}
+
 if (-not (Test-Path $venvPython)) {
-    Write-Host 'Virtual environment python executable was not found.' -ForegroundColor Red
+    Write-Host 'Broken virtual environment detected. Recreating .venv...' -ForegroundColor Yellow
+    if (Test-Path '.venv') {
+        Remove-Item -Recurse -Force '.venv'
+    }
+    New-Venv
+}
+
+if (-not (Test-Path $venvPython)) {
+    Write-Host 'Virtual environment python executable was not found after recreation.' -ForegroundColor Red
     exit 1
 }
 
