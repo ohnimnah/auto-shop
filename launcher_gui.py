@@ -834,33 +834,40 @@ class AutoShopLauncher(tk.Tk):
                 return False
         return False
 
-    def _has_ready_mosaic_runtime(self) -> bool:
+    def _get_mosaic_runtime_state(self) -> str:
         python_cmd = resolve_python_executable()
         if not python_cmd:
-            return False
+            return "missing"
         if not (os.path.isfile(python_cmd) or shutil.which(python_cmd)):
-            return False
+            return "missing"
         try:
             result = subprocess.run(
                 [
                     python_cmd,
                     "-c",
                     (
-                        "import os, cv2; "
+                        "import os; "
+                        "import cv2; "
                         "p=cv2.data.haarcascades + 'haarcascade_frontalface_default.xml'; "
                         "c=cv2.CascadeClassifier(p); "
-                        "raise SystemExit(0 if os.path.exists(p) and not c.empty() else 1)"
+                        "state='ready' if os.path.exists(p) and not c.empty() else 'installed'; "
+                        "print(state)"
                     ),
                 ],
-                stdout=subprocess.DEVNULL,
+                stdout=subprocess.PIPE,
                 stderr=subprocess.DEVNULL,
                 text=True,
                 timeout=20,
                 check=False,
             )
-            return result.returncode == 0
+            if result.returncode != 0:
+                return "missing"
+            state = (result.stdout or "").strip().lower()
+            if state in {"ready", "installed"}:
+                return state
+            return "missing"
         except Exception:
-            return False
+            return "missing"
 
     def _has_credentials_file(self) -> bool:
         return bool(self._get_available_credentials_path())
@@ -874,7 +881,8 @@ class AutoShopLauncher(tk.Tk):
         runtime_ready = self._has_ready_runtime()
         credentials_ready = self._has_credentials_file()
         sheet_ready = self._has_valid_sheet_config()
-        mosaic_ready = self._has_ready_mosaic_runtime()
+        mosaic_state = self._get_mosaic_runtime_state()
+        mosaic_ready = mosaic_state in {"ready", "installed"}
         buyma_ready = self._has_buyma_credentials()
 
         runtime_text = f"{'완료' if runtime_ready else '필요'} · Python {os.path.basename(resolve_python_executable())}"
@@ -893,8 +901,10 @@ class AutoShopLauncher(tk.Tk):
         else:
             self.wizard_status_vars["sheet"].set("필요 · Spreadsheet ID와 시트 이름을 입력해주세요")
 
-        if mosaic_ready:
+        if mosaic_state == "ready":
             self.wizard_status_vars["mosaic"].set("완료 · 얼굴 모자이크 사용 가능")
+        elif mosaic_state == "installed":
+            self.wizard_status_vars["mosaic"].set("완료 · OpenCV 설치됨 (얼굴 블러는 일부 환경에서 제한될 수 있음)")
         else:
             self.wizard_status_vars["mosaic"].set("필요 · OpenCV 모자이크 구성요소를 설치해주세요")
 
@@ -909,7 +919,7 @@ class AutoShopLauncher(tk.Tk):
                 self.wizard_summary_var.set("준비 완료. 이제 샘플 1건 실행이나 감시 모드를 시작할 수 있습니다.")
             else:
                 self.wizard_summary_var.set("준비 완료. 업로드를 쓰려면 BUYMA 계정만 입력하면 됩니다.")
-        elif runtime_ready and credentials_ready and sheet_ready and not mosaic_ready:
+        elif runtime_ready and credentials_ready and sheet_ready and mosaic_state == "missing":
             self.wizard_summary_var.set("거의 준비 완료. 얼굴 모자이크를 쓰려면 한 번 더 필수 설치를 실행해주세요.")
         elif not credentials_ready:
             self.wizard_summary_var.set("다음 단계: Google 키 파일(credentials.json)을 연결해주세요.")
