@@ -419,32 +419,41 @@ def wait_for_buyma_login(driver) -> bool:
             driver.get(BUYMA_LOGIN_URL)
             _sleep(2)
 
-            # 이메일 입력
-            email_input = WebDriverWait(driver, 10).until(
-                EC.presence_of_element_located((By.CSS_SELECTOR,
-                    "input[name='txtLoginId'], input[type='email'], "
-                    "input[name='email'], input[id*='login'], input[id*='email']"
-                ))
+            email_selector = (
+                "input[name='txtLoginId'], input[type='email'], "
+                "input[name='email'], input[id*='login'], input[id*='email']"
             )
-
-
-            email_input.clear()
-
-            # 비밀번호 입력
-            pw_input = driver.find_element(By.CSS_SELECTOR,
+            password_selector = (
                 "input[name='txtLoginPass'], input[type='password'], "
                 "input[name='password']"
             )
-            pw_input.clear()
-            pw_input.send_keys(password)
-
-            # 로그인 버튼 클릭
-            login_btn = driver.find_element(By.CSS_SELECTOR,
+            login_selector = (
                 "input[type='submit'][value*='出品'], "
                 "button[type='submit'], input[type='submit'], "
                 ".login-btn, button[class*='login']"
             )
-            login_btn.click()
+
+            # 이메일 입력
+            email_input = WebDriverWait(driver, 10).until(
+                EC.visibility_of_element_located((By.CSS_SELECTOR, email_selector))
+            )
+            _scroll_and_click(driver, email_input)
+            email_input.clear()
+            email_input.send_keys(email)
+
+            # 비밀번호 입력
+            pw_input = WebDriverWait(driver, 10).until(
+                EC.visibility_of_element_located((By.CSS_SELECTOR, password_selector))
+            )
+            _scroll_and_click(driver, pw_input)
+            pw_input.clear()
+            pw_input.send_keys(password)
+
+            # 로그인 버튼 클릭
+            login_btn = WebDriverWait(driver, 10).until(
+                EC.element_to_be_clickable((By.CSS_SELECTOR, login_selector))
+            )
+            _scroll_and_click(driver, login_btn)
             _sleep(5)
 
             # 로그인 성공 확인
