@@ -210,9 +210,7 @@ class AutoShopLauncher(tk.Tk):
         self.run_btn = tk.Button(hidden_actions, text="정찰팀 시작", command=lambda: self.run_action("run"))
         self.watch_btn = tk.Button(hidden_actions, text="정찰팀 감시", command=lambda: self.run_action("watch"))
         self.image_save_btn = tk.Button(hidden_actions, text="자료팀 저장", command=lambda: self.run_action("save-images"))
-        self.thumb_btn = tk.Button(hidden_actions, text="디자인팀 수동", command=self.run_thumbnail_action)
-        self.thumb_auto_btn = tk.Button(hidden_actions, text="디자인팀 자동", command=self.run_thumbnail_auto_action)
-        self.thumb_batch_btn = tk.Button(hidden_actions, text="디자인팀 배치", command=lambda: self.run_action("make-thumbnails"))
+        self.thumb_btn = tk.Button(hidden_actions, text="썸네일 만들기", command=self.run_thumbnail_action)
         self.upload_review_btn = tk.Button(hidden_actions, text="판매팀 확인", command=lambda: self.run_action("upload-review"))
         self.upload_auto_btn = tk.Button(hidden_actions, text="판매팀 자동", command=lambda: self.run_action("upload-auto"))
 
@@ -416,9 +414,7 @@ class AutoShopLauncher(tk.Tk):
             ]
         if team_key == "design":
             return [
-                ("썸네일 수동", "thumbnail-manual"),
-                ("썸네일 자동", "thumbnail-auto"),
-                ("썸네일 배치", "make-thumbnails"),
+                ("썸네일 만들기", "thumbnail-create"),
                 (watch_label, f"team-watch-toggle:{team_key}"),
             ]
         if team_key == "sales":
@@ -496,11 +492,8 @@ class AutoShopLauncher(tk.Tk):
         if action == "sheet-config":
             self.configure_sheet_settings()
             return
-        if action == "thumbnail-manual":
+        if action == "thumbnail-create":
             self.run_thumbnail_action()
-            return
-        if action == "thumbnail-auto":
-            self.run_thumbnail_auto_action()
             return
         self.run_action(action)
 
@@ -623,8 +616,6 @@ class AutoShopLauncher(tk.Tk):
             self.current_stage_key = "scout"
         elif action == "save-images":
             self.current_stage_key = "assets"
-        elif action == "make-thumbnails":
-            self.current_stage_key = "design"
         elif action in {"upload-review", "upload-auto"}:
             self.current_stage_key = "sales"
         else:
@@ -699,8 +690,6 @@ class AutoShopLauncher(tk.Tk):
             return build_unbuffered_python_command(os.path.join(SCRIPT_DIR, "buyma_upload.py"), "--watch", "--mode", "auto")
         if action == "save-images":
             return build_unbuffered_python_command(os.path.join(SCRIPT_DIR, "main.py"), "--download-images")
-        if action == "make-thumbnails":
-            return build_unbuffered_python_command(os.path.join(SCRIPT_DIR, "main.py"), "--make-thumbnails")
         if action == "upload-review":
             return build_unbuffered_python_command(os.path.join(SCRIPT_DIR, "buyma_upload.py"), "--mode", "review")
         if action == "upload-auto":
@@ -718,8 +707,6 @@ class AutoShopLauncher(tk.Tk):
         self.upload_review_btn.configure(state=normal)
         self.upload_auto_btn.configure(state=normal)
         self.thumb_btn.configure(state=normal)
-        self.thumb_auto_btn.configure(state=normal)
-        self.thumb_batch_btn.configure(state=normal)
         self.stop_btn.configure(state=tk.NORMAL if running else tk.DISABLED)
 
     def _get_sheet_label_prefix(self) -> str:
@@ -985,7 +972,7 @@ class AutoShopLauncher(tk.Tk):
         self.refresh_first_run_wizard()
 
     def _ensure_sheet_config_before_action(self, action: str) -> bool:
-        if action not in {"run", "watch", "watch-images", "watch-thumbnails", "watch-upload", "upload-review", "upload-auto", "save-images", "make-thumbnails"}:
+        if action not in {"run", "watch", "watch-images", "watch-thumbnails", "watch-upload", "upload-review", "upload-auto", "save-images"}:
             return True
         cfg = self._load_sheet_config()
         sid = self._normalize_spreadsheet_id(cfg.get("spreadsheet_id", ""))
@@ -1092,6 +1079,7 @@ class AutoShopLauncher(tk.Tk):
         desc_frame.pack()
         tk.Label(desc_frame, text="split  : 좌측 큰 사진 + 우측 2칸 + 하단 텍스트", fg="#555").pack(anchor="w")
         tk.Label(desc_frame, text="banner : 상단 타이틀 + 중앙 텍스트 + 하단 3칸", fg="#555").pack(anchor="w")
+        tk.Label(desc_frame, text="auto   : split 또는 banner를 자동으로 선택", fg="#555").pack(anchor="w")
 
         btn_frame = tk.Frame(dlg, padx=20, pady=12)
         btn_frame.pack()
@@ -1104,6 +1092,8 @@ class AutoShopLauncher(tk.Tk):
                   font=("Arial", 10, "bold"), command=lambda: choose("split")).pack(side=tk.LEFT, padx=8)
         tk.Button(btn_frame, text="banner", width=14, bg="#e8f0fe",
                   font=("Arial", 10, "bold"), command=lambda: choose("banner")).pack(side=tk.LEFT, padx=8)
+        tk.Button(btn_frame, text="자동 선택", width=14, bg="#e8ffe8",
+                  font=("Arial", 10, "bold"), command=lambda: choose("auto")).pack(side=tk.LEFT, padx=8)
 
         cancel_frame = tk.Frame(dlg, pady=(0))
         cancel_frame.pack(pady=(0, 10))
@@ -1179,6 +1169,9 @@ class AutoShopLauncher(tk.Tk):
         style = self._ask_style()
         if style is None:
             return
+        if style == "auto":
+            style = random.choice(["split", "banner"])
+            self.append_log(f"썸네일 레이아웃 자동 선택: {style}\n")
 
         python_cmd = resolve_python_executable()
         footer = f"{brand} / angduss k-closet"
@@ -1194,53 +1187,9 @@ class AutoShopLauncher(tk.Tk):
             footer,
             "--blur-face",
         ]
-        self._sync_stage_from_action("make-thumbnails")
-        self._start_command(command)
-
-    def run_thumbnail_auto_action(self) -> None:
-        """?ㅽ????쒕뜡 ?먮룞 ?좏깮?쇰줈 ?몃꽕???앹꽦."""
-        if self.process and self.process.poll() is None:
-            messagebox.showwarning("실행 중", "이미 작업이 실행 중입니다. 먼저 중지해주세요.")
-            return
-
-        folder = filedialog.askdirectory(
-            title="?몃꽕???몄쭛???대?吏 ?대뜑 ?좏깮",
-            initialdir=get_default_images_dir(),
-            mustexist=True,
-        )
-        if not folder:
-            return
-
-        sheets_brand = self._fetch_brand_from_sheets(folder)
-        default_brand = sheets_brand or self._guess_brand(folder)
-        brand = simpledialog.askstring(
-            "釉뚮옖?쒕챸",
-            "?곷떒 釉뚮옖?쒕챸???낅젰?섏꽭??",
-            initialvalue=default_brand,
-            parent=self,
-        )
-        if brand is None:
-            return
-        brand = brand.strip() or default_brand or "BRAND"
-
-        style = random.choice(["split", "banner"])
-        self.append_log(f"?ㅽ????먮룞?좏깮: {style}\n")
-
-        python_cmd = resolve_python_executable()
-        footer = f"{brand} / angduss k-closet"
-        command = [
-            python_cmd,
-            os.path.join(SCRIPT_DIR, "make_thumbnails.py"),
-            folder,
-            "--style",
-            style,
-            "--brand",
-            brand,
-            "--footer",
-            footer,
-            "--blur-face",
-        ]
-        self._sync_stage_from_action("make-thumbnails")
+        self.current_action = "thumbnail-create"
+        self.current_stage_key = "design"
+        self._set_stage_status("design", "진행중")
         self._start_command(command)
 
     def _read_output(self) -> None:
