@@ -776,7 +776,26 @@ class AutoShopLauncher(tk.Tk):
 
     def _has_ready_runtime(self) -> bool:
         python_cmd = resolve_python_executable()
-        return os.path.isfile(python_cmd) and os.path.basename(python_cmd).startswith("python")
+        if not python_cmd:
+            return False
+        if os.path.isfile(python_cmd) or shutil.which(python_cmd):
+            try:
+                result = subprocess.run(
+                    [
+                        python_cmd,
+                        "-c",
+                        "import selenium, PIL, bs4, googleapiclient, google.oauth2, webdriver_manager, numpy, cv2",
+                    ],
+                    stdout=subprocess.DEVNULL,
+                    stderr=subprocess.DEVNULL,
+                    text=True,
+                    timeout=20,
+                    check=False,
+                )
+                return result.returncode == 0
+            except Exception:
+                return False
+        return False
 
     def _has_credentials_file(self) -> bool:
         return bool(self._get_available_credentials_path())
