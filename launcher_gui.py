@@ -211,8 +211,8 @@ class AutoShopLauncher(tk.Tk):
         self.watch_btn = tk.Button(hidden_actions, text="정찰팀 감시", command=lambda: self.run_action("watch"))
         self.image_save_btn = tk.Button(hidden_actions, text="자료팀 저장", command=lambda: self.run_action("save-images"))
         self.thumb_btn = tk.Button(hidden_actions, text="썸네일 만들기", command=self.run_thumbnail_action)
-        self.upload_review_btn = tk.Button(hidden_actions, text="판매팀 확인", command=lambda: self.run_action("upload-review"))
-        self.upload_auto_btn = tk.Button(hidden_actions, text="판매팀 자동", command=lambda: self.run_action("upload-auto"))
+        self.upload_review_btn = tk.Button(hidden_actions, text="검토 후 업로드", command=lambda: self.run_action("upload-review"))
+        self.upload_auto_btn = tk.Button(hidden_actions, text="한 번 자동 업로드", command=lambda: self.run_action("upload-auto"))
 
         tk.Label(center, text="작전 사무실", bg="#101834", fg="#f7fbff", font=("Segoe UI", 13, "bold")).pack(anchor="w", pady=(0, 10))
         self._build_stage_card(center, "정찰팀", "무신사 크롤링", "scout", "#2a67cc")
@@ -419,8 +419,8 @@ class AutoShopLauncher(tk.Tk):
             ]
         if team_key == "sales":
             return [
-                ("업로드 확인", "upload-review"),
-                ("업로드 자동", "upload-auto"),
+                ("검토 후 업로드", "upload-review"),
+                ("한 번 자동 업로드", "upload-auto"),
                 (watch_label, f"team-watch-toggle:{team_key}"),
             ]
         return []
