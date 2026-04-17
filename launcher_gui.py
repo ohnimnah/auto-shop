@@ -376,7 +376,17 @@ class AutoShopLauncher(tk.Tk):
         ).pack(anchor="w", pady=(2, 6))
         bottom = tk.Frame(row, bg="#1e2b52")
         bottom.pack(fill=tk.X)
-        tk.Label(bottom, textvariable=status_var, bg="#1e2b52", fg="#5ef2c2", font=("Consolas", 9, "bold")).pack(side=tk.LEFT)
+        bottom.grid_columnconfigure(0, weight=1)
+        tk.Label(
+            bottom,
+            textvariable=status_var,
+            bg="#1e2b52",
+            fg="#5ef2c2",
+            justify=tk.LEFT,
+            anchor="w",
+            wraplength=165,
+            font=("Consolas", 9, "bold"),
+        ).grid(row=0, column=0, sticky="ew", padx=(0, 8))
         tk.Button(
             bottom,
             text=button_text,
@@ -385,7 +395,7 @@ class AutoShopLauncher(tk.Tk):
             fg="#f3f6ff",
             relief=tk.FLAT,
             activebackground="#4062a6",
-        ).pack(side=tk.RIGHT)
+        ).grid(row=0, column=1, sticky="e")
 
     def run_install_from_wizard(self) -> None:
         self.refresh_first_run_wizard()
