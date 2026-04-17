@@ -211,12 +211,6 @@ class AutoShopLauncher(tk.Tk):
         self.stop_btn = tk.Button(left_content, text="긴급 중지", command=self.stop_action, state=tk.DISABLED, bg="#5a2330", fg="#ffeef2", relief=tk.FLAT, activebackground="#6d2b3b")
         self.stop_btn.pack(fill=tk.X, pady=(0, 8), ipady=7)
 
-        self.install_btn = tk.Button(left_content, text="필수 설치", command=lambda: self.run_action("install"), bg="#1f315d", fg="#f3f6ff", relief=tk.FLAT, activebackground="#28417c")
-        self.sheet_cfg_btn = tk.Button(left_content, text="시트 설정", command=self.configure_sheet_settings, bg="#284f79", fg="#ebf6ff", relief=tk.FLAT, activebackground="#33659b")
-        self.images_dir_btn = tk.Button(left_content, text="이미지 경로", command=self.configure_images_directory, bg="#2d5d4f", fg="#effff7", relief=tk.FLAT, activebackground="#367263")
-        self.install_btn.pack(fill=tk.X, pady=2, ipady=5)
-        self.sheet_cfg_btn.pack(fill=tk.X, pady=2, ipady=5)
-        self.images_dir_btn.pack(fill=tk.X, pady=(2, 8), ipady=5)
         self._build_first_run_wizard(left_content)
 
         # Keep remaining action button objects for existing run/disable logic compatibility.
@@ -751,9 +745,6 @@ class AutoShopLauncher(tk.Tk):
 
     def _set_running_ui(self, running: bool) -> None:
         normal = tk.DISABLED if running else tk.NORMAL
-        self.install_btn.configure(state=normal)
-        self.sheet_cfg_btn.configure(state=normal)
-        self.images_dir_btn.configure(state=normal)
         self.run_btn.configure(state=normal)
         self.watch_btn.configure(state=normal)
         self.image_save_btn.configure(state=normal)
