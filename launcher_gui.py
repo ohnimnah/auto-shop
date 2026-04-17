@@ -288,10 +288,10 @@ class AutoShopLauncher(tk.Tk):
         self._build_wizard_step(
             card,
             "1. 실행 준비",
-            "Python과 가상환경이 준비됐는지 확인합니다.",
+            "Python, 가상환경, 필수 패키지를 준비합니다.",
             self.wizard_status_vars["runtime"],
-            self.refresh_first_run_wizard,
-            "다시 확인",
+            self.run_install_from_wizard,
+            "필수 설치",
         )
         self._build_wizard_step(
             card,
@@ -314,13 +314,22 @@ class AutoShopLauncher(tk.Tk):
         actions.pack(fill=tk.X, pady=(4, 0))
         tk.Button(
             actions,
+            text="상태 다시 확인",
+            command=self.refresh_first_run_wizard,
+            bg="#32466f",
+            fg="#eff4ff",
+            relief=tk.FLAT,
+            activebackground="#3e5a8e",
+        ).pack(fill=tk.X, ipady=5)
+        tk.Button(
+            actions,
             text="연결 테스트",
             command=self.test_google_setup,
             bg="#2b5f8a",
             fg="#eff7ff",
             relief=tk.FLAT,
             activebackground="#3675aa",
-        ).pack(fill=tk.X, ipady=5)
+        ).pack(fill=tk.X, pady=(6, 0), ipady=5)
         tk.Button(
             actions,
             text="샘플 1건 실행",
@@ -364,6 +373,13 @@ class AutoShopLauncher(tk.Tk):
             relief=tk.FLAT,
             activebackground="#4062a6",
         ).pack(side=tk.RIGHT)
+
+    def run_install_from_wizard(self) -> None:
+        self.refresh_first_run_wizard()
+        if self.process and self.process.poll() is None:
+            messagebox.showwarning("실행 중", "이미 작업이 실행 중입니다. 먼저 중지해주세요.")
+            return
+        self.run_action("install")
 
     def _build_stage_card(self, parent: tk.Frame, team: str, desc: str, key: str, accent: str) -> None:
         card = tk.Frame(parent, bg="#1a2346", padx=10, pady=10, highlightbackground=accent, highlightthickness=1)
