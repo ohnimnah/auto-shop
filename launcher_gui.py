@@ -2,6 +2,7 @@
 import queue
 import random
 import re
+import base64
 import json
 import shutil
 import subprocess
@@ -89,6 +90,7 @@ class AutoShopLauncher(tk.Tk):
             "credentials": tk.StringVar(value="확인 전"),
             "sheet": tk.StringVar(value="확인 전"),
             "mosaic": tk.StringVar(value="확인 전"),
+            "buyma": tk.StringVar(value="확인 전"),
         }
         self.stage_vars: dict[str, tk.StringVar] = {
             "scout": tk.StringVar(value="대기"),
@@ -311,6 +313,14 @@ class AutoShopLauncher(tk.Tk):
             self.wizard_status_vars["mosaic"],
             self.run_install_from_wizard,
             "필수 설치",
+        )
+        self._build_wizard_step(
+            card,
+            "5. BUYMA 계정",
+            "업로드에 쓸 BUYMA 아이디와 비밀번호를 저장합니다.",
+            self.wizard_status_vars["buyma"],
+            self.configure_buyma_credentials,
+            "계정 입력",
         )
 
         actions = tk.Frame(card, bg="#182446")
@@ -765,6 +775,9 @@ class AutoShopLauncher(tk.Tk):
     def _get_credentials_target_path(self) -> str:
         return os.path.join(self.data_dir, "credentials.json")
 
+    def _get_buyma_credentials_target_path(self) -> str:
+        return os.path.join(self.data_dir, "buyma_credentials.json")
+
     def _get_available_credentials_path(self) -> str:
         target = self._get_credentials_target_path()
         if os.path.exists(target):
@@ -773,6 +786,30 @@ class AutoShopLauncher(tk.Tk):
         if os.path.exists(legacy):
             return legacy
         return ""
+
+    def _has_buyma_credentials(self) -> bool:
+        path = self._get_buyma_credentials_target_path()
+        if not os.path.exists(path):
+            return False
+        try:
+            with open(path, "r", encoding="utf-8") as f:
+                data = json.load(f)
+            email = base64.b64decode(str(data.get("email", "")).encode()).decode().strip()
+            password = base64.b64decode(str(data.get("password", "")).encode()).decode().strip()
+            return bool(email and password)
+        except Exception:
+            return False
+
+    def _load_buyma_email(self) -> str:
+        path = self._get_buyma_credentials_target_path()
+        if not os.path.exists(path):
+            return ""
+        try:
+            with open(path, "r", encoding="utf-8") as f:
+                data = json.load(f)
+            return base64.b64decode(str(data.get("email", "")).encode()).decode().strip()
+        except Exception:
+            return ""
 
     def _has_ready_runtime(self) -> bool:
         python_cmd = resolve_python_executable()
@@ -838,6 +875,7 @@ class AutoShopLauncher(tk.Tk):
         credentials_ready = self._has_credentials_file()
         sheet_ready = self._has_valid_sheet_config()
         mosaic_ready = self._has_ready_mosaic_runtime()
+        buyma_ready = self._has_buyma_credentials()
 
         runtime_text = f"{'완료' if runtime_ready else '필요'} · Python {os.path.basename(resolve_python_executable())}"
         self.wizard_status_vars["runtime"].set(runtime_text)
@@ -860,8 +898,17 @@ class AutoShopLauncher(tk.Tk):
         else:
             self.wizard_status_vars["mosaic"].set("필요 · OpenCV 모자이크 구성요소를 설치해주세요")
 
+        if buyma_ready:
+            email = self._load_buyma_email()
+            self.wizard_status_vars["buyma"].set(f"완료 · {email or 'BUYMA 계정 저장됨'}")
+        else:
+            self.wizard_status_vars["buyma"].set("선택 · 업로드 전 BUYMA 계정을 저장해주세요")
+
         if runtime_ready and credentials_ready and sheet_ready and mosaic_ready:
-            self.wizard_summary_var.set("준비 완료. 이제 샘플 1건 실행이나 감시 모드를 시작할 수 있습니다.")
+            if buyma_ready:
+                self.wizard_summary_var.set("준비 완료. 이제 샘플 1건 실행이나 감시 모드를 시작할 수 있습니다.")
+            else:
+                self.wizard_summary_var.set("준비 완료. 업로드를 쓰려면 BUYMA 계정만 입력하면 됩니다.")
         elif runtime_ready and credentials_ready and sheet_ready and not mosaic_ready:
             self.wizard_summary_var.set("거의 준비 완료. 얼굴 모자이크를 쓰려면 한 번 더 필수 설치를 실행해주세요.")
         elif not credentials_ready:
@@ -870,6 +917,51 @@ class AutoShopLauncher(tk.Tk):
             self.wizard_summary_var.set("다음 단계: 작업할 Google 시트 정보를 입력해주세요.")
         else:
             self.wizard_summary_var.set("실행 준비를 마쳤습니다. 연결 테스트를 눌러 확인해보세요.")
+
+    def configure_buyma_credentials(self) -> bool:
+        current_email = self._load_buyma_email()
+        email = simpledialog.askstring(
+            "BUYMA 계정",
+            "BUYMA 아이디(이메일)를 입력하세요.",
+            initialvalue=current_email,
+            parent=self,
+        )
+        if email is None:
+            return False
+        email = email.strip()
+        if not email:
+            messagebox.showwarning("입력 오류", "BUYMA 아이디를 입력해주세요.")
+            return False
+
+        password = simpledialog.askstring(
+            "BUYMA 계정",
+            "BUYMA 비밀번호를 입력하세요.",
+            parent=self,
+            show="*",
+        )
+        if password is None:
+            return False
+        password = password.strip()
+        if not password:
+            messagebox.showwarning("입력 오류", "BUYMA 비밀번호를 입력해주세요.")
+            return False
+
+        try:
+            os.makedirs(self.data_dir, exist_ok=True)
+            payload = {
+                "email": base64.b64encode(email.encode()).decode(),
+                "password": base64.b64encode(password.encode()).decode(),
+            }
+            target_path = self._get_buyma_credentials_target_path()
+            with open(target_path, "w", encoding="utf-8") as f:
+                json.dump(payload, f, ensure_ascii=False, indent=2)
+            self.append_log(f"BUYMA 계정 저장 완료: {target_path}\n")
+            messagebox.showinfo("BUYMA 계정 저장", "BUYMA 아이디와 비밀번호를 저장했습니다.")
+            self.refresh_first_run_wizard()
+            return True
+        except Exception as exc:
+            messagebox.showerror("저장 실패", f"BUYMA 계정 저장 실패: {exc}")
+            return False
 
     def import_credentials_file(self) -> bool:
         initial_dir = os.path.expanduser("~/Downloads")
