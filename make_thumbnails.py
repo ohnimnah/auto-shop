@@ -161,6 +161,50 @@ def _find_thumbnail_frame() -> Optional[Path]:
     return None
 
 
+def _measure_frame_inner_box(frame: Image.Image) -> tuple[int, int, int, int]:
+    alpha = frame.getchannel("A")
+    w, h = frame.size
+    center_y = h // 2
+    center_x = w // 2
+
+    left = 0
+    while left < w and alpha.getpixel((left, center_y)) == 0:
+        left += 1
+
+    right = w - 1
+    while right >= 0 and alpha.getpixel((right, center_y)) == 0:
+        right -= 1
+
+    top = 0
+    while top < h and alpha.getpixel((center_x, top)) == 0:
+        top += 1
+
+    bottom = h - 1
+    while bottom >= 0 and alpha.getpixel((center_x, bottom)) == 0:
+        bottom -= 1
+
+    if left >= right or top >= bottom:
+        return (0, 0, w, h)
+    return (left, top, right + 1, bottom + 1)
+
+
+def _fit_canvas_inside_frame(canvas: Image.Image, frame_path: Optional[Path]) -> Image.Image:
+    if frame_path is None:
+        return canvas
+    try:
+        with Image.open(frame_path).convert("RGBA") as frame:
+            fitted_frame = frame.resize(canvas.size, Image.Resampling.LANCZOS)
+            inner_left, inner_top, inner_right, inner_bottom = _measure_frame_inner_box(fitted_frame)
+            inner_w = max(1, inner_right - inner_left)
+            inner_h = max(1, inner_bottom - inner_top)
+            shrunk = canvas.resize((inner_w, inner_h), Image.Resampling.LANCZOS)
+            base = Image.new("RGB", canvas.size, (255, 255, 255))
+            base.paste(shrunk, (inner_left, inner_top))
+            return base
+    except Exception:
+        return canvas
+
+
 def _apply_thumbnail_frame(canvas: Image.Image, frame_path: Optional[Path]) -> Image.Image:
     if frame_path is None:
         return canvas
@@ -172,6 +216,39 @@ def _apply_thumbnail_frame(canvas: Image.Image, frame_path: Optional[Path]) -> I
             return merged.convert("RGB")
     except Exception:
         return canvas
+
+
+def _add_bottom_caption(canvas: Image.Image, footer: str) -> Image.Image:
+    footer = (footer or "").strip()
+    if not footer:
+        return canvas
+
+    caption_font_size = max(22, canvas.width // 24)
+    caption_font = _load_font(caption_font_size, bold=True)
+    draw_probe = ImageDraw.Draw(Image.new("RGB", (10, 10), (255, 255, 255)))
+    bbox = draw_probe.textbbox((0, 0), footer, font=caption_font)
+    text_w = bbox[2] - bbox[0]
+    text_h = bbox[3] - bbox[1]
+
+    max_text_w = canvas.width - max(60, canvas.width // 12)
+    while text_w > max_text_w and caption_font_size > 14:
+        caption_font_size -= 1
+        caption_font = _load_font(caption_font_size, bold=True)
+        bbox = draw_probe.textbbox((0, 0), footer, font=caption_font)
+        text_w = bbox[2] - bbox[0]
+        text_h = bbox[3] - bbox[1]
+
+    top_gap = max(18, canvas.width // 40)
+    bottom_gap = max(18, canvas.width // 34)
+    final_h = canvas.height + top_gap + text_h + bottom_gap
+
+    final_canvas = Image.new("RGB", (canvas.width, final_h), (255, 255, 255))
+    final_canvas.paste(canvas, (0, 0))
+    draw = ImageDraw.Draw(final_canvas)
+    tx = (canvas.width - text_w) // 2
+    ty = canvas.height + top_gap
+    draw.text((tx, ty), footer, fill=(0, 0, 0), font=caption_font)
+    return final_canvas
 
 
 def _paste_brand_logo(canvas: Image.Image, logo_path: Path, left_box, size: int) -> bool:
@@ -327,8 +404,7 @@ def compose_split_style(
 
     canvas = Image.new("RGB", (size, size), bg)
     margin = max(20, size // 36)
-    footer_h = max(52, size // 14)
-    top_h = size - (margin * 2) - footer_h
+    top_h = size - (margin * 2)
     inner_w = size - margin * 2
     gap = max(4, size // 200)
 
@@ -379,15 +455,10 @@ def compose_split_style(
             stroke_fill=(0, 0, 0),
         )
 
-    draw.rectangle((0, size - footer_h, size, size), fill=(255, 255, 255))
-    footer_font = _load_font(max(22, size // 24), bold=True)
-    tw, th = draw.textbbox((0, 0), footer, font=footer_font)[2:]
-    tx = (size - tw) // 2
-    ty = size - footer_h + (footer_h - th) // 2
-    draw.text((tx, ty), footer, fill=(0, 0, 0), font=footer_font)
-
     dst.parent.mkdir(parents=True, exist_ok=True)
+    canvas = _fit_canvas_inside_frame(canvas, frame_overlay)
     canvas = _apply_thumbnail_frame(canvas, frame_overlay)
+    canvas = _add_bottom_caption(canvas, footer)
     canvas.save(dst, quality=95, optimize=True)
 
 
@@ -442,6 +513,7 @@ def compose_banner_style(
     _paste_contain(canvas, images[3], (margin + (cell_w + gap) * 2, bottom_y, cell_w, bottom_h), bg=bg, blur_faces=blur_faces, blur_radius=blur_radius)
 
     dst.parent.mkdir(parents=True, exist_ok=True)
+    canvas = _fit_canvas_inside_frame(canvas, frame_overlay)
     canvas = _apply_thumbnail_frame(canvas, frame_overlay)
     canvas.save(dst, quality=95, optimize=True)
 
@@ -482,6 +554,7 @@ def compose_simple_logo_style(
         _paste_brand_logo(canvas, brand_logo, (0, 0, size, size), size)
 
     dst.parent.mkdir(parents=True, exist_ok=True)
+    canvas = _fit_canvas_inside_frame(canvas, frame_overlay)
     canvas = _apply_thumbnail_frame(canvas, frame_overlay)
     canvas.save(dst, quality=95, optimize=True)
 
