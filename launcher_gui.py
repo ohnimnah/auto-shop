@@ -48,6 +48,17 @@ def get_default_images_dir() -> str:
     env_images_dir = os.environ.get('AUTO_SHOP_IMAGES_DIR', '').strip()
     if env_images_dir:
         return os.path.abspath(os.path.expanduser(env_images_dir))
+    cfg_path = os.path.join(get_default_data_dir(), "sheets_config.json")
+    try:
+        if os.path.exists(cfg_path):
+            with open(cfg_path, "r", encoding="utf-8") as f:
+                cfg = json.load(f)
+            if isinstance(cfg, dict):
+                saved_images_dir = (cfg.get("images_dir") or "").strip()
+                if saved_images_dir:
+                    return os.path.abspath(os.path.expanduser(saved_images_dir))
+    except Exception:
+        pass
     return os.path.join(os.path.expanduser('~'), 'images')
 
 
@@ -201,8 +212,10 @@ class AutoShopLauncher(tk.Tk):
 
         self.install_btn = tk.Button(left_content, text="필수 설치", command=lambda: self.run_action("install"), bg="#1f315d", fg="#f3f6ff", relief=tk.FLAT, activebackground="#28417c")
         self.sheet_cfg_btn = tk.Button(left_content, text="시트 설정", command=self.configure_sheet_settings, bg="#284f79", fg="#ebf6ff", relief=tk.FLAT, activebackground="#33659b")
+        self.images_dir_btn = tk.Button(left_content, text="이미지 경로", command=self.configure_images_directory, bg="#2d5d4f", fg="#effff7", relief=tk.FLAT, activebackground="#367263")
         self.install_btn.pack(fill=tk.X, pady=2, ipady=5)
-        self.sheet_cfg_btn.pack(fill=tk.X, pady=(2, 8), ipady=5)
+        self.sheet_cfg_btn.pack(fill=tk.X, pady=2, ipady=5)
+        self.images_dir_btn.pack(fill=tk.X, pady=(2, 8), ipady=5)
         self._build_first_run_wizard(left_content)
 
         # Keep remaining action button objects for existing run/disable logic compatibility.
@@ -403,9 +416,10 @@ class AutoShopLauncher(tk.Tk):
     def _get_team_actions(self, team_key: str) -> list[tuple[str, str]]:
         watch_label = "팀 감시 중지" if self.team_watch_enabled.get(team_key, False) else "팀 감시 시작"
         if team_key == "scout":
+            scout_watch_label = "팀 감시 중지" if self._is_scout_watch_running() else "팀 감시 시작"
             return [
                 ("정찰 시작", "run"),
-                ("팀 감시 시작", "watch"),
+                (scout_watch_label, "scout-watch-toggle"),
             ]
         if team_key == "assets":
             return [
@@ -489,6 +503,9 @@ class AutoShopLauncher(tk.Tk):
             team_key = action.split(":", 1)[1].strip()
             self._toggle_team_watch(team_key)
             return
+        if action == "scout-watch-toggle":
+            self._toggle_scout_watch()
+            return
         if action == "sheet-config":
             self.configure_sheet_settings()
             return
@@ -496,6 +513,15 @@ class AutoShopLauncher(tk.Tk):
             self.run_thumbnail_action()
             return
         self.run_action(action)
+
+    def _is_scout_watch_running(self) -> bool:
+        return bool(self.current_action == "watch" and self.process and self.process.poll() is None)
+
+    def _toggle_scout_watch(self) -> None:
+        if self._is_scout_watch_running():
+            self.stop_action()
+            return
+        self.run_action("watch")
 
     def _toggle_team_watch(self, team_key: str) -> None:
         if team_key not in self.team_watch_actions:
@@ -567,6 +593,7 @@ class AutoShopLauncher(tk.Tk):
         try:
             env = os.environ.copy()
             env["PYTHONUNBUFFERED"] = "1"
+            env["AUTO_SHOP_IMAGES_DIR"] = self._get_configured_images_dir()
             proc = subprocess.Popen(
                 command,
                 cwd=SCRIPT_DIR,
@@ -701,6 +728,7 @@ class AutoShopLauncher(tk.Tk):
         normal = tk.DISABLED if running else tk.NORMAL
         self.install_btn.configure(state=normal)
         self.sheet_cfg_btn.configure(state=normal)
+        self.images_dir_btn.configure(state=normal)
         self.run_btn.configure(state=normal)
         self.watch_btn.configure(state=normal)
         self.image_save_btn.configure(state=normal)
@@ -862,6 +890,13 @@ class AutoShopLauncher(tk.Tk):
         except Exception:
             return {}
 
+    def _get_configured_images_dir(self) -> str:
+        cfg = self._load_sheet_config()
+        configured = (cfg.get("images_dir") or "").strip()
+        if configured:
+            return os.path.abspath(os.path.expanduser(configured))
+        return get_default_images_dir()
+
     def _save_sheet_config(self, config: dict) -> bool:
         try:
             os.makedirs(self.data_dir, exist_ok=True)
@@ -871,6 +906,33 @@ class AutoShopLauncher(tk.Tk):
         except Exception as e:
             messagebox.showerror("저장 실패", f"시트 설정 저장 실패: {e}")
             return False
+
+    def configure_images_directory(self) -> bool:
+        current_dir = self._get_configured_images_dir()
+        selected_dir = filedialog.askdirectory(
+            title="이미지 저장 폴더 선택",
+            initialdir=current_dir,
+            mustexist=False,
+            parent=self,
+        )
+        if not selected_dir:
+            return False
+
+        selected_dir = os.path.abspath(os.path.expanduser(selected_dir))
+        try:
+            os.makedirs(selected_dir, exist_ok=True)
+        except Exception as exc:
+            messagebox.showerror("폴더 생성 실패", f"선택한 폴더를 준비하지 못했습니다: {exc}")
+            return False
+
+        current = self._load_sheet_config()
+        current["images_dir"] = selected_dir
+        if not self._save_sheet_config(current):
+            return False
+
+        self.append_log(f"이미지 저장 경로 설정 완료: {selected_dir}\n")
+        messagebox.showinfo("이미지 경로 저장", f"앞으로 이미지 저장 기본 경로로 사용합니다.\n{selected_dir}")
+        return True
 
     def _has_sheet_config(self) -> bool:
         cfg = self._load_sheet_config()
@@ -959,6 +1021,7 @@ class AutoShopLauncher(tk.Tk):
             "sheet_name": sheet_name,
             "sheet_gids": gids,
             "row_start": 2,
+            "images_dir": (current.get("images_dir") or "").strip(),
         }
         if not self._save_sheet_config(config):
             return False
@@ -988,6 +1051,7 @@ class AutoShopLauncher(tk.Tk):
         try:
             env = os.environ.copy()
             env["PYTHONUNBUFFERED"] = "1"
+            env["AUTO_SHOP_IMAGES_DIR"] = self._get_configured_images_dir()
             self.process = subprocess.Popen(
                 command,
                 cwd=SCRIPT_DIR,

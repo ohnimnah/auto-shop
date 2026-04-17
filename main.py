@@ -192,6 +192,17 @@ def get_default_images_dir() -> str:
     env_images_dir = os.environ.get('AUTO_SHOP_IMAGES_DIR', '').strip()
     if env_images_dir:
         return os.path.abspath(os.path.expanduser(env_images_dir))
+    cfg_path = os.path.join(get_default_data_dir(), 'sheets_config.json')
+    try:
+        if os.path.exists(cfg_path):
+            with open(cfg_path, 'r', encoding='utf-8') as f:
+                cfg = json.load(f)
+            if isinstance(cfg, dict):
+                saved_images_dir = (cfg.get('images_dir') or '').strip()
+                if saved_images_dir:
+                    return os.path.abspath(os.path.expanduser(saved_images_dir))
+    except Exception:
+        pass
     return os.path.join(os.path.expanduser('~'), 'images')
 
 
