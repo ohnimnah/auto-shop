@@ -24,7 +24,6 @@ except Exception:
 IMAGE_EXTS = {".jpg", ".jpeg", ".png", ".webp", ".bmp"}
 LOGO_EXTS = (".png", ".webp", ".jpg", ".jpeg")
 LOGO_BASENAMES = {"__brand_logo", "_brand_logo", "brand_logo", "logo"}
-FRAME_BASENAMES = ("thumbnail_frame", "thumb_frame", "frame_overlay")
 
 
 def iter_images(input_path: Path):
@@ -138,135 +137,6 @@ def _find_brand_logo(
             if _normalize_brand_key(p.stem) == normalized_target:
                 return p
     return None
-
-
-def _find_thumbnail_frame() -> Optional[Path]:
-    script_dir = Path(__file__).resolve().parent
-    search_dirs = [
-        script_dir,
-        script_dir / "images",
-        script_dir / "assets",
-        script_dir / "assets" / "frames",
-        script_dir / "images" / "frames",
-    ]
-
-    for directory in search_dirs:
-        if not directory.exists() or not directory.is_dir():
-            continue
-        for base in FRAME_BASENAMES:
-            for ext in LOGO_EXTS:
-                candidate = directory / f"{base}{ext}"
-                if candidate.exists() and candidate.is_file():
-                    return candidate
-    return None
-
-
-def _measure_frame_inner_box(frame: Image.Image) -> tuple[int, int, int, int]:
-    alpha = frame.getchannel("A")
-    w, h = frame.size
-    center_y = h // 2
-    center_x = w // 2
-
-    left = 0
-    while left < w and alpha.getpixel((left, center_y)) == 0:
-        left += 1
-
-    right = w - 1
-    while right >= 0 and alpha.getpixel((right, center_y)) == 0:
-        right -= 1
-
-    top = 0
-    while top < h and alpha.getpixel((center_x, top)) == 0:
-        top += 1
-
-    bottom = h - 1
-    while bottom >= 0 and alpha.getpixel((center_x, bottom)) == 0:
-        bottom -= 1
-
-    if left >= right or top >= bottom:
-        return (0, 0, w, h)
-    return (left, top, right + 1, bottom + 1)
-
-
-def _fit_canvas_inside_frame(canvas: Image.Image, frame_path: Optional[Path]) -> Image.Image:
-    if frame_path is None:
-        return canvas
-    try:
-        with Image.open(frame_path).convert("RGBA") as frame:
-            fitted_frame = frame.resize(canvas.size, Image.Resampling.LANCZOS)
-            inner_left, inner_top, inner_right, inner_bottom = _measure_frame_inner_box(fitted_frame)
-            inner_w = max(1, inner_right - inner_left)
-            inner_h = max(1, inner_bottom - inner_top)
-            shrunk = canvas.resize((inner_w, inner_h), Image.Resampling.LANCZOS)
-            base = Image.new("RGB", canvas.size, (255, 255, 255))
-            base.paste(shrunk, (inner_left, inner_top))
-            return base
-    except Exception:
-        return canvas
-
-
-def _get_frame_content_box(size: int, frame_path: Optional[Path]) -> tuple[int, int, int, int]:
-    if frame_path is None:
-        return (0, 0, size, size)
-    try:
-        with Image.open(frame_path).convert("RGBA") as frame:
-            fitted_frame = frame.resize((size, size), Image.Resampling.LANCZOS)
-            left, top, right, bottom = _measure_frame_inner_box(fitted_frame)
-            inset = max(2, size // 500)
-            left = min(max(0, left + inset), size)
-            top = min(max(0, top + inset), size)
-            right = max(left + 1, min(size, right - inset))
-            bottom = max(top + 1, min(size, bottom - inset))
-            return (left, top, right - left, bottom - top)
-    except Exception:
-        return (0, 0, size, size)
-
-
-def _apply_thumbnail_frame(canvas: Image.Image, frame_path: Optional[Path]) -> Image.Image:
-    if frame_path is None:
-        return canvas
-    try:
-        with Image.open(frame_path).convert("RGBA") as frame:
-            fitted = frame.resize(canvas.size, Image.Resampling.LANCZOS)
-            merged = canvas.convert("RGBA")
-            merged.alpha_composite(fitted)
-            return merged.convert("RGB")
-    except Exception:
-        return canvas
-
-
-def _add_bottom_caption(canvas: Image.Image, footer: str) -> Image.Image:
-    footer = (footer or "").strip()
-    if not footer:
-        return canvas
-
-    caption_font_size = max(22, canvas.width // 24)
-    caption_font = _load_font(caption_font_size, bold=True)
-    draw_probe = ImageDraw.Draw(Image.new("RGB", (10, 10), (255, 255, 255)))
-    bbox = draw_probe.textbbox((0, 0), footer, font=caption_font)
-    text_w = bbox[2] - bbox[0]
-    text_h = bbox[3] - bbox[1]
-
-    max_text_w = canvas.width - max(60, canvas.width // 12)
-    while text_w > max_text_w and caption_font_size > 14:
-        caption_font_size -= 1
-        caption_font = _load_font(caption_font_size, bold=True)
-        bbox = draw_probe.textbbox((0, 0), footer, font=caption_font)
-        text_w = bbox[2] - bbox[0]
-        text_h = bbox[3] - bbox[1]
-
-    top_gap = max(18, canvas.width // 40)
-    bottom_gap = max(18, canvas.width // 34)
-    caption_h = top_gap + text_h + bottom_gap
-    final_h = canvas.height + caption_h
-
-    final_canvas = Image.new("RGB", (canvas.width, final_h), (255, 255, 255))
-    final_canvas.paste(canvas, (0, 0))
-    draw = ImageDraw.Draw(final_canvas)
-    tx = (canvas.width - text_w) // 2
-    ty = canvas.height + (caption_h - text_h) // 2
-    draw.text((tx, ty), footer, fill=(0, 0, 0), font=caption_font)
-    return final_canvas
 
 
 def _paste_brand_logo(canvas: Image.Image, logo_path: Path, left_box, size: int) -> bool:
@@ -410,7 +280,6 @@ def compose_split_style(
     blur_faces: bool = False,
     blur_radius: int = 14,
     brand_logo: Optional[Path] = None,
-    frame_overlay: Optional[Path] = None,
 ):
     """예시의 의류형 썸네일 스타일: 좌측 메인컷 + 우측 2컷 + 하단 블랙 바."""
     if len(images) < 1:
@@ -421,16 +290,19 @@ def compose_split_style(
     images = images[:3]
 
     canvas = Image.new("RGB", (size, size), bg)
-    content_x, content_y, content_w, content_h = _get_frame_content_box(size, frame_overlay)
-    gap = max(4, content_w // 200)
+    margin = max(20, size // 36)
+    footer_h = max(52, size // 14)
+    top_h = size - (margin * 2) - footer_h
+    inner_w = size - margin * 2
+    gap = max(4, size // 200)
 
-    left_w = int(content_w * 0.56)
-    right_w = content_w - left_w - gap
-    right_h = (content_h - gap) // 2
+    left_w = int(inner_w * 0.56)
+    right_w = inner_w - left_w - gap
+    right_h = (top_h - gap) // 2
 
-    left_box = (content_x, content_y, left_w, content_h)
-    right_top_box = (content_x + left_w + gap, content_y, right_w, right_h)
-    right_bottom_box = (content_x + left_w + gap, content_y + right_h + gap, right_w, content_h - right_h - gap)
+    left_box = (margin, margin, left_w, top_h)
+    right_top_box = (margin + left_w + gap, margin, right_w, right_h)
+    right_bottom_box = (margin + left_w + gap, margin + right_h + gap, right_w, top_h - right_h - gap)
 
     _paste_cover(canvas, images[0], left_box, blur_faces=blur_faces, blur_radius=blur_radius)
     _paste_contain(canvas, images[1], right_top_box, bg=bg, blur_faces=blur_faces, blur_radius=blur_radius)
@@ -471,9 +343,14 @@ def compose_split_style(
             stroke_fill=(0, 0, 0),
         )
 
+    draw.rectangle((0, size - footer_h, size, size), fill=(255, 255, 255))
+    footer_font = _load_font(max(22, size // 24), bold=True)
+    tw, th = draw.textbbox((0, 0), footer, font=footer_font)[2:]
+    tx = (size - tw) // 2
+    ty = size - footer_h + (footer_h - th) // 2
+    draw.text((tx, ty), footer, fill=(0, 0, 0), font=footer_font)
+
     dst.parent.mkdir(parents=True, exist_ok=True)
-    canvas = _apply_thumbnail_frame(canvas, frame_overlay)
-    canvas = _add_bottom_caption(canvas, footer)
     canvas.save(dst, quality=95, optimize=True)
 
 
@@ -485,7 +362,6 @@ def compose_banner_style(
     bg=(255, 255, 255),
     blur_faces: bool = False,
     blur_radius: int = 14,
-    frame_overlay: Optional[Path] = None,
 ):
     """예시의 안경형 스타일: 상단 와이드 + 중간 텍스트 밴드 + 하단 3컷."""
     if len(images) < 1:
@@ -496,40 +372,38 @@ def compose_banner_style(
     images = images[:4]
 
     canvas = Image.new("RGB", (size, size), bg)
-    content_x, content_y, content_w, content_h = _get_frame_content_box(size, frame_overlay)
-    margin = max(12, content_w // 45)
-    top_h = int(content_h * 0.34)
-    band_h = int(content_h * 0.14)
-    gap = max(8, content_w // 100)
+    margin = max(20, size // 30)
+    top_h = int(size * 0.34)
+    band_h = int(size * 0.14)
+    gap = max(8, size // 100)
 
-    top_box = (content_x + margin, content_y + margin, content_w - margin * 2, top_h)
-    band_y = content_y + margin + top_h
+    top_box = (margin, margin, size - margin * 2, top_h)
+    band_y = margin + top_h
     bottom_y = band_y + band_h + gap
-    bottom_h = (content_y + content_h) - bottom_y - margin
-    cell_w = (content_w - margin * 2 - gap * 2) // 3
+    bottom_h = size - bottom_y - margin
+    cell_w = (size - margin * 2 - gap * 2) // 3
 
     _paste_cover(canvas, images[0], top_box, blur_faces=blur_faces, blur_radius=blur_radius)
 
     draw = ImageDraw.Draw(canvas)
-    draw.rectangle((content_x, band_y, content_x + content_w, band_y + band_h), fill=(245, 245, 245))
+    draw.rectangle((0, band_y, size, band_y + band_h), fill=(245, 245, 245))
 
     # 밴드 텍스트: 너비에 맞게 폰트 자동 축소
-    max_text_w = content_w - margin * 4
-    fsize = max(22, content_w // 22)
+    max_text_w = size - margin * 4
+    fsize = max(22, size // 22)
     footer_font = _load_font(fsize, bold=True)
     tw, th = draw.textbbox((0, 0), footer, font=footer_font)[2:]
     while tw > max_text_w and fsize > 14:
         fsize -= 1
         footer_font = _load_font(fsize, bold=True)
         tw, th = draw.textbbox((0, 0), footer, font=footer_font)[2:]
-    draw.text((content_x + (content_w - tw) // 2, band_y + (band_h - th) // 2), footer, fill=(0, 0, 0), font=footer_font)
+    draw.text(((size - tw) // 2, band_y + (band_h - th) // 2), footer, fill=(0, 0, 0), font=footer_font)
 
-    _paste_contain(canvas, images[1], (content_x + margin, bottom_y, cell_w, bottom_h), bg=bg, blur_faces=blur_faces, blur_radius=blur_radius)
-    _paste_contain(canvas, images[2], (content_x + margin + cell_w + gap, bottom_y, cell_w, bottom_h), bg=bg, blur_faces=blur_faces, blur_radius=blur_radius)
-    _paste_contain(canvas, images[3], (content_x + margin + (cell_w + gap) * 2, bottom_y, cell_w, bottom_h), bg=bg, blur_faces=blur_faces, blur_radius=blur_radius)
+    _paste_contain(canvas, images[1], (margin, bottom_y, cell_w, bottom_h), bg=bg, blur_faces=blur_faces, blur_radius=blur_radius)
+    _paste_contain(canvas, images[2], (margin + cell_w + gap, bottom_y, cell_w, bottom_h), bg=bg, blur_faces=blur_faces, blur_radius=blur_radius)
+    _paste_contain(canvas, images[3], (margin + (cell_w + gap) * 2, bottom_y, cell_w, bottom_h), bg=bg, blur_faces=blur_faces, blur_radius=blur_radius)
 
     dst.parent.mkdir(parents=True, exist_ok=True)
-    canvas = _apply_thumbnail_frame(canvas, frame_overlay)
     canvas.save(dst, quality=95, optimize=True)
 
 
@@ -541,7 +415,6 @@ def compose_simple_logo_style(
     blur_faces: bool = False,
     blur_radius: int = 14,
     brand_logo: Optional[Path] = None,
-    frame_overlay: Optional[Path] = None,
 ):
     """1장/2장 전용 단순 레이아웃:
     - 1장: 원본 1장만 표시 + 로고 좌상단
@@ -551,18 +424,17 @@ def compose_simple_logo_style(
         raise ValueError("simple 스타일은 1장 또는 2장만 지원합니다")
 
     canvas = Image.new("RGB", (size, size), bg)
-    content_x, content_y, content_w, content_h = _get_frame_content_box(size, frame_overlay)
-    margin = max(8, content_w // 90)
+    margin = max(12, size // 60)
 
     if len(images) == 1:
-        box = (content_x + margin, content_y + margin, content_w - margin * 2, content_h - margin * 2)
+        box = (margin, margin, size - margin * 2, size - margin * 2)
         _paste_contain(canvas, images[0], box, bg=bg, blur_faces=blur_faces, blur_radius=blur_radius)
     else:
-        gap = max(4, content_w // 200)
-        inner_w = content_w - margin * 2
+        gap = max(4, size // 200)
+        inner_w = size - margin * 2
         half_w = (inner_w - gap) // 2
-        left_box = (content_x + margin, content_y + margin, half_w, content_h - margin * 2)
-        right_box = (content_x + margin + half_w + gap, content_y + margin, inner_w - half_w - gap, content_h - margin * 2)
+        left_box = (margin, margin, half_w, size - margin * 2)
+        right_box = (margin + half_w + gap, margin, inner_w - half_w - gap, size - margin * 2)
         _paste_contain(canvas, images[0], left_box, bg=bg, blur_faces=blur_faces, blur_radius=blur_radius)
         _paste_contain(canvas, images[1], right_box, bg=bg, blur_faces=blur_faces, blur_radius=blur_radius)
 
@@ -570,7 +442,6 @@ def compose_simple_logo_style(
         _paste_brand_logo(canvas, brand_logo, (0, 0, size, size), size)
 
     dst.parent.mkdir(parents=True, exist_ok=True)
-    canvas = _apply_thumbnail_frame(canvas, frame_overlay)
     canvas.save(dst, quality=95, optimize=True)
 
 
@@ -618,9 +489,6 @@ def main():
     )
     if logo_path:
         print(f"Brand logo found: {logo_path}")
-    frame_path = _find_thumbnail_frame()
-    if frame_path:
-        print(f"Thumbnail frame found: {frame_path}")
     bg = (255, 255, 255)
 
     if len(images) <= 2:
@@ -632,7 +500,6 @@ def main():
             blur_faces=args.blur_face,
             blur_radius=args.blur_radius,
             brand_logo=logo_path,
-            frame_overlay=frame_path,
         )
         style_used = "simple"
     elif args.style == "split":
@@ -646,7 +513,6 @@ def main():
             blur_faces=args.blur_face,
             blur_radius=args.blur_radius,
             brand_logo=logo_path,
-            frame_overlay=frame_path,
         )
         style_used = "split"
     else:
@@ -658,7 +524,6 @@ def main():
             bg=bg,
             blur_faces=args.blur_face,
             blur_radius=args.blur_radius,
-            frame_overlay=frame_path,
         )
         style_used = "banner"
 
