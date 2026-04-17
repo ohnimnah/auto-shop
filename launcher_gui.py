@@ -153,33 +153,61 @@ class AutoShopLauncher(tk.Tk):
         board.grid_columnconfigure(2, weight=5)
         board.grid_rowconfigure(0, weight=1)
 
-        left = tk.Frame(board, bg="#121a33", padx=12, pady=12, highlightbackground="#2b3760", highlightthickness=1)
+        left = tk.Frame(board, bg="#121a33", highlightbackground="#2b3760", highlightthickness=1)
         center = tk.Frame(board, bg="#101834", padx=12, pady=12, highlightbackground="#2b3760", highlightthickness=1)
         right = tk.Frame(board, bg="#11182f", padx=12, pady=12, highlightbackground="#2b3760", highlightthickness=1)
         left.grid(row=0, column=0, sticky="nsew", padx=(0, 10))
         center.grid(row=0, column=1, sticky="nsew", padx=(0, 10))
         right.grid(row=0, column=2, sticky="nsew")
 
-        tk.Label(left, text="작전 패널", bg="#121a33", fg="#f7fbff", font=("Segoe UI", 13, "bold")).pack(anchor="w", pady=(0, 10))
+        left.grid_columnconfigure(0, weight=1)
+        left.grid_rowconfigure(0, weight=1)
+        left_canvas = tk.Canvas(left, bg="#121a33", highlightthickness=0, bd=0)
+        left_scrollbar = tk.Scrollbar(left, orient=tk.VERTICAL, command=left_canvas.yview)
+        left_canvas.configure(yscrollcommand=left_scrollbar.set)
+        left_canvas.grid(row=0, column=0, sticky="nsew")
+        left_scrollbar.grid(row=0, column=1, sticky="ns")
+
+        left_content = tk.Frame(left_canvas, bg="#121a33", padx=12, pady=12)
+        left_window = left_canvas.create_window((0, 0), window=left_content, anchor="nw")
+
+        def _sync_left_scrollregion(_event=None) -> None:
+            left_canvas.configure(scrollregion=left_canvas.bbox("all"))
+
+        def _resize_left_content(_event=None) -> None:
+            left_canvas.itemconfigure(left_window, width=left_canvas.winfo_width())
+
+        def _on_left_mousewheel(event) -> str | None:
+            if event.delta == 0:
+                return None
+            left_canvas.yview_scroll(int(-event.delta / 120), "units")
+            return "break"
+
+        left_content.bind("<Configure>", _sync_left_scrollregion)
+        left_canvas.bind("<Configure>", _resize_left_content)
+        left_canvas.bind("<Enter>", lambda _e: left_canvas.bind_all("<MouseWheel>", _on_left_mousewheel))
+        left_canvas.bind("<Leave>", lambda _e: left_canvas.unbind_all("<MouseWheel>"))
+
+        tk.Label(left_content, text="작전 패널", bg="#121a33", fg="#f7fbff", font=("Segoe UI", 13, "bold")).pack(anchor="w", pady=(0, 10))
         tk.Label(
-            left,
+            left_content,
             text="사무실 직원을 클릭하면\n말풍선으로 작업 옵션이 열립니다.",
             bg="#121a33",
             fg="#9fb1dd",
             justify=tk.LEFT,
             font=("Segoe UI", 10),
         ).pack(anchor="w", pady=(0, 10))
-        self.stop_btn = tk.Button(left, text="긴급 중지", command=self.stop_action, state=tk.DISABLED, bg="#5a2330", fg="#ffeef2", relief=tk.FLAT, activebackground="#6d2b3b")
+        self.stop_btn = tk.Button(left_content, text="긴급 중지", command=self.stop_action, state=tk.DISABLED, bg="#5a2330", fg="#ffeef2", relief=tk.FLAT, activebackground="#6d2b3b")
         self.stop_btn.pack(fill=tk.X, pady=(0, 8), ipady=7)
 
-        self.install_btn = tk.Button(left, text="필수 설치", command=lambda: self.run_action("install"), bg="#1f315d", fg="#f3f6ff", relief=tk.FLAT, activebackground="#28417c")
-        self.sheet_cfg_btn = tk.Button(left, text="시트 설정", command=self.configure_sheet_settings, bg="#284f79", fg="#ebf6ff", relief=tk.FLAT, activebackground="#33659b")
+        self.install_btn = tk.Button(left_content, text="필수 설치", command=lambda: self.run_action("install"), bg="#1f315d", fg="#f3f6ff", relief=tk.FLAT, activebackground="#28417c")
+        self.sheet_cfg_btn = tk.Button(left_content, text="시트 설정", command=self.configure_sheet_settings, bg="#284f79", fg="#ebf6ff", relief=tk.FLAT, activebackground="#33659b")
         self.install_btn.pack(fill=tk.X, pady=2, ipady=5)
         self.sheet_cfg_btn.pack(fill=tk.X, pady=(2, 8), ipady=5)
-        self._build_first_run_wizard(left)
+        self._build_first_run_wizard(left_content)
 
         # Keep remaining action button objects for existing run/disable logic compatibility.
-        hidden_actions = tk.Frame(left, bg="#121a33")
+        hidden_actions = tk.Frame(left_content, bg="#121a33")
         self.run_btn = tk.Button(hidden_actions, text="정찰팀 시작", command=lambda: self.run_action("run"))
         self.watch_btn = tk.Button(hidden_actions, text="정찰팀 감시", command=lambda: self.run_action("watch"))
         self.image_save_btn = tk.Button(hidden_actions, text="자료팀 저장", command=lambda: self.run_action("save-images"))
