@@ -87,7 +87,6 @@ class AutoShopLauncher(tk.Tk):
         self.stage_card_widgets: dict[str, tk.Widget] = {}
         self.action_bubble: tk.Toplevel | None = None
         self.team_watch_actions: dict[str, str] = {
-            "scout": "watch-crawler",
             "assets": "watch-images",
             "design": "watch-thumbnails",
             "sales": "watch-upload",
@@ -408,8 +407,7 @@ class AutoShopLauncher(tk.Tk):
         if team_key == "scout":
             return [
                 ("정찰 시작", "run"),
-                ("정찰 감시", "watch"),
-                (watch_label, f"team-watch-toggle:{team_key}"),
+                ("팀 감시 시작", "watch"),
             ]
         if team_key == "assets":
             return [
@@ -692,8 +690,6 @@ class AutoShopLauncher(tk.Tk):
         if action == "run":
             return build_unbuffered_python_command(os.path.join(SCRIPT_DIR, "main.py"))
         if action == "watch":
-            return build_unbuffered_python_command(os.path.join(SCRIPT_DIR, "main.py"), "--watch")
-        if action == "watch-crawler":
             return build_unbuffered_python_command(os.path.join(SCRIPT_DIR, "main.py"), "--watch")
         if action == "watch-images":
             return build_unbuffered_python_command(os.path.join(SCRIPT_DIR, "main.py"), "--watch", "--download-images")
@@ -989,7 +985,7 @@ class AutoShopLauncher(tk.Tk):
         self.refresh_first_run_wizard()
 
     def _ensure_sheet_config_before_action(self, action: str) -> bool:
-        if action not in {"run", "watch", "watch-crawler", "watch-images", "watch-thumbnails", "watch-upload", "upload-review", "upload-auto", "save-images", "make-thumbnails"}:
+        if action not in {"run", "watch", "watch-images", "watch-thumbnails", "watch-upload", "upload-review", "upload-auto", "save-images", "make-thumbnails"}:
             return True
         cfg = self._load_sheet_config()
         sid = self._normalize_spreadsheet_id(cfg.get("spreadsheet_id", ""))
