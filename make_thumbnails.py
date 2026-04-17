@@ -24,6 +24,7 @@ except Exception:
 IMAGE_EXTS = {".jpg", ".jpeg", ".png", ".webp", ".bmp"}
 LOGO_EXTS = (".png", ".webp", ".jpg", ".jpeg")
 LOGO_BASENAMES = {"__brand_logo", "_brand_logo", "brand_logo", "logo"}
+FRAME_BASENAMES = ("thumbnail_frame", "thumb_frame", "frame_overlay")
 
 
 def iter_images(input_path: Path):
@@ -137,6 +138,40 @@ def _find_brand_logo(
             if _normalize_brand_key(p.stem) == normalized_target:
                 return p
     return None
+
+
+def _find_thumbnail_frame() -> Optional[Path]:
+    script_dir = Path(__file__).resolve().parent
+    search_dirs = [
+        script_dir,
+        script_dir / "images",
+        script_dir / "assets",
+        script_dir / "assets" / "frames",
+        script_dir / "images" / "frames",
+    ]
+
+    for directory in search_dirs:
+        if not directory.exists() or not directory.is_dir():
+            continue
+        for base in FRAME_BASENAMES:
+            for ext in LOGO_EXTS:
+                candidate = directory / f"{base}{ext}"
+                if candidate.exists() and candidate.is_file():
+                    return candidate
+    return None
+
+
+def _apply_thumbnail_frame(canvas: Image.Image, frame_path: Optional[Path]) -> Image.Image:
+    if frame_path is None:
+        return canvas
+    try:
+        with Image.open(frame_path).convert("RGBA") as frame:
+            fitted = frame.resize(canvas.size, Image.Resampling.LANCZOS)
+            merged = canvas.convert("RGBA")
+            merged.alpha_composite(fitted)
+            return merged.convert("RGB")
+    except Exception:
+        return canvas
 
 
 def _paste_brand_logo(canvas: Image.Image, logo_path: Path, left_box, size: int) -> bool:
@@ -280,6 +315,7 @@ def compose_split_style(
     blur_faces: bool = False,
     blur_radius: int = 14,
     brand_logo: Optional[Path] = None,
+    frame_overlay: Optional[Path] = None,
 ):
     """예시의 의류형 썸네일 스타일: 좌측 메인컷 + 우측 2컷 + 하단 블랙 바."""
     if len(images) < 1:
@@ -351,6 +387,7 @@ def compose_split_style(
     draw.text((tx, ty), footer, fill=(0, 0, 0), font=footer_font)
 
     dst.parent.mkdir(parents=True, exist_ok=True)
+    canvas = _apply_thumbnail_frame(canvas, frame_overlay)
     canvas.save(dst, quality=95, optimize=True)
 
 
@@ -362,6 +399,7 @@ def compose_banner_style(
     bg=(255, 255, 255),
     blur_faces: bool = False,
     blur_radius: int = 14,
+    frame_overlay: Optional[Path] = None,
 ):
     """예시의 안경형 스타일: 상단 와이드 + 중간 텍스트 밴드 + 하단 3컷."""
     if len(images) < 1:
@@ -404,6 +442,7 @@ def compose_banner_style(
     _paste_contain(canvas, images[3], (margin + (cell_w + gap) * 2, bottom_y, cell_w, bottom_h), bg=bg, blur_faces=blur_faces, blur_radius=blur_radius)
 
     dst.parent.mkdir(parents=True, exist_ok=True)
+    canvas = _apply_thumbnail_frame(canvas, frame_overlay)
     canvas.save(dst, quality=95, optimize=True)
 
 
@@ -415,6 +454,7 @@ def compose_simple_logo_style(
     blur_faces: bool = False,
     blur_radius: int = 14,
     brand_logo: Optional[Path] = None,
+    frame_overlay: Optional[Path] = None,
 ):
     """1장/2장 전용 단순 레이아웃:
     - 1장: 원본 1장만 표시 + 로고 좌상단
@@ -442,6 +482,7 @@ def compose_simple_logo_style(
         _paste_brand_logo(canvas, brand_logo, (0, 0, size, size), size)
 
     dst.parent.mkdir(parents=True, exist_ok=True)
+    canvas = _apply_thumbnail_frame(canvas, frame_overlay)
     canvas.save(dst, quality=95, optimize=True)
 
 
@@ -489,6 +530,9 @@ def main():
     )
     if logo_path:
         print(f"Brand logo found: {logo_path}")
+    frame_path = _find_thumbnail_frame()
+    if frame_path:
+        print(f"Thumbnail frame found: {frame_path}")
     bg = (255, 255, 255)
 
     if len(images) <= 2:
@@ -500,6 +544,7 @@ def main():
             blur_faces=args.blur_face,
             blur_radius=args.blur_radius,
             brand_logo=logo_path,
+            frame_overlay=frame_path,
         )
         style_used = "simple"
     elif args.style == "split":
@@ -513,6 +558,7 @@ def main():
             blur_faces=args.blur_face,
             blur_radius=args.blur_radius,
             brand_logo=logo_path,
+            frame_overlay=frame_path,
         )
         style_used = "split"
     else:
@@ -524,6 +570,7 @@ def main():
             bg=bg,
             blur_faces=args.blur_face,
             blur_radius=args.blur_radius,
+            frame_overlay=frame_path,
         )
         style_used = "banner"
 
