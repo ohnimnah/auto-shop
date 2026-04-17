@@ -79,7 +79,6 @@ class AutoShopLauncher(tk.Tk):
             "sheet": tk.StringVar(value="확인 전"),
         }
         self.stage_vars: dict[str, tk.StringVar] = {
-            "leader": tk.StringVar(value="대기"),
             "scout": tk.StringVar(value="대기"),
             "assets": tk.StringVar(value="대기"),
             "design": tk.StringVar(value="대기"),
@@ -191,7 +190,6 @@ class AutoShopLauncher(tk.Tk):
         self.upload_auto_btn = tk.Button(hidden_actions, text="판매팀 자동", command=lambda: self.run_action("upload-auto"))
 
         tk.Label(center, text="작전 사무실", bg="#101834", fg="#f7fbff", font=("Segoe UI", 13, "bold")).pack(anchor="w", pady=(0, 10))
-        self._build_stage_card(center, "작전 팀장", "필수 설치 / 시트", "leader", "#8f6cff")
         self._build_stage_card(center, "정찰팀", "무신사 크롤링", "scout", "#2a67cc")
         self._build_stage_card(center, "자료팀", "이미지 저장", "assets", "#2f9f65")
         self._build_stage_card(center, "디자인팀", "썸네일 작업", "design", "#c0882e")
@@ -351,7 +349,6 @@ class AutoShopLauncher(tk.Tk):
 
     def _draw_pixel_agent(self, canvas: tk.Canvas, key: str) -> None:
         palette = {
-            "leader": ("#d7b58a", "#6b54b8", "#1f1a3d"),
             "scout": ("#d7b58a", "#2f4f9c", "#141414"),
             "assets": ("#d7b58a", "#2d7b56", "#2c2c2c"),
             "design": ("#d7b58a", "#8b5f2d", "#3a2a1f"),
@@ -380,11 +377,6 @@ class AutoShopLauncher(tk.Tk):
 
     def _get_team_actions(self, team_key: str) -> list[tuple[str, str]]:
         watch_label = "팀 감시 중지" if self.team_watch_enabled.get(team_key, False) else "팀 감시 시작"
-        if team_key == "leader":
-            return [
-                ("필수 설치", "install"),
-                ("시트 설정", "sheet-config"),
-            ]
         if team_key == "scout":
             return [
                 ("정찰 시작", "run"),
@@ -601,9 +593,7 @@ class AutoShopLauncher(tk.Tk):
 
     def _sync_stage_from_action(self, action: str) -> None:
         self.current_action = action
-        if action == "install":
-            self.current_stage_key = "leader"
-        elif action in {"run", "watch"}:
+        if action in {"run", "watch"}:
             self.current_stage_key = "scout"
         elif action == "save-images":
             self.current_stage_key = "assets"
