@@ -174,10 +174,8 @@ class AutoShopLauncher(tk.Tk):
         self.stop_btn.pack(fill=tk.X, pady=(0, 8), ipady=7)
 
         self.install_btn = tk.Button(left, text="필수 설치", command=lambda: self.run_action("install"), bg="#1f315d", fg="#f3f6ff", relief=tk.FLAT, activebackground="#28417c")
-        self.setup_btn = tk.Button(left, text="초기 설정", command=lambda: self.run_action("setup"), bg="#1f315d", fg="#f3f6ff", relief=tk.FLAT, activebackground="#28417c")
         self.sheet_cfg_btn = tk.Button(left, text="시트 설정", command=self.configure_sheet_settings, bg="#284f79", fg="#ebf6ff", relief=tk.FLAT, activebackground="#33659b")
         self.install_btn.pack(fill=tk.X, pady=2, ipady=5)
-        self.setup_btn.pack(fill=tk.X, pady=2, ipady=5)
         self.sheet_cfg_btn.pack(fill=tk.X, pady=(2, 8), ipady=5)
         self._build_first_run_wizard(left)
 
@@ -193,7 +191,7 @@ class AutoShopLauncher(tk.Tk):
         self.upload_auto_btn = tk.Button(hidden_actions, text="판매팀 자동", command=lambda: self.run_action("upload-auto"))
 
         tk.Label(center, text="작전 사무실", bg="#101834", fg="#f7fbff", font=("Segoe UI", 13, "bold")).pack(anchor="w", pady=(0, 10))
-        self._build_stage_card(center, "작전 팀장", "필수 설치 / 초기 설정 / 시트", "leader", "#8f6cff")
+        self._build_stage_card(center, "작전 팀장", "필수 설치 / 시트", "leader", "#8f6cff")
         self._build_stage_card(center, "정찰팀", "무신사 크롤링", "scout", "#2a67cc")
         self._build_stage_card(center, "자료팀", "이미지 저장", "assets", "#2f9f65")
         self._build_stage_card(center, "디자인팀", "썸네일 작업", "design", "#c0882e")
@@ -385,7 +383,6 @@ class AutoShopLauncher(tk.Tk):
         if team_key == "leader":
             return [
                 ("필수 설치", "install"),
-                ("초기 설정", "setup"),
                 ("시트 설정", "sheet-config"),
             ]
         if team_key == "scout":
@@ -604,7 +601,7 @@ class AutoShopLauncher(tk.Tk):
 
     def _sync_stage_from_action(self, action: str) -> None:
         self.current_action = action
-        if action in {"install", "setup"}:
+        if action == "install":
             self.current_stage_key = "leader"
         elif action in {"run", "watch"}:
             self.current_stage_key = "scout"
@@ -674,8 +671,6 @@ class AutoShopLauncher(tk.Tk):
             script = os.path.join(SCRIPT_DIR, "bootstrap_mac.sh")
             return ["bash", script]
 
-        if action == "setup":
-            return build_unbuffered_python_command(os.path.join(SCRIPT_DIR, "setup.py"))
         if action == "run":
             return build_unbuffered_python_command(os.path.join(SCRIPT_DIR, "main.py"))
         if action == "watch":
@@ -702,7 +697,6 @@ class AutoShopLauncher(tk.Tk):
     def _set_running_ui(self, running: bool) -> None:
         normal = tk.DISABLED if running else tk.NORMAL
         self.install_btn.configure(state=normal)
-        self.setup_btn.configure(state=normal)
         self.sheet_cfg_btn.configure(state=normal)
         self.run_btn.configure(state=normal)
         self.watch_btn.configure(state=normal)
