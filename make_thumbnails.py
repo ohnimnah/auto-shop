@@ -257,13 +257,14 @@ def _add_bottom_caption(canvas: Image.Image, footer: str) -> Image.Image:
 
     top_gap = max(18, canvas.width // 40)
     bottom_gap = max(18, canvas.width // 34)
-    final_h = canvas.height + top_gap + text_h + bottom_gap
+    caption_h = top_gap + text_h + bottom_gap
+    final_h = canvas.height + caption_h
 
     final_canvas = Image.new("RGB", (canvas.width, final_h), (255, 255, 255))
     final_canvas.paste(canvas, (0, 0))
     draw = ImageDraw.Draw(final_canvas)
     tx = (canvas.width - text_w) // 2
-    ty = canvas.height + top_gap
+    ty = canvas.height + (caption_h - text_h) // 2
     draw.text((tx, ty), footer, fill=(0, 0, 0), font=caption_font)
     return final_canvas
 
