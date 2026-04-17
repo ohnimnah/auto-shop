@@ -2116,38 +2116,50 @@ def extract_discounted_product_price(soup: BeautifulSoup) -> str:
     if soup is None:
         return "가격 미확인"
 
-    candidates: List[int] = []
+    def collect_won_values(text: str) -> List[int]:
+        values: List[int] = []
+        for raw in re.findall(r'(\d{1,3}(?:,\d{3})*)\s*원', text):
+            try:
+                value = int(raw.replace(',', ''))
+            except ValueError:
+                continue
+            if 1000 <= value <= 100000000:
+                values.append(value)
+        return values
 
-    # 상품 가격 UI 영역 우선 탐색 (쿠폰 영역 제외)
+    # 할인/현재 판매가가 아닌 문맥은 최대한 배제한다.
+    banned_tokens = (
+        '쿠폰', '원가', '정가', '정상가', '기존가', '소비자가', '배송비',
+        '할부', '개월', '최대', '적립', '예상', '혜택', 'card', '카드',
+    )
+
+    # 무신사 할인 가격 UI를 우선 순서대로 탐색한다.
     selectors = [
         '[class*="CurrentPrice"]',
         '[class*="CalculatedPrice"]',
-        '[class*="PriceTotalWrap"]',
         '[class*="DiscountWrap"]',
         '[class*="sale_price"]',
-        '[class*="price"]',
+        '[class*="PriceTotalWrap"]',
     ]
     for selector in selectors:
+        candidates: List[int] = []
         for tag in soup.select(selector):
             text = tag.get_text(' ', strip=True)
             if not text:
                 continue
-            # 쿠폰 적용가는 제외
-            if '쿠폰' in text:
+            lowered = text.lower()
+            if any(token.lower() in lowered for token in banned_tokens):
                 continue
-            for raw in re.findall(r'(\d{1,3}(?:,\d{3})*)\s*원', text):
-                try:
-                    value = int(raw.replace(',', ''))
-                except ValueError:
-                    continue
-                if 1000 <= value <= 100000000:
-                    candidates.append(value)
+            candidates.extend(collect_won_values(text))
+        if candidates:
+            return f"{min(candidates):,}"
 
-    # 라벨 기반 패턴 (판매가/할인가/현재가)
-    page_text = soup.get_text(' ', strip=True)
+    # 라벨 기반 fallback: 할인/판매/현재가 근처 가격만 허용한다.
+    page_text = soup.get_text('\n', strip=True)
+    candidates: List[int] = []
     patterns = [
-        r'(?:할인가|판매가|현재가)[^0-9]{0,20}(\d{1,3}(?:,\d{3})*)\s*원',
-        r'(\d{1,3}(?:,\d{3})*)\s*원[^가-힣A-Za-z0-9]{0,10}(?:할인)',
+        r'(?:할인가|판매가|현재가)[^0-9\n]{0,20}(\d{1,3}(?:,\d{3})*)\s*원',
+        r'(\d{1,3}(?:,\d{3})*)\s*원[^가-힣A-Za-z0-9\n]{0,10}(?:할인)',
     ]
     for pattern in patterns:
         for raw in re.findall(pattern, page_text, re.IGNORECASE):
@@ -2157,11 +2169,10 @@ def extract_discounted_product_price(soup: BeautifulSoup) -> str:
                 continue
             if 1000 <= value <= 100000000:
                 candidates.append(value)
+        if candidates:
+            return f"{min(candidates):,}"
 
-    if not candidates:
-        return "가격 미확인"
-
-    return f"{min(candidates):,}"
+    return "가격 미확인"
 
 
 def extract_yen_values(text: str) -> List[int]:
