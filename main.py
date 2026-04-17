@@ -988,6 +988,7 @@ def clean_product_name(name: str) -> str:
         return "상품명 미확인"
 
     cleaned = re.sub(r'\s*/\s*[A-Z0-9-]+$', '', name).strip()
+    cleaned = re.sub(r'_[A-Z0-9-]+$', '', cleaned).strip()
     if ' - ' in cleaned:
         cleaned = cleaned.split(' - ', 1)[0].strip()
     cleaned = re.sub(r'\s+(?:M|W|K|FREE|O/S|OS)$', '', cleaned, flags=re.IGNORECASE).strip()
@@ -1000,6 +1001,7 @@ def split_name_and_color(raw_name: str) -> Tuple[str, str]:
         return "", ""
 
     text = re.sub(r'\s*/\s*[A-Z0-9-]+$', '', raw_name).strip()
+    text = re.sub(r'_[A-Z0-9-]+$', '', text).strip()
     if ' - ' not in text:
         return text, ""
 
@@ -1013,6 +1015,7 @@ def extract_color_from_name(raw_name: str) -> str:
         return ""
 
     cleaned = re.sub(r'\s*/\s*[A-Z0-9-]+$', '', raw_name).strip()
+    cleaned = re.sub(r'_[A-Z0-9-]+$', '', cleaned).strip()
     _, color_part = split_name_and_color(cleaned)
     if color_part and not is_color_count_placeholder(color_part):
         return color_part
@@ -1028,7 +1031,16 @@ def extract_color_from_name(raw_name: str) -> str:
         candidate = paren_match.group(1).strip()
         if (
             not is_color_count_placeholder(candidate)
-            and (any(token in candidate for token in ['/', ',', '-', ':']) or has_hangul(candidate))
+            and (
+                any(token in candidate for token in ['/', ',', '-', ':'])
+                or has_hangul(candidate)
+                or re.fullmatch(
+                    r'(?:black|white|ivory|cream|beige|navy|blue|sky|red|pink|green|khaki|olive|yellow|'
+                    r'orange|purple|brown|grey|gray|charcoal|silver|gold|wine|burgundy|mint)(?:\s+[a-z]+)?',
+                    candidate,
+                    re.IGNORECASE,
+                )
+            )
         ):
             return candidate
 
@@ -2890,6 +2902,10 @@ def scrape_musinsa_product(
             color_kr = "none"
         if not size_text:
             size_text = extract_sizes(soup, opt_kind_cd)
+        if color_kr == "none":
+            print("    색상 추출 실패: 옵션 API/상품명 fallback에서 값을 찾지 못했습니다.")
+        if not size_text:
+            print("    사이즈 추출 실패: 옵션 API, 실측 API, HTML fallback 모두 비어 있습니다.")
 
         # J열은 쿠폰가가 아닌 상품 할인판매가를 우선 사용
         discounted_price_text = extract_discounted_product_price(soup)
@@ -3063,5 +3079,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-
-

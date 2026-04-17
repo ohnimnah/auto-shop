@@ -3,6 +3,7 @@ import queue
 import random
 import re
 import json
+import shutil
 import subprocess
 import sys
 import threading
@@ -71,6 +72,12 @@ class AutoShopLauncher(tk.Tk):
         self.today_processed_var = tk.StringVar(value="0")
         self.today_success_var = tk.StringVar(value="0")
         self.today_fail_var = tk.StringVar(value="0")
+        self.wizard_summary_var = tk.StringVar(value="첫 실행 준비를 확인하세요.")
+        self.wizard_status_vars: dict[str, tk.StringVar] = {
+            "runtime": tk.StringVar(value="확인 전"),
+            "credentials": tk.StringVar(value="확인 전"),
+            "sheet": tk.StringVar(value="확인 전"),
+        }
         self.stage_vars: dict[str, tk.StringVar] = {
             "leader": tk.StringVar(value="대기"),
             "scout": tk.StringVar(value="대기"),
@@ -172,6 +179,7 @@ class AutoShopLauncher(tk.Tk):
         self.install_btn.pack(fill=tk.X, pady=2, ipady=5)
         self.setup_btn.pack(fill=tk.X, pady=2, ipady=5)
         self.sheet_cfg_btn.pack(fill=tk.X, pady=(2, 8), ipady=5)
+        self._build_first_run_wizard(left)
 
         # Keep remaining action button objects for existing run/disable logic compatibility.
         hidden_actions = tk.Frame(left, bg="#121a33")
@@ -220,6 +228,109 @@ class AutoShopLauncher(tk.Tk):
         card.grid(row=0, column=col, sticky="ew", padx=(0 if col == 0 else 6, 0 if col == 2 else 6))
         tk.Label(card, text=title, bg="#161f3e", fg="#afc3ef", font=("Segoe UI", 10, "bold")).pack(anchor="w")
         tk.Label(card, textvariable=value_var, bg="#161f3e", fg="#f5fbff", font=("Segoe UI", 20, "bold")).pack(anchor="w", pady=(2, 0))
+
+    def _build_first_run_wizard(self, parent: tk.Frame) -> None:
+        card = tk.Frame(parent, bg="#182446", padx=12, pady=12, highlightbackground="#5ef2c2", highlightthickness=1)
+        card.pack(fill=tk.X, pady=(2, 10))
+        tk.Label(card, text="첫 실행 마법사", bg="#182446", fg="#f7fbff", font=("Segoe UI", 12, "bold")).pack(anchor="w")
+        tk.Label(
+            card,
+            text="처음 쓰는 사람도 순서대로 눌러서 준비할 수 있게 만든 안내 영역입니다.",
+            bg="#182446",
+            fg="#afc3ef",
+            justify=tk.LEFT,
+            wraplength=260,
+            font=("Segoe UI", 9),
+        ).pack(anchor="w", pady=(4, 8))
+        tk.Label(
+            card,
+            textvariable=self.wizard_summary_var,
+            bg="#182446",
+            fg="#5ef2c2",
+            justify=tk.LEFT,
+            wraplength=260,
+            font=("Segoe UI", 10, "bold"),
+        ).pack(anchor="w", pady=(0, 8))
+
+        self._build_wizard_step(
+            card,
+            "1. 실행 준비",
+            "Python과 가상환경이 준비됐는지 확인합니다.",
+            self.wizard_status_vars["runtime"],
+            self.refresh_first_run_wizard,
+            "다시 확인",
+        )
+        self._build_wizard_step(
+            card,
+            "2. Google 키 연결",
+            "credentials.json을 연결해서 시트 접근 준비를 합니다.",
+            self.wizard_status_vars["credentials"],
+            self.import_credentials_file,
+            "파일 연결",
+        )
+        self._build_wizard_step(
+            card,
+            "3. 작업 시트 연결",
+            "Spreadsheet ID, 시트 이름, GID를 저장합니다.",
+            self.wizard_status_vars["sheet"],
+            self.configure_sheet_settings,
+            "시트 설정",
+        )
+
+        actions = tk.Frame(card, bg="#182446")
+        actions.pack(fill=tk.X, pady=(4, 0))
+        tk.Button(
+            actions,
+            text="연결 테스트",
+            command=self.test_google_setup,
+            bg="#2b5f8a",
+            fg="#eff7ff",
+            relief=tk.FLAT,
+            activebackground="#3675aa",
+        ).pack(fill=tk.X, ipady=5)
+        tk.Button(
+            actions,
+            text="샘플 1건 실행",
+            command=self.run_sample_check,
+            bg="#2d7b56",
+            fg="#effff7",
+            relief=tk.FLAT,
+            activebackground="#379167",
+        ).pack(fill=tk.X, pady=(6, 0), ipady=5)
+
+    def _build_wizard_step(
+        self,
+        parent: tk.Frame,
+        title: str,
+        description: str,
+        status_var: tk.StringVar,
+        command,
+        button_text: str,
+    ) -> None:
+        row = tk.Frame(parent, bg="#1e2b52", padx=10, pady=8, highlightbackground="#30416f", highlightthickness=1)
+        row.pack(fill=tk.X, pady=4)
+        tk.Label(row, text=title, bg="#1e2b52", fg="#f7fbff", font=("Segoe UI", 10, "bold")).pack(anchor="w")
+        tk.Label(
+            row,
+            text=description,
+            bg="#1e2b52",
+            fg="#9fb1dd",
+            justify=tk.LEFT,
+            wraplength=240,
+            font=("Segoe UI", 9),
+        ).pack(anchor="w", pady=(2, 6))
+        bottom = tk.Frame(row, bg="#1e2b52")
+        bottom.pack(fill=tk.X)
+        tk.Label(bottom, textvariable=status_var, bg="#1e2b52", fg="#5ef2c2", font=("Consolas", 9, "bold")).pack(side=tk.LEFT)
+        tk.Button(
+            bottom,
+            text=button_text,
+            command=command,
+            bg="#334d86",
+            fg="#f3f6ff",
+            relief=tk.FLAT,
+            activebackground="#4062a6",
+        ).pack(side=tk.RIGHT)
 
     def _build_stage_card(self, parent: tk.Frame, team: str, desc: str, key: str, accent: str) -> None:
         card = tk.Frame(parent, bg="#1a2346", padx=10, pady=10, highlightbackground=accent, highlightthickness=1)
@@ -629,6 +740,140 @@ class AutoShopLauncher(tk.Tk):
         self.watch_btn.configure(text=f"{prefix} 감시")
         self.image_save_btn.configure(text="자료팀 저장")
 
+    def _get_credentials_target_path(self) -> str:
+        return os.path.join(self.data_dir, "credentials.json")
+
+    def _get_available_credentials_path(self) -> str:
+        target = self._get_credentials_target_path()
+        if os.path.exists(target):
+            return target
+        legacy = os.path.join(SCRIPT_DIR, "credentials.json")
+        if os.path.exists(legacy):
+            return legacy
+        return ""
+
+    def _has_ready_runtime(self) -> bool:
+        python_cmd = resolve_python_executable()
+        return os.path.isfile(python_cmd) and os.path.basename(python_cmd).startswith("python")
+
+    def _has_credentials_file(self) -> bool:
+        return bool(self._get_available_credentials_path())
+
+    def _has_valid_sheet_config(self) -> bool:
+        cfg = self._load_sheet_config()
+        sid = self._normalize_spreadsheet_id(cfg.get("spreadsheet_id", ""))
+        return self._is_valid_spreadsheet_id(sid) and bool((cfg.get("sheet_name") or "").strip())
+
+    def refresh_first_run_wizard(self) -> None:
+        runtime_ready = self._has_ready_runtime()
+        credentials_ready = self._has_credentials_file()
+        sheet_ready = self._has_valid_sheet_config()
+
+        runtime_text = f"{'완료' if runtime_ready else '필요'} · Python {os.path.basename(resolve_python_executable())}"
+        self.wizard_status_vars["runtime"].set(runtime_text)
+
+        credentials_path = self._get_available_credentials_path()
+        if credentials_ready:
+            self.wizard_status_vars["credentials"].set(f"완료 · {os.path.basename(credentials_path)} 연결됨")
+        else:
+            self.wizard_status_vars["credentials"].set("필요 · credentials.json 파일을 연결해주세요")
+
+        cfg = self._load_sheet_config()
+        if sheet_ready:
+            sheet_name = (cfg.get("sheet_name") or "").strip()
+            self.wizard_status_vars["sheet"].set(f"완료 · {sheet_name} 연결됨")
+        else:
+            self.wizard_status_vars["sheet"].set("필요 · Spreadsheet ID와 시트 이름을 입력해주세요")
+
+        if runtime_ready and credentials_ready and sheet_ready:
+            self.wizard_summary_var.set("준비 완료. 이제 샘플 1건 실행이나 감시 모드를 시작할 수 있습니다.")
+        elif not credentials_ready:
+            self.wizard_summary_var.set("다음 단계: Google 키 파일(credentials.json)을 연결해주세요.")
+        elif not sheet_ready:
+            self.wizard_summary_var.set("다음 단계: 작업할 Google 시트 정보를 입력해주세요.")
+        else:
+            self.wizard_summary_var.set("실행 준비를 마쳤습니다. 연결 테스트를 눌러 확인해보세요.")
+
+    def import_credentials_file(self) -> bool:
+        initial_dir = os.path.expanduser("~/Downloads")
+        selected_path = filedialog.askopenfilename(
+            title="credentials.json 선택",
+            initialdir=initial_dir,
+            filetypes=[("JSON files", "*.json"), ("All files", "*.*")],
+            parent=self,
+        )
+        if not selected_path:
+            return False
+
+        try:
+            os.makedirs(self.data_dir, exist_ok=True)
+            target_path = self._get_credentials_target_path()
+            shutil.copy2(selected_path, target_path)
+            self.append_log(f"자격증명 파일 연결 완료: {target_path}\n")
+            messagebox.showinfo("키 연결 완료", f"credentials.json을 연결했습니다.\n저장 위치: {target_path}")
+            self.refresh_first_run_wizard()
+            return True
+        except Exception as exc:
+            messagebox.showerror("키 연결 실패", f"credentials.json 복사 실패: {exc}")
+            return False
+
+    def test_google_setup(self) -> bool:
+        credentials_path = self._get_available_credentials_path()
+        if not credentials_path:
+            messagebox.showwarning(
+                "키 파일 필요",
+                "먼저 credentials.json 파일을 연결해주세요.\n보통 Downloads에 받은 JSON 파일을 선택하면 됩니다.",
+            )
+            self.refresh_first_run_wizard()
+            return False
+
+        cfg = self._load_sheet_config()
+        spreadsheet_id = self._normalize_spreadsheet_id(cfg.get("spreadsheet_id", ""))
+        if not self._is_valid_spreadsheet_id(spreadsheet_id):
+            messagebox.showwarning("시트 설정 필요", "먼저 Spreadsheet ID 또는 시트 URL을 입력해주세요.")
+            self.refresh_first_run_wizard()
+            return False
+
+        try:
+            from google.oauth2.service_account import Credentials
+            from googleapiclient.discovery import build
+
+            creds = Credentials.from_service_account_file(
+                credentials_path,
+                scopes=["https://www.googleapis.com/auth/spreadsheets.readonly"],
+            )
+            service = build("sheets", "v4", credentials=creds)
+            spreadsheet = service.spreadsheets().get(spreadsheetId=spreadsheet_id).execute()
+            title = str(spreadsheet.get("properties", {}).get("title", "")).strip() or "제목 미확인"
+            self.append_log(f"Google Sheets 연결 테스트 성공: {title}\n")
+            messagebox.showinfo("연결 성공", f"Google Sheets 연결 확인 완료\n시트 제목: {title}")
+            self.refresh_first_run_wizard()
+            return True
+        except Exception as exc:
+            messagebox.showerror(
+                "연결 실패",
+                "Google Sheets 연결 확인에 실패했습니다.\n"
+                "1) credentials.json 파일\n"
+                "2) Spreadsheet ID\n"
+                "3) 시트 공유 대상(client_email)\n"
+                f"를 확인해주세요.\n\n상세 오류: {exc}",
+            )
+            self.refresh_first_run_wizard()
+            return False
+
+    def run_sample_check(self) -> None:
+        if not self.test_google_setup():
+            return
+        if self.process and self.process.poll() is None:
+            messagebox.showwarning("실행 중", "이미 작업이 실행 중입니다. 먼저 중지해주세요.")
+            return
+        if not messagebox.askyesno(
+            "샘플 1건 실행",
+            "현재 시트 기준으로 첫 작업 1건을 확인해보려면 정찰팀 시작을 실행합니다.\n계속할까요?",
+        ):
+            return
+        self.run_action("run")
+
     def _load_sheet_config(self) -> dict:
         try:
             if not os.path.exists(self.sheet_config_path):
@@ -646,7 +891,7 @@ class AutoShopLauncher(tk.Tk):
                 json.dump(config, f, ensure_ascii=False, indent=2)
             return True
         except Exception as e:
-            messagebox.showerror("????ㅽ뙣", f"?쒗듃 ?ㅼ젙 ????ㅽ뙣: {e}")
+            messagebox.showerror("저장 실패", f"시트 설정 저장 실패: {e}")
             return False
 
     def _has_sheet_config(self) -> bool:
@@ -654,17 +899,17 @@ class AutoShopLauncher(tk.Tk):
         return bool((cfg.get("spreadsheet_id") or "").strip())
 
     def _normalize_spreadsheet_id(self, raw_value: str) -> str:
-        """?낅젰媛믪뿉??Spreadsheet ID瑜?異붿텧/?뺢퇋?뷀븳??"""
+        """입력값에서 Spreadsheet ID를 추출하고 정리한다."""
         value = (raw_value or "").strip()
         if not value:
             return ""
 
-        # URL ?꾩껜瑜??ｌ? 寃쎌슦 /d/<id>/ 遺遺꾩뿉??異붿텧
+        # 전체 URL이 들어오면 /d/<id>/ 부분에서 ID를 추출한다.
         m = re.search(r"/spreadsheets/d/([a-zA-Z0-9-_]+)", value)
         if m:
             return m.group(1)
 
-        # d/<id>, /d/<id> ?뺥깭???덉슜
+        # d/<id>, /d/<id> 형태도 허용한다.
         m = re.search(r"(?:^|/)d/([a-zA-Z0-9-_]+)", value)
         if m:
             return m.group(1)
@@ -677,20 +922,20 @@ class AutoShopLauncher(tk.Tk):
             return False
         if "@" in sid:
             return False
-        # 援ш? ?쒗듃 ID??蹂댄넻 ?곷Ц/?レ옄/-/_ 議고빀??湲?臾몄옄??
+        # 구글 시트 ID는 보통 영문/숫자/-/_ 조합의 긴 문자열이다.
         return bool(re.fullmatch(r"[a-zA-Z0-9-_]{20,}", sid))
 
     def configure_sheet_settings(self) -> bool:
-        """?쒗듃 ?ㅼ젙 ?앹뾽???닿퀬 ??ν븳??"""
+        """시트 설정 팝업을 띄우고 저장한다."""
         current = self._load_sheet_config()
         cur_id = (current.get("spreadsheet_id") or "").strip()
-        cur_name = (current.get("sheet_name") or "?쒗듃1").strip() or "?쒗듃1"
+        cur_name = (current.get("sheet_name") or "시트1").strip() or "시트1"
         cur_gids = current.get("sheet_gids") or [1698424449]
         cur_gid_text = ",".join(str(x) for x in cur_gids if isinstance(x, int))
 
         spreadsheet_input = simpledialog.askstring(
-            "?쒗듃 ?ㅼ젙",
-            "Google Spreadsheet ID ?먮뒗 ?쒗듃 URL???낅젰?섏꽭??",
+            "시트 설정",
+            "Google Spreadsheet ID 또는 시트 URL을 입력하세요.",
             initialvalue=cur_id,
             parent=self,
         )
@@ -700,24 +945,24 @@ class AutoShopLauncher(tk.Tk):
         spreadsheet_id = self._normalize_spreadsheet_id(spreadsheet_input)
         if not self._is_valid_spreadsheet_id(spreadsheet_id):
             messagebox.showwarning(
-                "?낅젰 ?ㅻ쪟",
-                "?좏슚??Spreadsheet ID媛 ?꾨떃?덈떎.\n?대찓?쇱씠 ?꾨땲???쒗듃 URL??/d/ ??臾몄옄?댁쓣 ?낅젰?댁＜?몄슂.",
+                "입력 오류",
+                "유효한 Spreadsheet ID가 아닙니다.\n이메일이 아니라 시트 URL의 /d/ 뒤 문자열을 입력해주세요.",
             )
             return False
 
         sheet_name = simpledialog.askstring(
-            "?쒗듃 ?ㅼ젙",
-            "?쒗듃 ?대쫫???낅젰?섏꽭??(湲곕낯: ?쒗듃1):",
+            "시트 설정",
+            "시트 이름을 입력하세요. (기본: 시트1)",
             initialvalue=cur_name,
             parent=self,
         )
         if sheet_name is None:
             return False
-        sheet_name = sheet_name.strip() or "?쒗듃1"
+        sheet_name = sheet_name.strip() or "시트1"
 
         gid_text = simpledialog.askstring(
-            "?쒗듃 ?ㅼ젙",
-            "?쒗듃 GID瑜??낅젰?섏꽭??(?щ윭 媛쒕㈃ 肄ㅻ쭏 援щ텇):",
+            "시트 설정",
+            "시트 GID를 입력하세요. (여러 개면 쉼표로 구분)",
             initialvalue=cur_gid_text or "1698424449",
             parent=self,
         )
@@ -740,18 +985,13 @@ class AutoShopLauncher(tk.Tk):
         if not self._save_sheet_config(config):
             return False
 
-        self.append_log(f"?쒗듃 ?ㅼ젙 ????꾨즺: {self.sheet_config_path}\n")
+        self.append_log(f"시트 설정 저장 완료: {self.sheet_config_path}\n")
         self._refresh_action_button_labels()
+        self.refresh_first_run_wizard()
         return True
 
     def _ensure_sheet_config_on_startup(self) -> None:
-        if self._has_sheet_config():
-            return
-        messagebox.showinfo(
-            "珥덇린 ?ㅼ젙",
-            "泥섏쓬 ?ㅽ뻾?낅땲?? Google ?쒗듃 媛믪쓣 癒쇱? ?낅젰?댁＜?몄슂.",
-        )
-        self.configure_sheet_settings()
+        self.refresh_first_run_wizard()
 
     def _ensure_sheet_config_before_action(self, action: str) -> bool:
         if action not in {"run", "watch", "watch-crawler", "watch-images", "watch-thumbnails", "watch-upload", "upload-review", "upload-auto", "save-images", "make-thumbnails", "full-auto-upload"}:
@@ -760,7 +1000,7 @@ class AutoShopLauncher(tk.Tk):
         sid = self._normalize_spreadsheet_id(cfg.get("spreadsheet_id", ""))
         if self._is_valid_spreadsheet_id(sid):
             return True
-        messagebox.showwarning("?쒗듃 ?ㅼ젙 ?꾩슂", "?쒗듃 ID媛 ?녾굅???섎せ?섏뿀?듬땲?? ?쒗듃 ?ㅼ젙???ㅼ떆 ?댁＜?몄슂.")
+        messagebox.showwarning("시트 설정 필요", "시트 ID가 없거나 잘못되었습니다. 시트 설정을 다시 입력해주세요.")
         return self.configure_sheet_settings()
 
     def _start_command(self, command: list[str]) -> bool:
@@ -1106,4 +1346,3 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
-
