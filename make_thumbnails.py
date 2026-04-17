@@ -184,19 +184,30 @@ def _blur_faces(pil_img: Image.Image, blur_radius: int = 14) -> Image.Image:
 
     gray = cv2.cvtColor(arr, cv2.COLOR_RGB2GRAY)
     cascade_path = cv2.data.haarcascades + "haarcascade_frontalface_default.xml"
+    if not os.path.exists(cascade_path):
+        print(f"Face blur skipped: cascade file not found ({cascade_path})")
+        return pil_img
+
     face_cascade = cv2.CascadeClassifier(cascade_path)
+    if face_cascade.empty():
+        print(f"Face blur skipped: failed to load cascade ({cascade_path})")
+        return pil_img
 
     # 이미지 상단 55% 영역에서만 탐지 (하반신 오탐 방지)
     h_limit = int(gray.shape[0] * 0.55)
     gray_top = gray[:h_limit, :]
 
-    faces = face_cascade.detectMultiScale(
-        gray_top,
-        scaleFactor=1.05,
-        minNeighbors=7,
-        minSize=(60, 60),
-        maxSize=(int(gray.shape[1] * 0.5), int(gray.shape[0] * 0.5)),
-    )
+    try:
+        faces = face_cascade.detectMultiScale(
+            gray_top,
+            scaleFactor=1.05,
+            minNeighbors=7,
+            minSize=(60, 60),
+            maxSize=(int(gray.shape[1] * 0.5), int(gray.shape[0] * 0.5)),
+        )
+    except Exception as exc:
+        print(f"Face blur skipped: OpenCV detect failed ({exc})")
+        return pil_img
 
     if len(faces) == 0:
         return pil_img
