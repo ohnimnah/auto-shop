@@ -8,14 +8,88 @@
 import json
 import argparse
 import os
-import random
 import re
-import subprocess
 import sys
 import time
 import urllib.parse
 import urllib.request
 from typing import Dict, List, Tuple
+from app_config import (
+    ACTUAL_SIZE_COLUMN,
+    BAIMA_SELL_PRICE_COLUMN,
+    BRAND_COLUMN,
+    BRAND_EN_COLUMN,
+    CATEGORY_LARGE_COLUMN,
+    CATEGORY_MIDDLE_COLUMN,
+    CATEGORY_SMALL_COLUMN,
+    COLOR_EN_COLUMN,
+    COLOR_KR_COLUMN,
+    CRAWL_PAGE_SETTLE_SECONDS,
+    CRAWLER_ROW_DELAY_SECONDS,
+    DEFAULT_ROW_START,
+    DEFAULT_SHEET_GIDS,
+    DEFAULT_SHEET_NAME,
+    DEFAULT_SPREADSHEET_ID,
+    DEFAULT_WEIGHT_KG,
+    HEADLESS,
+    HEADER_ROW,
+    IMAGE_PATHS_COLUMN,
+    IMAGE_ROW_DELAY_SECONDS,
+    KEYWORD_WEIGHT_RULES,
+    MARGIN_RATE_HEADER,
+    MARGIN_THRESHOLD_PERCENT,
+    MAX_THUMBNAIL_IMAGES,
+    MUSINSA_SKU_COLUMN,
+    OPT_KIND_WEIGHT_MAP,
+    PRICE_COLUMN,
+    PRODUCT_NAME_EN_COLUMN,
+    PRODUCT_NAME_KR_COLUMN,
+    PROGRESS_STATUS_HEADER,
+    SEQUENCE_COLUMN,
+    SHIPPING_COST_COLUMN,
+    SIZE_COLUMN,
+    STATUS_COMPLETED,
+    STATUS_CRAWLED,
+    STATUS_CRAWLING,
+    STATUS_DOWNLOADING,
+    STATUS_ERROR,
+    STATUS_HOLD,
+    STATUS_IMAGE_READY,
+    STATUS_IMAGES_SAVED,
+    STATUS_NEW,
+    STATUS_THUMBNAIL_READY,
+    STATUS_THUMBNAILING,
+    STATUS_THUMBNAILS_DONE,
+    STATUS_UPLOAD_READY,
+    STATUS_WAITING,
+    THUMB_ROW_DELAY_SECONDS,
+    URL_COLUMN,
+    WATCH_INTERVAL_SECONDS,
+    get_default_data_dir,
+    get_default_images_dir,
+)
+from sheet_service import (
+    column_index_to_letter as svc_column_index_to_letter,
+    get_row_dynamic_values as svc_get_row_dynamic_values,
+    get_rows_dynamic_values_bulk as svc_get_rows_dynamic_values_bulk,
+    get_sheet_header_map as svc_get_sheet_header_map,
+    parse_margin_rate as svc_parse_margin_rate,
+    update_cell_by_header as svc_update_cell_by_header,
+)
+from image_service import (
+    build_thumbnail_brand as svc_build_thumbnail_brand,
+    create_thumbnail_for_folder as svc_create_thumbnail_for_folder,
+    resolve_image_folder_from_paths as svc_resolve_image_folder_from_paths,
+)
+from crawler_service import (
+    build_image_folder_name as svc_build_image_folder_name,
+    build_image_identity_key as svc_build_image_identity_key,
+    extract_musinsa_thumbnail_urls as svc_extract_musinsa_thumbnail_urls,
+    fetch_json as svc_fetch_json,
+    has_hangul as svc_has_hangul,
+    normalize_image_source as svc_normalize_image_source,
+    sanitize_path_component as svc_sanitize_path_component,
+)
 
 # Windows cp949 터미널에서 유니코드 출력 오류 방지
 if sys.stdout.encoding and sys.stdout.encoding.lower().replace("-", "") in ("cp949", "euckr"):
@@ -39,51 +113,12 @@ import urllib3
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
 # ==================== 설정 부분 ====================
-SPREADSHEET_ID = "1mTV-Fcybov-0uC7tNyM_GXGDoth8F_7wM__zaC1fAjs"
+SPREADSHEET_ID = DEFAULT_SPREADSHEET_ID
 # 링크의 탭 GID 목록을 적어주세요. 서비스 계정이 해당 스프레드시트에 권한이 있어야 동작합니다.
-SHEET_GIDS = [1698424449]
+SHEET_GIDS = list(DEFAULT_SHEET_GIDS)
 # GID를 사용하지 않을 때는 아래 default sheet name을 설정합니다.
-SHEET_NAME = "시트1"
-HEADER_ROW = 1
-MARGIN_RATE_HEADER = "마진률"
-PROGRESS_STATUS_HEADER = "진행상태"
-MARGIN_THRESHOLD_PERCENT = 9.0
-STATUS_HOLD = "보류"
-# 레거시 호환용 상태 (읽기 전용)
-STATUS_WAITING = "대기"
-STATUS_IMAGE_READY = "이미지진행대기"
-STATUS_THUMBNAIL_READY = "썸네일진행대기"
-STATUS_UPLOAD_READY = "업로드진행대기"
-STATUS_COMPLETED = "출품완료"
-STATUS_ERROR = "오류"
-STATUS_NEW = "신규"
-STATUS_CRAWLED = "정찰완료"
-STATUS_IMAGES_SAVED = "이미지저장완료"
-STATUS_THUMBNAILS_DONE = "썸네일완료"
-STATUS_CRAWLING = "정찰중"
-STATUS_DOWNLOADING = "이미지저장중"
-STATUS_THUMBNAILING = "썸네일작업중"
-
-# 시트 열 구조
-SEQUENCE_COLUMN = "A"
-URL_COLUMN = "B"
-BRAND_COLUMN = "C"
-BRAND_EN_COLUMN = "D"
-PRODUCT_NAME_KR_COLUMN = "E"
-PRODUCT_NAME_EN_COLUMN = "F"
-MUSINSA_SKU_COLUMN = "G"
-COLOR_KR_COLUMN = "H"
-COLOR_EN_COLUMN = "I"
-SIZE_COLUMN = "J"
-ACTUAL_SIZE_COLUMN = "K"
-PRICE_COLUMN = "L"
-BAIMA_SELL_PRICE_COLUMN = "M"
-IMAGE_PATHS_COLUMN = "N"
-SHIPPING_COST_COLUMN = "O"
-CATEGORY_LARGE_COLUMN = "W"
-CATEGORY_MIDDLE_COLUMN = "X"
-CATEGORY_SMALL_COLUMN = "Y"
-ROW_START = 2
+SHEET_NAME = DEFAULT_SHEET_NAME
+ROW_START = DEFAULT_ROW_START
 
 
 def _load_sheet_runtime_config() -> None:
@@ -136,64 +171,6 @@ def _load_sheet_runtime_config() -> None:
 
 
 _load_sheet_runtime_config()
-
-# 상품명 키워드 → 추정 무게(kg)  (X열 예시 기반, 무거운 것부터 매칭)
-KEYWORD_WEIGHT_RULES: List[Tuple[List[str], float]] = [
-    (['패딩', '다운', '점퍼', '코트', '무스탕', '파카', 'padding', 'down', 'coat', 'parka', 'puffer'], 2.5),
-    (['겨울신발', '부츠', '워커', 'boots', 'boot', 'walker'], 3.5),
-    (['가방', '백팩', '캐리어', '토트백', '숄더백', '크로스백', 'bag', 'backpack', 'tote', 'shoulder', 'crossbody', 'carrier'], 3.5),
-    (['후드', '맨투맨', '스웨트', '니트', '집업', 'hoodie', 'sweatshirt', 'sweat', 'knit', 'cardigan', 'zip-up', 'zipup'], 1.5),
-    (['자켓', '블레이저', '블루종', '바람막이', '아우터', 'jacket', 'blazer', 'blouson', 'windbreaker', 'outer'], 2.0),
-    (['바지', '팬츠', '청바지', '데님', '슬랙스', '조거', '트랙', 'pants', 'jeans', 'denim', 'slacks', 'jogger', 'track'], 1.0),
-    (['원피스', '드레스', 'dress', 'onepiece'], 1.0),
-    (['셔츠', '블라우스', 'shirt', 'blouse'], 0.5),
-    (['티셔츠', '반팔', '긴팔', '탑', '티', 't-shirt', 'tee', 'top', 'long sleeve', 'short sleeve'], 1.0),
-    (['운동화', '스니커즈', '슬리퍼', '샌들', '로퍼', '플랫', '슈즈', '클로그', 'sneakers', 'sneaker', 'slipper', 'sandals', 'loafer', 'flat', 'shoes', 'clog'], 1.5),
-    (['레깅스', '스타킹', '양말', '속옷', 'leggings', 'stocking', 'socks', 'underwear', 'bra', 'panty'], 0.5),
-    (['모자', '캡', '버킷햇', '비니', 'hat', 'cap', 'bucket hat', 'beanie'], 0.5),
-    (['안경', '선글라스', '장갑', '머플러', '스카프', '벨트', '지갑', '케이스', '키링', 'glasses', 'sunglasses', 'glove', 'muffler', 'scarf', 'belt', 'wallet', 'case', 'keyring'], 0.5),
-]
-# optKindCd 기반 기본 무게 (키워드 매칭 실패 시)
-OPT_KIND_WEIGHT_MAP = {
-    'SHOES': 1.5,
-    'BAG': 3.5,
-    'ACC': 0.5,
-    'CLOTHES': 1.2,
-    'OUTER': 2.5,
-    'TOP': 1.0,
-    'BOTTOM': 1.0,
-    'DRESS': 1.0,
-    'UNDERWEAR': 0.5,
-}
-DEFAULT_WEIGHT_KG = 1.0
-MAX_THUMBNAIL_IMAGES = 10
-
-# Selenium 설정
-HEADLESS = True  # True = 백그라운드 실행, False = 브라우저 창 보기
-
-# 감시 모드 기본값(초)
-WATCH_INTERVAL_SECONDS = 20
-CRAWL_PAGE_SETTLE_SECONDS = 1.0
-CRAWLER_ROW_DELAY_SECONDS = 1.5
-IMAGE_ROW_DELAY_SECONDS = 0.4
-THUMB_ROW_DELAY_SECONDS = 0.4
-
-
-def get_default_data_dir() -> str:
-    """기본 런타임 데이터 경로를 OS별로 반환한다"""
-    local_app_data = os.environ.get('LOCALAPPDATA', '').strip()
-    if local_app_data:
-        return os.path.join(local_app_data, 'auto_shop')
-    return os.path.join(os.path.expanduser('~'), '.auto_shop')
-
-
-def get_default_images_dir() -> str:
-    """기본 이미지 저장 경로를 반환한다 (홈 디렉토리 하위 images 폴더)"""
-    env_images_dir = os.environ.get('AUTO_SHOP_IMAGES_DIR', '').strip()
-    if env_images_dir:
-        return os.path.abspath(os.path.expanduser(env_images_dir))
-    return os.path.join(os.path.expanduser('~'), 'images')
-
 
 DATA_DIR = get_default_data_dir()
 IMAGES_ROOT = get_default_images_dir()
@@ -306,33 +283,12 @@ def lookup_shipping_cost(table: List[Tuple[float, int]], weight_kg: float) -> st
 
 def column_index_to_letter(index: int) -> str:
     """0-based 열 인덱스를 Google Sheets 열 문자로 변환한다."""
-    if index < 0:
-        raise ValueError("열 인덱스는 0 이상이어야 합니다.")
-    result = ""
-    current = index + 1
-    while current:
-        current, remainder = divmod(current - 1, 26)
-        result = chr(65 + remainder) + result
-    return result
+    return svc_column_index_to_letter(index)
 
 
 def get_sheet_header_map(service, sheet_name: str) -> Dict[str, int]:
     """1행 헤더명을 읽어 헤더명 -> 0-based 열 인덱스 맵을 반환한다."""
-    try:
-        result = service.spreadsheets().values().get(
-            spreadsheetId=SPREADSHEET_ID,
-            range=f"'{sheet_name}'!{HEADER_ROW}:{HEADER_ROW}"
-        ).execute()
-        header_row = result.get('values', [[]])[0] if result.get('values') else []
-        header_map: Dict[str, int] = {}
-        for idx, value in enumerate(header_row):
-            header = (value or '').strip()
-            if header:
-                header_map[header] = idx
-        return header_map
-    except Exception as e:
-        print(f" 헤더 조회 실패 ({sheet_name}): {e}")
-        return {}
+    return svc_get_sheet_header_map(service, SPREADSHEET_ID, sheet_name, HEADER_ROW)
 
 
 def get_row_dynamic_values(
@@ -343,33 +299,14 @@ def get_row_dynamic_values(
     header_names: List[str],
 ) -> Dict[str, str]:
     """헤더명 기준으로 특정 행의 동적 컬럼 값을 읽는다."""
-    target_indexes = [header_map[name] for name in header_names if name in header_map]
-    if not target_indexes:
-        return {}
-
-    min_index = min(target_indexes)
-    max_index = max(target_indexes)
-    start_col = column_index_to_letter(min_index)
-    end_col = column_index_to_letter(max_index)
-
-    try:
-        result = service.spreadsheets().values().get(
-            spreadsheetId=SPREADSHEET_ID,
-            range=f"'{sheet_name}'!{start_col}{row_num}:{end_col}{row_num}"
-        ).execute()
-        row = result.get('values', [[]])[0] if result.get('values') else []
-    except Exception as e:
-        print(f" {sheet_name} {row_num}행 동적 컬럼 조회 실패: {e}")
-        return {}
-
-    values: Dict[str, str] = {}
-    for name in header_names:
-        idx = header_map.get(name)
-        if idx is None:
-            continue
-        offset = idx - min_index
-        values[name] = row[offset].strip() if offset < len(row) and row[offset] else ""
-    return values
+    return svc_get_row_dynamic_values(
+        service,
+        SPREADSHEET_ID,
+        sheet_name,
+        row_num,
+        header_map,
+        header_names,
+    )
 
 
 def get_rows_dynamic_values_bulk(
@@ -380,48 +317,14 @@ def get_rows_dynamic_values_bulk(
     header_names: List[str],
 ) -> Dict[int, Dict[str, str]]:
     """헤더명 기준 동적 컬럼 값을 여러 행에서 한 번에 읽어 반환한다."""
-    if not row_numbers:
-        return {}
-
-    target_indexes = [header_map[name] for name in header_names if name in header_map]
-    if not target_indexes:
-        return {row_num: {} for row_num in row_numbers}
-
-    min_col_index = min(target_indexes)
-    max_col_index = max(target_indexes)
-    start_col = column_index_to_letter(min_col_index)
-    end_col = column_index_to_letter(max_col_index)
-    min_row = min(row_numbers)
-    max_row = max(row_numbers)
-
-    try:
-        result = service.spreadsheets().values().get(
-            spreadsheetId=SPREADSHEET_ID,
-            range=f"'{sheet_name}'!{start_col}{min_row}:{end_col}{max_row}"
-        ).execute()
-        rows = result.get('values', [])
-    except Exception as e:
-        print(f" {sheet_name} 동적 컬럼 일괄 조회 실패: {e}")
-        return {row_num: {} for row_num in row_numbers}
-
-    row_set = set(row_numbers)
-    values_map: Dict[int, Dict[str, str]] = {}
-    for offset, row_num in enumerate(range(min_row, max_row + 1)):
-        if row_num not in row_set:
-            continue
-        row = rows[offset] if offset < len(rows) else []
-        row_values: Dict[str, str] = {}
-        for name in header_names:
-            idx = header_map.get(name)
-            if idx is None:
-                continue
-            local_offset = idx - min_col_index
-            row_values[name] = row[local_offset].strip() if local_offset < len(row) and row[local_offset] else ""
-        values_map[row_num] = row_values
-
-    for row_num in row_numbers:
-        values_map.setdefault(row_num, {})
-    return values_map
+    return svc_get_rows_dynamic_values_bulk(
+        service,
+        SPREADSHEET_ID,
+        sheet_name,
+        row_numbers,
+        header_map,
+        header_names,
+    )
 
 
 def update_cell_by_header(
@@ -433,44 +336,20 @@ def update_cell_by_header(
     value: str,
 ) -> bool:
     """헤더명 기준으로 특정 셀 값을 업데이트한다."""
-    col_index = header_map.get(header_name)
-    if col_index is None:
-        return False
-
-    try:
-        service.spreadsheets().values().update(
-            spreadsheetId=SPREADSHEET_ID,
-            range=f"'{sheet_name}'!{column_index_to_letter(col_index)}{row_num}",
-            valueInputOption='USER_ENTERED',
-            body={'values': [[value]]},
-        ).execute()
-        return True
-    except Exception as e:
-        print(f" {sheet_name} {row_num}행 {header_name} 업데이트 실패: {e}")
-        return False
+    return svc_update_cell_by_header(
+        service,
+        SPREADSHEET_ID,
+        sheet_name,
+        row_num,
+        header_map,
+        header_name,
+        value,
+    )
 
 
 def parse_margin_rate(value: str) -> float | None:
     """마진률 셀 문자열을 퍼센트 숫자로 변환한다."""
-    text = (value or '').strip()
-    if not text:
-        return None
-
-    has_percent = '%' in text
-    cleaned = re.sub(r'[^0-9.\-]', '', text)
-    if not cleaned:
-        return None
-
-    try:
-        parsed = float(cleaned)
-    except ValueError:
-        return None
-
-    if has_percent:
-        return parsed
-    if 0 <= parsed <= 1:
-        return parsed * 100
-    return parsed
+    return svc_parse_margin_rate(value)
 
 
 def determine_progress_status(margin_rate: float | None) -> str:
@@ -498,66 +377,17 @@ def is_thumbnail_ready_status(status: str) -> bool:
 
 def resolve_image_folder_from_paths(image_paths: str) -> str:
     """콤마 구분 image_paths에서 첫 이미지의 폴더 경로를 반환한다."""
-    parts = [part.strip() for part in (image_paths or "").split(",") if part.strip()]
-    if not parts:
-        return ""
-    first_path = os.path.abspath(os.path.expanduser(parts[0].replace('/', os.sep)))
-    return os.path.dirname(first_path)
+    return svc_resolve_image_folder_from_paths(image_paths)
 
 
 def build_thumbnail_brand(existing_values: Dict[str, str]) -> str:
     """썸네일용 브랜드명을 우선순위대로 반환한다."""
-    brand = (existing_values.get(BRAND_EN_COLUMN, "") or "").strip()
-    if brand:
-        return brand
-    brand = (existing_values.get(BRAND_COLUMN, "") or "").strip()
-    return brand or "BRAND"
+    return svc_build_thumbnail_brand(existing_values)
 
 
 def create_thumbnail_for_folder(folder_path: str, brand: str) -> bool:
     """이미지 폴더에서 썸네일을 생성한다."""
-    folder = os.path.abspath(os.path.expanduser(folder_path))
-    if not os.path.isdir(folder):
-        print(f"    썸네일 스킵: 폴더가 없습니다 -> {folder}")
-        return False
-
-    style = "split"
-    footer = f"{brand} / angduss k-closet"
-    command = [
-        sys.executable,
-        os.path.join(os.path.dirname(__file__), "make_thumbnails.py"),
-        folder,
-        "--style",
-        style,
-        "--brand",
-        brand,
-        "--footer",
-        footer,
-        "--blur-face",
-    ]
-    try:
-        completed = subprocess.run(
-            command,
-            cwd=os.path.dirname(__file__),
-            capture_output=True,
-            text=True,
-            encoding="utf-8",
-            errors="replace",
-            check=False,
-        )
-        if completed.stdout.strip():
-            print(completed.stdout.strip())
-        if completed.stderr.strip():
-            print(completed.stderr.strip())
-        thumb_path = os.path.join(folder, "00_thumb_main.jpg")
-        if completed.returncode == 0 and os.path.exists(thumb_path):
-            print(f"    썸네일 생성 완료: {thumb_path} ({style})")
-            return True
-        print(f"    썸네일 생성 실패 (코드 {completed.returncode})")
-        return False
-    except Exception as e:
-        print(f"    썸네일 생성 오류: {e}")
-        return False
+    return svc_create_thumbnail_for_folder(folder_path, brand)
 
 def get_sheets_service():
     """Google Sheets API 서비스 객체 생성"""
@@ -642,54 +472,32 @@ def read_urls_from_sheet(service, sheet_name: str) -> List[Tuple[int, str]]:
 
 def has_hangul(text: str) -> bool:
     """문자열에 한글이 포함되어 있는지 확인"""
-    return any('\uac00' <= char <= '\ud7a3' for char in text)
+    return svc_has_hangul(text)
 
 
 def fetch_json(url: str) -> Dict[str, object]:
     """JSON API를 호출한다"""
-    request = urllib.request.Request(url, headers={'User-Agent': 'Mozilla/5.0'})
-    with urllib.request.urlopen(request, timeout=30) as response:
-        return json.load(response)
+    return svc_fetch_json(url)
 
 
 def sanitize_path_component(value: str) -> str:
     """파일/폴더명으로 안전한 문자열로 정리한다"""
-    cleaned = re.sub(r'[\\/:*?"<>|]+', '_', (value or '').strip())
-    cleaned = re.sub(r'\s+', ' ', cleaned)
-    return cleaned.strip(' ._') or 'item'
+    return svc_sanitize_path_component(value)
 
 
 def build_image_folder_name(row_num: int, product_name: str) -> str:
     """이미지 폴더명을 '행번호. 상품명' 형식으로 만든다"""
-    display_index = max(1, row_num - ROW_START + 1)
-    safe_name = sanitize_path_component(product_name or '상품명 미확인')
-    return f"{display_index}. {safe_name}"
+    return svc_build_image_folder_name(row_num, ROW_START, product_name)
 
 
 def normalize_image_source(src: str) -> str:
     """무신사 이미지 URL을 다운로드 가능한 형태로 정규화한다"""
-    if not src:
-        return ""
-
-    normalized = src.strip()
-    if normalized.startswith('//'):
-        normalized = f"https:{normalized}"
-    elif normalized.startswith('/'):
-        normalized = f"https://image.msscdn.net{normalized}"
-
-    normalized = normalized.split('?')[0]
-    normalized = normalized.replace('https://image.msscdn.net/thumbnails/', 'https://image.msscdn.net/')
-    normalized = normalized.replace('/thumbnails/', '/')
-    return normalized
+    return svc_normalize_image_source(src)
 
 
 def build_image_identity_key(image_url: str) -> str:
     """같은 원본 사진의 다른 사이즈 URL을 하나로 묶기 위한 키를 만든다"""
-    normalized = normalize_image_source(image_url)
-    parsed = urllib.parse.urlparse(normalized)
-    path = parsed.path.lower()
-    path = re.sub(r'_(?:60|80|125|250|500|big)(\.[a-z0-9]+)$', r'\1', path)
-    return path
+    return svc_build_image_identity_key(image_url)
 
 
 def extract_musinsa_thumbnail_urls(
@@ -698,48 +506,12 @@ def extract_musinsa_thumbnail_urls(
     goods_no: str,
 ) -> List[str]:
     """무신사 상품 페이지에서 이미지 URL 목록을 추출한다"""
-    candidates: List[str] = []
-    seen_urls = set()
-    seen_images = set()
-
-    def add_candidate(src: str):
-        normalized = normalize_image_source(src)
-        if not normalized or normalized in seen_urls:
-            return
-        if 'goods_img' not in normalized and 'prd_img' not in normalized:
-            return
-        if goods_no and goods_no not in normalized:
-            return
-        identity_key = build_image_identity_key(normalized)
-        if identity_key in seen_images:
-            return
-        seen_urls.add(normalized)
-        seen_images.add(identity_key)
-        candidates.append(normalized)
-
-    if isinstance(product_json, dict):
-        image_field = product_json.get('image')
-        if isinstance(image_field, str):
-            add_candidate(image_field)
-        elif isinstance(image_field, list):
-            for item in image_field:
-                if isinstance(item, str):
-                    add_candidate(item)
-
-    og_image = soup.select_one('meta[property="og:image"]')
-    if og_image:
-        add_candidate(og_image.get('content', ''))
-
-    for img in soup.select('img'):
-        for attr in ('src', 'data-src', 'data-original', 'data-lazy-src'):
-            src = img.get(attr, '')
-            if not src:
-                continue
-            if goods_no and goods_no not in src:
-                continue
-            add_candidate(src)
-
-    return candidates[:MAX_THUMBNAIL_IMAGES]
+    return svc_extract_musinsa_thumbnail_urls(
+        soup=soup,
+        product_json=product_json,
+        goods_no=goods_no,
+        max_thumbnail_images=MAX_THUMBNAIL_IMAGES,
+    )
 
 
 def download_thumbnail_images(image_urls: List[str], folder_name: str) -> str:
