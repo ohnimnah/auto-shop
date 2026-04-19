@@ -1,5 +1,10 @@
 # Runtime artifacts
 images/
+build/
+dist/
+_debug/
+_parallel_test_logs/
+*.log
 
 # Secrets
 credentials.json
@@ -12,6 +17,7 @@ chrome_profile/
 # Python cache
 __pycache__/
 *.pyc
+.venv/
 
 # Backup/obsolete files
 backups/

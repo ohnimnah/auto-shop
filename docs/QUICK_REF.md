@@ -57,8 +57,8 @@ auto_shop/
 ├── run.command          # macOS 빠른 실행 파일
 ├── credentials.json     # Google API 인증 파일 (직접 다운로드)
 ├── README.md            # 상세 가이드
-├── ADVANCED.md          # 고급 설정
-├── QUICK_REF.md         # 이 파일
+├── docs/ADVANCED.md     # 고급 설정
+├── docs/QUICK_REF.md    # 이 파일
 └── images/              # 예시 이미지
 ```
 
@@ -171,7 +171,7 @@ Task Scheduler에 등록
 ### README.md
 → 기본 사용법 및 설명
 
-### ADVANCED.md
+### docs/ADVANCED.md
 → 고급 설정 및 커스터마이징
 
 ### main.py
