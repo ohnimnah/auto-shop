@@ -633,6 +633,9 @@ class AutoShopLauncher(tk.Tk):
             env = os.environ.copy()
             env["PYTHONUNBUFFERED"] = "1"
             env["AUTO_SHOP_IMAGES_DIR"] = self._get_configured_images_dir()
+            env["AUTO_SHOP_DATA_DIR"] = self.data_dir
+            if action == "watch-upload":
+                env["AUTO_SHOP_FORCE_BUYMA_RELOGIN"] = "1"
             proc = subprocess.Popen(
                 command,
                 cwd=SCRIPT_DIR,
@@ -1235,6 +1238,9 @@ class AutoShopLauncher(tk.Tk):
             env = os.environ.copy()
             env["PYTHONUNBUFFERED"] = "1"
             env["AUTO_SHOP_IMAGES_DIR"] = self._get_configured_images_dir()
+            env["AUTO_SHOP_DATA_DIR"] = self.data_dir
+            if self.current_action in {"upload-review", "upload-auto", "watch-upload"}:
+                env["AUTO_SHOP_FORCE_BUYMA_RELOGIN"] = "1"
             self.process = subprocess.Popen(
                 command,
                 cwd=SCRIPT_DIR,

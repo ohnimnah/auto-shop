@@ -72,6 +72,17 @@ JP_SHITEI_NASHI = "\u6307\u5b9a\u306a\u3057"  # 指定なし
 JP_SIZE_SHITEI_NASHI = "\u30b5\u30a4\u30ba\u6307\u5b9a\u306a\u3057"  # サイズ指定なし
 
 
+def get_runtime_data_dir() -> str:
+    """런처/CLI가 지정한 런타임 데이터 폴더를 반환한다."""
+    env_data_dir = os.environ.get("AUTO_SHOP_DATA_DIR", "").strip()
+    if env_data_dir:
+        return os.path.abspath(os.path.expanduser(env_data_dir))
+    local_app_data = os.environ.get("LOCALAPPDATA", "").strip()
+    if local_app_data:
+        return os.path.join(local_app_data, "auto_shop")
+    return os.path.join(os.path.expanduser("~"), ".auto_shop")
+
+
 def _normalize_jp_match_text(text: str) -> str:
     return (text or "").strip().replace(" ", "").replace("\u3000", "")
 
@@ -84,11 +95,7 @@ def _is_shitei_nashi_text(text: str) -> bool:
 def _load_sheet_runtime_config() -> None:
     """로컬에서 저장한 시트 설정파일을 읽어 기본값을 반영한다."""
     global SPREADSHEET_ID, SHEET_GIDS, SHEET_NAME, ROW_START
-    local_app_data = os.environ.get('LOCALAPPDATA', '').strip()
-    if local_app_data:
-        data_dir = os.path.join(local_app_data, 'auto_shop')
-    else:
-        data_dir = os.path.join(os.path.expanduser('~'), '.auto_shop')
+    data_dir = get_runtime_data_dir()
 
     cfg_path = os.path.join(data_dir, 'sheets_config.json')
     if not os.path.exists(cfg_path):
@@ -134,17 +141,12 @@ _load_sheet_runtime_config()
 
 BUYMA_SELL_URL = "https://www.buyma.com/my/sell/new?tab=b"
 BUYMA_LOGIN_URL = "https://www.buyma.com/login/"
+BUYMA_LOGOUT_URL = "https://www.buyma.com/logout/"
 
 # 바이마 로그인 정보 저장경로 (로컬)
-BUYMA_CRED_PATH = os.path.join(
-    os.environ.get('LOCALAPPDATA', os.path.expanduser('~')),
-    'auto_shop', 'buyma_credentials.json'
-)
+BUYMA_CRED_PATH = os.path.join(get_runtime_data_dir(), "buyma_credentials.json")
 # Chrome 프로필 경로 (세션/쿠키 유지)
-CHROME_PROFILE_DIR = os.path.join(
-    os.environ.get('LOCALAPPDATA', os.path.expanduser('~')),
-    'auto_shop', 'chrome_profile'
-)
+CHROME_PROFILE_DIR = os.path.join(get_runtime_data_dir(), "chrome_profile")
 
 
 BUYMA_COMMENT_TEMPLATE = """
@@ -182,11 +184,9 @@ COL = {
 
 def get_credentials_path() -> str:
     """자격증명 파일 경로 반환"""
-    local_app_data = os.environ.get('LOCALAPPDATA', '').strip()
-    if local_app_data:
-        cred = os.path.join(local_app_data, 'auto_shop', 'credentials.json')
-        if os.path.exists(cred):
-            return cred
+    cred = os.path.join(get_runtime_data_dir(), "credentials.json")
+    if os.path.exists(cred):
+        return cred
     fallback = os.path.join(os.path.dirname(__file__), 'credentials.json')
     if os.path.exists(fallback):
         return fallback
@@ -415,23 +415,33 @@ def setup_visible_chrome_driver():
 
 def wait_for_buyma_login(driver) -> bool:
     """Handle BUYMA login flow with saved credentials and manual fallback."""
-    driver.get(BUYMA_SELL_URL)
-    _sleep(3)
-
-    # 이미 로그인 상태면 통과
-    if '/login' not in driver.current_url:
-        print("이미 로그인 상태입니다.")
-        return True
-
     # 저장된 계정 정보 로드 (없으면 입력 받기)
     email, password = _load_buyma_credentials()
     if not email or not password:
         email, password = _prompt_buyma_credentials()
 
+    force_relogin = os.environ.get("AUTO_SHOP_FORCE_BUYMA_RELOGIN", "1").strip().lower() in {
+        "1", "true", "yes", "y", "on"
+    }
+
+    driver.get(BUYMA_SELL_URL)
+    _sleep(3)
+
+    # 이미 로그인 상태일 때도 계정 변경 반영을 위해 재로그인 옵션을 지원
+    if '/login' not in driver.current_url and not (force_relogin and email and password):
+        print("이미 로그인 상태입니다.")
+        return True
+
     if email and password:
         # 자동 로그인 시도
         print("자동 로그인 시도 중...")
         try:
+            if force_relogin:
+                try:
+                    driver.get(BUYMA_LOGOUT_URL)
+                    _sleep(2)
+                except Exception:
+                    pass
             driver.get(BUYMA_LOGIN_URL)
             _sleep(2)
 
