@@ -110,6 +110,12 @@ from crawler_service import (
     sanitize_path_component as svc_sanitize_path_component,
     split_name_and_color as svc_split_name_and_color,
 )
+from pipeline_service import (
+    determine_progress_status as svc_determine_progress_status,
+    is_crawler_ready_status as svc_is_crawler_ready_status,
+    is_image_ready_status as svc_is_image_ready_status,
+    is_thumbnail_ready_status as svc_is_thumbnail_ready_status,
+)
 
 # Windows cp949 터미널에서 유니코드 출력 오류 방지
 if sys.stdout.encoding and sys.stdout.encoding.lower().replace("-", "") in ("cp949", "euckr"):
@@ -374,25 +380,36 @@ def parse_margin_rate(value: str) -> float | None:
 
 def determine_progress_status(margin_rate: float | None) -> str:
     """마진률 기준으로 다음 진행상태를 계산한다."""
-    if margin_rate is not None and margin_rate < MARGIN_THRESHOLD_PERCENT:
-        return STATUS_HOLD
-    return STATUS_CRAWLED
+    return svc_determine_progress_status(
+        margin_rate=margin_rate,
+        margin_threshold_percent=MARGIN_THRESHOLD_PERCENT,
+        status_hold=STATUS_HOLD,
+        status_crawled=STATUS_CRAWLED,
+    )
 
 
 def is_crawler_ready_status(status: str) -> bool:
-    normalized = (status or "").strip()
-    # 신규만 정찰 대상으로 삼되, 기존 데이터 호환을 위해 일부 레거시 값을 허용
-    return normalized in {"", STATUS_WAITING, STATUS_NEW, "NEW"}
+    return svc_is_crawler_ready_status(
+        status=status,
+        status_waiting=STATUS_WAITING,
+        status_new=STATUS_NEW,
+    )
 
 
 def is_image_ready_status(status: str) -> bool:
-    normalized = (status or "").strip()
-    return normalized in {STATUS_CRAWLED, "CRAWLED", STATUS_IMAGE_READY}
+    return svc_is_image_ready_status(
+        status=status,
+        status_crawled=STATUS_CRAWLED,
+        status_image_ready=STATUS_IMAGE_READY,
+    )
 
 
 def is_thumbnail_ready_status(status: str) -> bool:
-    normalized = (status or "").strip()
-    return normalized in {STATUS_IMAGES_SAVED, "IMAGES_SAVED", STATUS_THUMBNAIL_READY}
+    return svc_is_thumbnail_ready_status(
+        status=status,
+        status_images_saved=STATUS_IMAGES_SAVED,
+        status_thumbnail_ready=STATUS_THUMBNAIL_READY,
+    )
 
 
 def resolve_image_folder_from_paths(image_paths: str) -> str:
