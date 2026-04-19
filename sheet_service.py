@@ -244,6 +244,131 @@ def read_urls_from_sheet(
         return []
 
 
+def get_existing_row_values(
+    service,
+    spreadsheet_id: str,
+    sheet_name: str,
+    row_num: int,
+    sequence_column: str,
+    url_column: str,
+    brand_column: str,
+    brand_en_column: str,
+    product_name_kr_column: str,
+    product_name_en_column: str,
+    musinsa_sku_column: str,
+    color_kr_column: str,
+    color_en_column: str,
+    size_column: str,
+    actual_size_column: str,
+    price_column: str,
+    buyma_sell_price_column: str,
+    image_paths_column: str,
+    shipping_cost_column: str,
+    category_large_column: str,
+    category_middle_column: str,
+    category_small_column: str,
+) -> Dict[str, str]:
+    """Read one row (A~Y) and map selected columns."""
+    try:
+        result = service.spreadsheets().values().get(
+            spreadsheetId=spreadsheet_id,
+            range=f"'{sheet_name}'!A{row_num}:Y{row_num}",
+        ).execute()
+        rows = result.get("values", [])
+        row = rows[0] if rows else []
+
+        return {
+            sequence_column: row[0] if len(row) > 0 else "",
+            url_column: row[1] if len(row) > 1 else "",
+            brand_column: row[2] if len(row) > 2 else "",
+            brand_en_column: row[3] if len(row) > 3 else "",
+            product_name_kr_column: row[4] if len(row) > 4 else "",
+            product_name_en_column: row[5] if len(row) > 5 else "",
+            musinsa_sku_column: row[6] if len(row) > 6 else "",
+            color_kr_column: row[7] if len(row) > 7 else "",
+            color_en_column: row[8] if len(row) > 8 else "",
+            size_column: row[9] if len(row) > 9 else "",
+            actual_size_column: row[10] if len(row) > 10 else "",
+            price_column: row[11] if len(row) > 11 else "",
+            buyma_sell_price_column: row[12] if len(row) > 12 else "",
+            image_paths_column: row[13] if len(row) > 13 else "",
+            shipping_cost_column: row[14] if len(row) > 14 else "",
+            category_large_column: row[22] if len(row) > 22 else "",
+            category_middle_column: row[23] if len(row) > 23 else "",
+            category_small_column: row[24] if len(row) > 24 else "",
+        }
+    except Exception as e:
+        print(f" {sheet_name} {row_num}행 기존 데이터 조회 실패: {e}")
+        return {}
+
+
+def get_existing_rows_bulk(
+    service,
+    spreadsheet_id: str,
+    sheet_name: str,
+    row_numbers: List[int],
+    sequence_column: str,
+    url_column: str,
+    brand_column: str,
+    brand_en_column: str,
+    product_name_kr_column: str,
+    product_name_en_column: str,
+    musinsa_sku_column: str,
+    color_kr_column: str,
+    color_en_column: str,
+    size_column: str,
+    actual_size_column: str,
+    price_column: str,
+    buyma_sell_price_column: str,
+    image_paths_column: str,
+    shipping_cost_column: str,
+    category_large_column: str,
+    category_middle_column: str,
+    category_small_column: str,
+) -> Dict[int, Dict[str, str]]:
+    """Read multiple rows (A~Y) in one request and map selected columns."""
+    if not row_numbers:
+        return {}
+
+    min_row = min(row_numbers)
+    max_row = max(row_numbers)
+    try:
+        result = service.spreadsheets().values().get(
+            spreadsheetId=spreadsheet_id,
+            range=f"'{sheet_name}'!A{min_row}:Y{max_row}",
+        ).execute()
+        values = result.get("values", [])
+
+        row_map: Dict[int, Dict[str, str]] = {}
+        for offset, row_num in enumerate(range(min_row, max_row + 1)):
+            row_values = values[offset] if offset < len(values) else []
+            mapped = {
+                sequence_column: row_values[0] if len(row_values) > 0 else "",
+                url_column: row_values[1] if len(row_values) > 1 else "",
+                brand_column: row_values[2] if len(row_values) > 2 else "",
+                brand_en_column: row_values[3] if len(row_values) > 3 else "",
+                product_name_kr_column: row_values[4] if len(row_values) > 4 else "",
+                product_name_en_column: row_values[5] if len(row_values) > 5 else "",
+                musinsa_sku_column: row_values[6] if len(row_values) > 6 else "",
+                color_kr_column: row_values[7] if len(row_values) > 7 else "",
+                color_en_column: row_values[8] if len(row_values) > 8 else "",
+                size_column: row_values[9] if len(row_values) > 9 else "",
+                actual_size_column: row_values[10] if len(row_values) > 10 else "",
+                price_column: row_values[11] if len(row_values) > 11 else "",
+                buyma_sell_price_column: row_values[12] if len(row_values) > 12 else "",
+                image_paths_column: row_values[13] if len(row_values) > 13 else "",
+                shipping_cost_column: row_values[14] if len(row_values) > 14 else "",
+                category_large_column: row_values[22] if len(row_values) > 22 else "",
+                category_middle_column: row_values[23] if len(row_values) > 23 else "",
+                category_small_column: row_values[24] if len(row_values) > 24 else "",
+            }
+            row_map[row_num] = mapped
+        return row_map
+    except Exception as e:
+        print(f" {sheet_name} 기존 데이터 일괄 조회 실패: {e}")
+        return {}
+
+
 def update_value_by_range(
     service,
     spreadsheet_id: str,

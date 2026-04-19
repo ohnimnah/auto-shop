@@ -70,6 +70,8 @@ from app_config import (
 from sheet_service import (
     batch_update_values as svc_batch_update_values,
     column_index_to_letter as svc_column_index_to_letter,
+    get_existing_row_values as svc_get_existing_row_values,
+    get_existing_rows_bulk as svc_get_existing_rows_bulk,
     get_target_sheet_names as svc_get_target_sheet_names,
     get_sheet_name_by_gid as svc_get_sheet_name_by_gid,
     is_url_cell as svc_is_url_cell,
@@ -1058,38 +1060,30 @@ def extract_musinsa_sku(
 
 def get_existing_row_values(service, sheet_name: str, row_num: int) -> Dict[str, str]:
     """현재 행의 A~Y 값을 읽어 컬럼별로 반환한다"""
-    try:
-        result = service.spreadsheets().values().get(
-            spreadsheetId=SPREADSHEET_ID,
-            range=f"'{sheet_name}'!A{row_num}:Y{row_num}"
-        ).execute()
-        rows = result.get('values', [])
-        row = rows[0] if rows else []
-
-        existing = {
-            SEQUENCE_COLUMN: row[0] if len(row) > 0 else "",
-            URL_COLUMN: row[1] if len(row) > 1 else "",
-            BRAND_COLUMN: row[2] if len(row) > 2 else "",
-            BRAND_EN_COLUMN: row[3] if len(row) > 3 else "",
-            PRODUCT_NAME_KR_COLUMN: row[4] if len(row) > 4 else "",
-            PRODUCT_NAME_EN_COLUMN: row[5] if len(row) > 5 else "",
-            MUSINSA_SKU_COLUMN: row[6] if len(row) > 6 else "",
-            COLOR_KR_COLUMN: row[7] if len(row) > 7 else "",
-            COLOR_EN_COLUMN: row[8] if len(row) > 8 else "",
-            SIZE_COLUMN: row[9] if len(row) > 9 else "",
-            ACTUAL_SIZE_COLUMN: row[10] if len(row) > 10 else "",
-            PRICE_COLUMN: row[11] if len(row) > 11 else "",
-            BAIMA_SELL_PRICE_COLUMN: row[12] if len(row) > 12 else "",
-            IMAGE_PATHS_COLUMN: row[13] if len(row) > 13 else "",
-            SHIPPING_COST_COLUMN: row[14] if len(row) > 14 else "",
-            CATEGORY_LARGE_COLUMN: row[22] if len(row) > 22 else "",
-            CATEGORY_MIDDLE_COLUMN: row[23] if len(row) > 23 else "",
-            CATEGORY_SMALL_COLUMN: row[24] if len(row) > 24 else "",
-        }
-        return existing
-    except Exception as e:
-        print(f" {sheet_name} {row_num}행 기존 데이터 조회 실패: {e}")
-        return {}
+    return svc_get_existing_row_values(
+        service=service,
+        spreadsheet_id=SPREADSHEET_ID,
+        sheet_name=sheet_name,
+        row_num=row_num,
+        sequence_column=SEQUENCE_COLUMN,
+        url_column=URL_COLUMN,
+        brand_column=BRAND_COLUMN,
+        brand_en_column=BRAND_EN_COLUMN,
+        product_name_kr_column=PRODUCT_NAME_KR_COLUMN,
+        product_name_en_column=PRODUCT_NAME_EN_COLUMN,
+        musinsa_sku_column=MUSINSA_SKU_COLUMN,
+        color_kr_column=COLOR_KR_COLUMN,
+        color_en_column=COLOR_EN_COLUMN,
+        size_column=SIZE_COLUMN,
+        actual_size_column=ACTUAL_SIZE_COLUMN,
+        price_column=PRICE_COLUMN,
+        buyma_sell_price_column=BAIMA_SELL_PRICE_COLUMN,
+        image_paths_column=IMAGE_PATHS_COLUMN,
+        shipping_cost_column=SHIPPING_COST_COLUMN,
+        category_large_column=CATEGORY_LARGE_COLUMN,
+        category_middle_column=CATEGORY_MIDDLE_COLUMN,
+        category_small_column=CATEGORY_SMALL_COLUMN,
+    )
 
 
 def get_existing_rows_bulk(
@@ -1098,55 +1092,30 @@ def get_existing_rows_bulk(
     row_numbers: List[int],
 ) -> Dict[int, Dict[str, str]]:
     """여러 행의 A~Y 값을 한 번에 읽어 행 번호별 맵으로 반환한다"""
-    if not row_numbers:
-        return {}
-
-    min_row = min(row_numbers)
-    max_row = max(row_numbers)
-    columns = [
-        SEQUENCE_COLUMN, URL_COLUMN, BRAND_COLUMN, BRAND_EN_COLUMN,
-        PRODUCT_NAME_KR_COLUMN, PRODUCT_NAME_EN_COLUMN, MUSINSA_SKU_COLUMN,
-        COLOR_KR_COLUMN, COLOR_EN_COLUMN, SIZE_COLUMN,
-        ACTUAL_SIZE_COLUMN,
-        PRICE_COLUMN, BAIMA_SELL_PRICE_COLUMN, IMAGE_PATHS_COLUMN, SHIPPING_COST_COLUMN,
-        CATEGORY_LARGE_COLUMN, CATEGORY_MIDDLE_COLUMN, CATEGORY_SMALL_COLUMN,
-    ]
-
-    try:
-        result = service.spreadsheets().values().get(
-            spreadsheetId=SPREADSHEET_ID,
-            range=f"'{sheet_name}'!A{min_row}:Y{max_row}"
-        ).execute()
-        values = result.get('values', [])
-
-        row_map: Dict[int, Dict[str, str]] = {}
-        for offset, row_num in enumerate(range(min_row, max_row + 1)):
-            row_values = values[offset] if offset < len(values) else []
-            mapped = {}
-            mapped[SEQUENCE_COLUMN] = row_values[0] if len(row_values) > 0 else ""
-            mapped[URL_COLUMN] = row_values[1] if len(row_values) > 1 else ""
-            mapped[BRAND_COLUMN] = row_values[2] if len(row_values) > 2 else ""
-            mapped[BRAND_EN_COLUMN] = row_values[3] if len(row_values) > 3 else ""
-            mapped[PRODUCT_NAME_KR_COLUMN] = row_values[4] if len(row_values) > 4 else ""
-            mapped[PRODUCT_NAME_EN_COLUMN] = row_values[5] if len(row_values) > 5 else ""
-            mapped[MUSINSA_SKU_COLUMN] = row_values[6] if len(row_values) > 6 else ""
-            mapped[COLOR_KR_COLUMN] = row_values[7] if len(row_values) > 7 else ""
-            mapped[COLOR_EN_COLUMN] = row_values[8] if len(row_values) > 8 else ""
-            mapped[SIZE_COLUMN] = row_values[9] if len(row_values) > 9 else ""
-            mapped[ACTUAL_SIZE_COLUMN] = row_values[10] if len(row_values) > 10 else ""
-            mapped[PRICE_COLUMN] = row_values[11] if len(row_values) > 11 else ""
-            mapped[BAIMA_SELL_PRICE_COLUMN] = row_values[12] if len(row_values) > 12 else ""
-            mapped[IMAGE_PATHS_COLUMN] = row_values[13] if len(row_values) > 13 else ""
-            mapped[SHIPPING_COST_COLUMN] = row_values[14] if len(row_values) > 14 else ""
-            mapped[CATEGORY_LARGE_COLUMN] = row_values[22] if len(row_values) > 22 else ""
-            mapped[CATEGORY_MIDDLE_COLUMN] = row_values[23] if len(row_values) > 23 else ""
-            mapped[CATEGORY_SMALL_COLUMN] = row_values[24] if len(row_values) > 24 else ""
-            row_map[row_num] = mapped
-
-        return row_map
-    except Exception as e:
-        print(f" {sheet_name} 기존 데이터 일괄 조회 실패: {e}")
-        return {}
+    return svc_get_existing_rows_bulk(
+        service=service,
+        spreadsheet_id=SPREADSHEET_ID,
+        sheet_name=sheet_name,
+        row_numbers=row_numbers,
+        sequence_column=SEQUENCE_COLUMN,
+        url_column=URL_COLUMN,
+        brand_column=BRAND_COLUMN,
+        brand_en_column=BRAND_EN_COLUMN,
+        product_name_kr_column=PRODUCT_NAME_KR_COLUMN,
+        product_name_en_column=PRODUCT_NAME_EN_COLUMN,
+        musinsa_sku_column=MUSINSA_SKU_COLUMN,
+        color_kr_column=COLOR_KR_COLUMN,
+        color_en_column=COLOR_EN_COLUMN,
+        size_column=SIZE_COLUMN,
+        actual_size_column=ACTUAL_SIZE_COLUMN,
+        price_column=PRICE_COLUMN,
+        buyma_sell_price_column=BAIMA_SELL_PRICE_COLUMN,
+        image_paths_column=IMAGE_PATHS_COLUMN,
+        shipping_cost_column=SHIPPING_COST_COLUMN,
+        category_large_column=CATEGORY_LARGE_COLUMN,
+        category_middle_column=CATEGORY_MIDDLE_COLUMN,
+        category_small_column=CATEGORY_SMALL_COLUMN,
+    )
 
 
 def build_incremental_payload(
