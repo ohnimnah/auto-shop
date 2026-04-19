@@ -3,7 +3,7 @@ import os
 import sys
 from pathlib import Path
 import re
-from typing import Optional
+from typing import List, Optional, Tuple
 
 # Windows cp949 터미널에서 유니코드 출력 오류 방지
 if sys.stdout.encoding and sys.stdout.encoding.lower().replace("-", "") in ("cp949", "euckr"):
@@ -20,10 +20,18 @@ except Exception:
     cv2 = None
     np = None
 
+try:
+    from ultralytics import YOLO as UltralyticsYOLO
+except Exception:
+    UltralyticsYOLO = None
+
 
 IMAGE_EXTS = {".jpg", ".jpeg", ".png", ".webp", ".bmp"}
 LOGO_EXTS = (".png", ".webp", ".jpg", ".jpeg")
 LOGO_BASENAMES = {"__brand_logo", "_brand_logo", "brand_logo", "logo"}
+YOLO_FACE_MODEL = os.environ.get("AUTO_SHOP_FACE_MODEL", "yolov8n-face.pt").strip() or "yolov8n-face.pt"
+_YOLO_FACE_MODEL_INSTANCE = None
+_YOLO_FACE_MODEL_FAILED = False
 
 
 def iter_images(input_path: Path):
@@ -174,35 +182,18 @@ def _paste_brand_logo(canvas: Image.Image, logo_path: Path, left_box, size: int)
 
 
 def _blur_faces(pil_img: Image.Image, blur_radius: int = 14) -> Image.Image:
-    """Detect faces and apply Gaussian blur only on face areas."""
-    if cv2 is None or np is None:
+    """Detect faces (YOLO-first) and blur face-shaped regions."""
+    if np is None:
         return pil_img
 
-    arr = np.array(pil_img)
-    if arr.size == 0:
-        return pil_img
-
-    gray = cv2.cvtColor(arr, cv2.COLOR_RGB2GRAY)
-    cascade_path = cv2.data.haarcascades + "haarcascade_frontalface_default.xml"
-    face_cascade = cv2.CascadeClassifier(cascade_path)
-
-    # 이미지 상단 55% 영역에서만 탐지 (하반신 오탐 방지)
-    h_limit = int(gray.shape[0] * 0.55)
-    gray_top = gray[:h_limit, :]
-
-    faces = face_cascade.detectMultiScale(
-        gray_top,
-        scaleFactor=1.05,
-        minNeighbors=7,
-        minSize=(60, 60),
-        maxSize=(int(gray.shape[1] * 0.5), int(gray.shape[0] * 0.5)),
-    )
-
-    if len(faces) == 0:
+    faces = _detect_faces_yolo(pil_img)
+    if not faces:
+        faces = _detect_faces_haar(pil_img)
+    if not faces:
         return pil_img
 
     out = pil_img.copy()
-    for (x, y, w, h) in faces:
+    for x, y, w, h in faces:
         # Face box padding for natural blur coverage.
         px = int(w * 0.2)
         py = int(h * 0.25)
@@ -229,6 +220,86 @@ def _blur_faces(pil_img: Image.Image, blur_radius: int = 14) -> Image.Image:
     return out
 
 
+def _get_yolo_face_model():
+    global _YOLO_FACE_MODEL_INSTANCE, _YOLO_FACE_MODEL_FAILED
+    if _YOLO_FACE_MODEL_INSTANCE is not None:
+        return _YOLO_FACE_MODEL_INSTANCE
+    if _YOLO_FACE_MODEL_FAILED or UltralyticsYOLO is None:
+        return None
+    try:
+        _YOLO_FACE_MODEL_INSTANCE = UltralyticsYOLO(YOLO_FACE_MODEL)
+        return _YOLO_FACE_MODEL_INSTANCE
+    except Exception:
+        _YOLO_FACE_MODEL_FAILED = True
+        return None
+
+
+def _detect_faces_yolo(pil_img: Image.Image) -> List[Tuple[int, int, int, int]]:
+    model = _get_yolo_face_model()
+    if model is None or np is None:
+        return []
+
+    arr = np.array(pil_img)
+    if arr.size == 0:
+        return []
+
+    try:
+        results = model.predict(source=arr, conf=0.2, iou=0.45, verbose=False, device="cpu")
+    except TypeError:
+        results = model.predict(source=arr, conf=0.2, iou=0.45, verbose=False)
+    except Exception:
+        return []
+
+    if not results:
+        return []
+
+    h, w = arr.shape[:2]
+    y_limit = int(h * 0.70)
+    boxes = getattr(results[0], "boxes", None)
+    if boxes is None or boxes.xyxy is None:
+        return []
+
+    detected: List[Tuple[int, int, int, int]] = []
+    for box in boxes.xyxy.tolist():
+        if len(box) < 4:
+            continue
+        x1 = max(0, min(w - 1, int(box[0])))
+        y1 = max(0, min(h - 1, int(box[1])))
+        x2 = max(0, min(w, int(box[2])))
+        y2 = max(0, min(h, int(box[3])))
+        if x2 <= x1 or y2 <= y1:
+            continue
+        cy = (y1 + y2) // 2
+        if cy > y_limit:
+            continue
+        detected.append((x1, y1, x2 - x1, y2 - y1))
+    return detected
+
+
+def _detect_faces_haar(pil_img: Image.Image) -> List[Tuple[int, int, int, int]]:
+    if cv2 is None or np is None:
+        return []
+
+    arr = np.array(pil_img)
+    if arr.size == 0:
+        return []
+
+    gray = cv2.cvtColor(arr, cv2.COLOR_RGB2GRAY)
+    cascade_path = cv2.data.haarcascades + "haarcascade_frontalface_default.xml"
+    face_cascade = cv2.CascadeClassifier(cascade_path)
+
+    h_limit = int(gray.shape[0] * 0.55)
+    gray_top = gray[:h_limit, :]
+    faces = face_cascade.detectMultiScale(
+        gray_top,
+        scaleFactor=1.05,
+        minNeighbors=7,
+        minSize=(60, 60),
+        maxSize=(int(gray.shape[1] * 0.5), int(gray.shape[0] * 0.5)),
+    )
+    if faces is None or len(faces) == 0:
+        return []
+    return [(int(x), int(y), int(w), int(h)) for (x, y, w, h) in faces]
 def _paste_cover(canvas: Image.Image, src: Path, box, blur_faces: bool = False, blur_radius: int = 14):
     """Legacy name kept for compatibility.
     Preserve the full source image (no crop) and fill remaining area with a soft background.
