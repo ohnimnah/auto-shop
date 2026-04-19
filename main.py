@@ -94,8 +94,10 @@ from image_service import (
 from crawler_service import (
     build_image_folder_name as svc_build_image_folder_name,
     build_image_identity_key as svc_build_image_identity_key,
+    classify_size_token as svc_classify_size_token,
     clean_product_name as svc_clean_product_name,
     extract_actual_size_text as svc_extract_actual_size_text,
+    extract_color_from_api as svc_extract_color_from_api,
     extract_musinsa_categories as svc_extract_musinsa_categories,
     extract_musinsa_gender_large as svc_extract_musinsa_gender_large,
     extract_brand_en_from_musinsa as svc_extract_brand_en_from_musinsa,
@@ -107,15 +109,23 @@ from crawler_service import (
     fetch_actual_size as svc_fetch_actual_size,
     fetch_goods_options as svc_fetch_goods_options,
     fetch_json as svc_fetch_json,
+    find_longest_step_sequence as svc_find_longest_step_sequence,
     get_color_name_map as svc_get_color_name_map,
     has_hangul as svc_has_hangul,
+    is_date_like_size_token as svc_is_date_like_size_token,
     is_color_count_placeholder as svc_is_color_count_placeholder,
     normalize_image_source as svc_normalize_image_source,
     normalize_english_color as svc_normalize_english_color,
     normalize_gender_label as svc_normalize_gender_label,
     normalize_korean_color as svc_normalize_korean_color,
+    normalize_size_tokens as svc_normalize_size_tokens,
+    extract_sizes as svc_extract_sizes,
+    extract_sizes_from_api as svc_extract_sizes_from_api,
+    extract_sizes_from_review_options as svc_extract_sizes_from_review_options,
+    extract_sizes_from_table as svc_extract_sizes_from_table,
     remap_categories_with_gender as svc_remap_categories_with_gender,
     sanitize_path_component as svc_sanitize_path_component,
+    split_color_size_tokens as svc_split_color_size_tokens,
     split_name_and_color as svc_split_name_and_color,
 )
 from pipeline_service import (
@@ -642,350 +652,54 @@ def extract_brand_en_from_musinsa(driver, product_url: str) -> str:
 
 def find_longest_step_sequence(values: List[int], allowed_steps: Tuple[int, ...]) -> List[int]:
     """허용된 간격을 갖는 가장 긴 수열을 찾는다"""
-    if not values:
-        return []
-
-    sorted_values = sorted(set(values))
-    best_sequence: List[int] = []
-    current_sequence = [sorted_values[0]]
-
-    for value in sorted_values[1:]:
-        step = value - current_sequence[-1]
-        if step in allowed_steps:
-            current_sequence.append(value)
-        else:
-            if len(current_sequence) > len(best_sequence):
-                best_sequence = current_sequence[:]
-            current_sequence = [value]
-
-    if len(current_sequence) > len(best_sequence):
-        best_sequence = current_sequence[:]
-
-    return best_sequence
+    return svc_find_longest_step_sequence(values, allowed_steps)
 
 
 def classify_size_token(token: str) -> str:
     """사이즈 토큰 타입을 반환한다: numeric, english, korean, mixed, other"""
-    value = token.strip()
-    if not value:
-        return "other"
-    if value.isdigit():
-        return "numeric"
-    if re.fullmatch(r'[A-Za-z0-9/\-+ ]+', value):
-        return "english"
-    if has_hangul(value):
-        english_present = bool(re.search(r'[A-Za-z]', value))
-        digit_present = bool(re.search(r'\d', value))
-        if english_present or digit_present:
-            return "mixed"
-        return "korean"
-    return "other"
+    return svc_classify_size_token(token)
 
 
 def is_date_like_size_token(token: str) -> bool:
     """사이즈 토큰으로 보기 어려운 날짜형 문자열을 걸러낸다."""
-    value = (token or "").strip()
-    if not value:
-        return False
-
-    # 2026-04-17 / 2026.04 / 20260417
-    if re.fullmatch(r'(?:19|20)\d{2}[./-]\d{1,2}(?:[./-]\d{1,2})?', value):
-        return True
-    if re.fullmatch(r'(?:19|20)\d{6}', value):
-        return True
-
-    # 2026년 4월 17일 / 4월 17일
-    if re.search(r'(?:19|20)\d{2}\s*년', value):
-        return True
-    if re.search(r'\d{1,2}\s*월\s*\d{1,2}\s*일', value):
-        return True
-
-    return False
+    return svc_is_date_like_size_token(token)
 
 
 def normalize_size_tokens(tokens: List[str], option_kind: str = "") -> List[str]:
     """사이즈 토큰을 숫자/영문/한글 한 종류만 남도록 정규화한다"""
-    cleaned: List[str] = []
-    seen = set()
-    for token in tokens:
-        value = re.sub(r'\s+', ' ', str(token)).strip(' ,')
-        if not value or value in seen:
-            continue
-        if is_date_like_size_token(value):
-            continue
-        seen.add(value)
-        cleaned.append(value)
-
-    if not cleaned:
-        return []
-
-    groups = {
-        'numeric': [],
-        'english': [],
-        'korean': [],
-        'mixed': [],
-    }
-    for token in cleaned:
-        token_type = classify_size_token(token)
-        if token_type in groups:
-            groups[token_type].append(token)
-
-    option_kind = option_kind.upper()
-    if groups['numeric']:
-        return groups['numeric']
-    if option_kind == 'SHOES' and groups['english']:
-        return groups['english']
-    if groups['english']:
-        return groups['english']
-    if groups['korean']:
-        return groups['korean']
-    if groups['mixed']:
-        return groups['mixed']
-    return cleaned
+    return svc_normalize_size_tokens(tokens, option_kind)
 
 
 def extract_color_from_api(goods_options: Dict[str, object]) -> str:
     """옵션 API의 colorCode를 색상명으로 변환한다"""
-    if not goods_options:
-        return ""
-
-    # optionValues의 색상 축(C / COLOR)을 우선 사용한다. (예: CG, MG)
-    option_value_colors: List[str] = []
-    for item in goods_options.get('optionItems', []):
-        for option_value in item.get('optionValues', []):
-            axis = str(option_value.get('optionName', '')).strip().upper()
-            if axis not in {"C", "COLOR", "CLR", "COL"}:
-                continue
-            value = str(option_value.get('name', '')).strip() or str(option_value.get('code', '')).strip()
-            if not value:
-                continue
-            if re.fullmatch(r'\d+', value):
-                continue
-            value = value.lower() if re.fullmatch(r'[A-Za-z0-9._-]{1,8}', value) else value
-            if value not in option_value_colors and not is_color_count_placeholder(value):
-                option_value_colors.append(value)
-
-    if option_value_colors:
-        return normalize_korean_color(', '.join(option_value_colors))
-
-    color_map = get_color_name_map()
-    color_names: List[str] = []
-    for item in goods_options.get('optionItems', []):
-        for color in item.get('colors', []):
-            color_code = str(color.get('colorCode', '')).strip()
-            color_id = str(color.get('colorId', '')).strip()
-
-            # 1) API에 색상명이 직접 있으면 우선 사용
-            color_name = str(color.get('colorName', '')).strip() or str(color.get('name', '')).strip()
-
-            # 2) 색상명 맵(color-images)으로 보강
-            if not color_name:
-                if color_code:
-                    color_name = color_map.get(color_code, '').strip()
-                if not color_name and color_id:
-                    color_name = color_map.get(color_id, '').strip()
-
-            # 3) 맵이 없으면 원본 코드라도 보존 (예: cg.mg)
-            if not color_name:
-                color_name = color_code or color_id
-
-            if color_name and not is_color_count_placeholder(color_name) and color_name not in color_names:
-                color_names.append(color_name)
-
-    return normalize_korean_color(', '.join(color_names))
+    return svc_extract_color_from_api(goods_options)
 
 
 def split_color_size_tokens(tokens: List[str]) -> Tuple[List[str], List[str]]:
     """'한글색상 영문사이즈' 패턴 토큰에서 색상과 사이즈를 분리한다.
     절반 이상 패턴 일치 시 (색상 목록, 사이즈 목록) 반환, 아니면 ([], 원래 토큰) 반환."""
-    pattern = re.compile(r'^([가-힣]+)\s+([A-Za-z0-9/+\-]+)$')
-    colors: List[str] = []
-    sizes: List[str] = []
-    matched = 0
-    for token in tokens:
-        m = pattern.match(token.strip())
-        if m:
-            matched += 1
-            color = m.group(1)
-            size = m.group(2).upper()
-            if color not in colors:
-                colors.append(color)
-            if size not in sizes:
-                sizes.append(size)
-    if tokens and matched >= len(tokens) * 0.5:
-        return colors, sizes
-    return [], list(tokens)
+    return svc_split_color_size_tokens(tokens)
 
 
 def extract_sizes_from_api(goods_no: str, goods_sale_type: str, opt_kind_cd: str) -> Tuple[str, str]:
     """옵션 API와 실측 API를 이용해 사이즈(, 색상)를 추출한다.
     반환: (size_str, color_str) — color_str은 '한글색상 영문사이즈' 패턴 감지 시에만 채워짐"""
-    option_kind = (opt_kind_cd or '').upper()
-    options_data = fetch_goods_options(goods_no, goods_sale_type, opt_kind_cd)
-
-    option_tokens: List[str] = []
-    basic_options = options_data.get('basic', [])
-    size_options = []
-    for option in basic_options:
-        option_name = str(option.get('name', '')).strip().lower()
-        if option_name in {'사이즈', 'size'}:
-            size_options.append(option)
-
-    source_options = size_options if size_options else basic_options
-    for option in source_options:
-        for value in option.get('optionValues', []):
-            token = str(value.get('name', '')).strip()
-            if token:
-                option_tokens.append(token)
-
-    detected_colors, pure_size_tokens = split_color_size_tokens(option_tokens)
-    if detected_colors:
-        color_str = normalize_korean_color(', '.join(detected_colors))
-        normalized_sizes = normalize_size_tokens(pure_size_tokens, option_kind)
-        size_str = ', '.join(normalized_sizes) if normalized_sizes else ""
-        return size_str, color_str
-
-    normalized_option_tokens = normalize_size_tokens(option_tokens, option_kind)
-    if normalized_option_tokens:
-        return ', '.join(normalized_option_tokens), ""
-
-    actual_size = fetch_actual_size(goods_no)
-    actual_tokens = [str(item.get('name', '')).strip() for item in actual_size.get('sizes', []) if item.get('name')]
-    normalized_actual_tokens = normalize_size_tokens(actual_tokens, option_kind)
-    if normalized_actual_tokens:
-        return ', '.join(normalized_actual_tokens), ""
-
-    return "", ""
+    return svc_extract_sizes_from_api(goods_no, goods_sale_type, opt_kind_cd)
 
 
 def extract_sizes_from_table(soup: BeautifulSoup, option_kind: str = "") -> List[str]:
     """무신사 표 영역에서 사이즈 값을 우선 추출한다"""
-    size_values: List[str] = []
-    valid_text_sizes = {
-        'FREE', 'O/S', 'OS', 'ONE SIZE', 'XXS', 'XS', 'S', 'M', 'L', 'XL', 'XXL', 'XXXL',
-        '프리', '원사이즈', '스몰', '미디움', '라지', '엑스라지', '투엑스라지'
-    }
-    option_kind = option_kind.upper()
-
-    for cell in soup.select('td[class*="StandardSizeTable"], th[class*="StandardSizeTable"]'):
-        text = cell.get_text(' ', strip=True)
-        if not text:
-            continue
-
-        upper_text = text.upper()
-        if upper_text in valid_text_sizes or text in valid_text_sizes:
-            if text not in size_values:
-                size_values.append(text)
-            continue
-
-        if text.isdigit():
-            number = int(text)
-            if option_kind == 'SHOES':
-                if 200 <= number <= 300 and number % 5 == 0 and text not in size_values:
-                    size_values.append(text)
-            else:
-                if 40 <= number <= 130 and text not in size_values:
-                    size_values.append(text)
-
-    return normalize_size_tokens(size_values, option_kind)
+    return svc_extract_sizes_from_table(soup, option_kind)
 
 
 def extract_sizes_from_review_options(soup: BeautifulSoup, option_kind: str = "") -> List[int]:
     """리뷰의 선택옵션 영역에서 노출된 사이즈를 추출한다"""
-    option_kind = option_kind.upper()
-    values: List[int] = []
-
-    for tag in soup.select('span[class*="text-body_13px_reg"][class*="text-black"]'):
-        text = tag.get_text(' ', strip=True)
-        if not text.isdigit():
-            continue
-
-        number = int(text)
-        if option_kind == 'SHOES':
-            if 200 <= number <= 300 and number % 5 == 0:
-                values.append(number)
-        else:
-            if 40 <= number <= 130:
-                values.append(number)
-
-    return sorted(set(values))
+    return svc_extract_sizes_from_review_options(soup, option_kind)
 
 
 def extract_sizes(soup: BeautifulSoup, option_kind: str = "") -> str:
     """페이지에서 사용 가능한 사이즈 후보를 추출한다"""
-    text_candidates: List[str] = []
-    numeric_candidates: List[int] = []
-    text_sizes = {
-        'FREE', 'O/S', 'OS', 'ONE SIZE', 'XXS', 'XS', 'S', 'M', 'L', 'XL', 'XXL', 'XXXL',
-        '프리', '원사이즈', '스몰', '미디움', '라지', '엑스라지', '투엑스라지'
-    }
-    numeric_sizes = {
-        44, 55, 66, 77, 88,
-        90, 95, 100, 105, 110, 115, 120,
-        130, 135, 140, 145, 150, 155, 160,
-        200, 205, 210, 215, 220, 225, 230, 235, 240, 245,
-        250, 255, 260, 265, 270, 275, 280, 285, 290, 295, 300,
-    }
-
-    table_sizes = extract_sizes_from_table(soup, option_kind)
-    review_sizes = extract_sizes_from_review_options(soup, option_kind)
-
-    if review_sizes:
-        if table_sizes:
-            table_numbers = [int(x) for x in table_sizes if x.isdigit()]
-            if table_numbers:
-                low, high = min(review_sizes), max(review_sizes)
-                narrowed = [n for n in table_numbers if low <= n <= high]
-                narrowed = find_longest_step_sequence(narrowed, (5, 10))
-                if narrowed:
-                    return ', '.join(str(n) for n in narrowed)
-        return ', '.join(str(n) for n in review_sizes)
-
-    if table_sizes:
-        if all(item.isdigit() for item in table_sizes):
-            numeric = [int(item) for item in table_sizes]
-            numeric = find_longest_step_sequence(numeric, (5, 10))
-            if option_kind.upper() == 'SHOES' and len(numeric) >= 4:
-                return ', '.join(str(n) for n in numeric)
-            if option_kind.upper() != 'SHOES' and len(numeric) >= 2:
-                return ', '.join(str(n) for n in numeric)
-            return ""
-        if len(table_sizes) >= 2:
-            return ', '.join(table_sizes)
-        return ""
-
-    for text in soup.stripped_strings:
-        value = text.strip()
-        upper_value = value.upper()
-
-        if upper_value in text_sizes or value in text_sizes:
-            if value not in text_candidates:
-                text_candidates.append(value)
-
-        if has_hangul(value) and value in text_sizes and value not in text_candidates:
-            text_candidates.append(value)
-
-        if value.isdigit() and int(value) in numeric_sizes:
-            numeric_candidates.append(int(value))
-
-    option_kind = option_kind.upper()
-    if option_kind == 'SHOES' or any(number >= 200 for number in numeric_candidates):
-        size_numbers = [number for number in numeric_candidates if 200 <= number <= 300]
-        numeric_sequence = find_longest_step_sequence(size_numbers, (5,))
-    else:
-        size_numbers = [number for number in numeric_candidates if number < 200]
-        numeric_sequence = find_longest_step_sequence(size_numbers, (5, 10))
-
-    formatted_numeric = [str(number) for number in numeric_sequence]
-
-    if option_kind.upper() == 'SHOES' and len(formatted_numeric) >= 4:
-        return ', '.join(formatted_numeric)
-    if option_kind.upper() != 'SHOES' and len(formatted_numeric) >= 2:
-        return ', '.join(formatted_numeric)
-    if text_candidates:
-        normalized_text = normalize_size_tokens(text_candidates[:12], option_kind)
-        return ', '.join(normalized_text)
-    return ""
+    return svc_extract_sizes(soup, option_kind)
 
 
 def format_price(price_value: object) -> str:

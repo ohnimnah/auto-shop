@@ -591,3 +591,390 @@ def remap_categories_with_gender(
     new_middle = rest[0] if len(rest) > 0 else ""
     new_small = rest[1] if len(rest) > 1 else ""
     return gender_large, new_middle, new_small
+
+
+def find_longest_step_sequence(values: List[int], allowed_steps: Tuple[int, ...]) -> List[int]:
+    """Find the longest sequence where each step is in allowed_steps."""
+    if not values:
+        return []
+
+    sorted_values = sorted(set(values))
+    best_sequence: List[int] = []
+    current_sequence = [sorted_values[0]]
+
+    for value in sorted_values[1:]:
+        step = value - current_sequence[-1]
+        if step in allowed_steps:
+            current_sequence.append(value)
+        else:
+            if len(current_sequence) > len(best_sequence):
+                best_sequence = current_sequence[:]
+            current_sequence = [value]
+
+    if len(current_sequence) > len(best_sequence):
+        best_sequence = current_sequence[:]
+    return best_sequence
+
+
+def classify_size_token(token: str) -> str:
+    """Return size token type: numeric, english, korean, mixed, other."""
+    value = token.strip()
+    if not value:
+        return "other"
+    if value.isdigit():
+        return "numeric"
+    if re.fullmatch(r"[A-Za-z0-9/\-+ ]+", value):
+        return "english"
+    if has_hangul(value):
+        english_present = bool(re.search(r"[A-Za-z]", value))
+        digit_present = bool(re.search(r"\d", value))
+        if english_present or digit_present:
+            return "mixed"
+        return "korean"
+    return "other"
+
+
+def is_date_like_size_token(token: str) -> bool:
+    """Filter date-like strings that should not be treated as sizes."""
+    value = (token or "").strip()
+    if not value:
+        return False
+    if re.fullmatch(r"(?:19|20)\d{2}[./-]\d{1,2}(?:[./-]\d{1,2})?", value):
+        return True
+    if re.fullmatch(r"(?:19|20)\d{6}", value):
+        return True
+    if re.search(r"(?:19|20)\d{2}\s*\ub144", value):
+        return True
+    if re.search(r"\d{1,2}\s*\uc6d4\s*\d{1,2}\s*\uc77c", value):
+        return True
+    return False
+
+
+def normalize_size_tokens(tokens: List[str], option_kind: str = "") -> List[str]:
+    """Normalize size tokens to one dominant type."""
+    cleaned: List[str] = []
+    seen = set()
+    for token in tokens:
+        value = re.sub(r"\s+", " ", str(token)).strip(" ,")
+        if not value or value in seen:
+            continue
+        if is_date_like_size_token(value):
+            continue
+        seen.add(value)
+        cleaned.append(value)
+
+    if not cleaned:
+        return []
+
+    groups = {"numeric": [], "english": [], "korean": [], "mixed": []}
+    for token in cleaned:
+        token_type = classify_size_token(token)
+        if token_type in groups:
+            groups[token_type].append(token)
+
+    option_kind = option_kind.upper()
+    if groups["numeric"]:
+        return groups["numeric"]
+    if option_kind == "SHOES" and groups["english"]:
+        return groups["english"]
+    if groups["english"]:
+        return groups["english"]
+    if groups["korean"]:
+        return groups["korean"]
+    if groups["mixed"]:
+        return groups["mixed"]
+    return cleaned
+
+
+def extract_color_from_api(goods_options: Dict[str, object]) -> str:
+    """Extract and normalize colors from options API payload."""
+    if not goods_options:
+        return ""
+
+    option_value_colors: List[str] = []
+    for item in goods_options.get("optionItems", []):
+        for option_value in item.get("optionValues", []):
+            axis = str(option_value.get("optionName", "")).strip().upper()
+            if axis not in {"C", "COLOR", "CLR", "COL"}:
+                continue
+            value = str(option_value.get("name", "")).strip() or str(option_value.get("code", "")).strip()
+            if not value:
+                continue
+            if re.fullmatch(r"\d+", value):
+                continue
+            value = value.lower() if re.fullmatch(r"[A-Za-z0-9._-]{1,8}", value) else value
+            if value not in option_value_colors and not is_color_count_placeholder(value):
+                option_value_colors.append(value)
+
+    if option_value_colors:
+        return normalize_korean_color(", ".join(option_value_colors))
+
+    color_map = get_color_name_map()
+    color_names: List[str] = []
+    for item in goods_options.get("optionItems", []):
+        for color in item.get("colors", []):
+            color_code = str(color.get("colorCode", "")).strip()
+            color_id = str(color.get("colorId", "")).strip()
+            color_name = str(color.get("colorName", "")).strip() or str(color.get("name", "")).strip()
+            if not color_name:
+                if color_code:
+                    color_name = color_map.get(color_code, "").strip()
+                if not color_name and color_id:
+                    color_name = color_map.get(color_id, "").strip()
+            if not color_name:
+                color_name = color_code or color_id
+            if color_name and not is_color_count_placeholder(color_name) and color_name not in color_names:
+                color_names.append(color_name)
+
+    return normalize_korean_color(", ".join(color_names))
+
+
+def split_color_size_tokens(tokens: List[str]) -> Tuple[List[str], List[str]]:
+    """Split 'KoreanColor EnglishSize' tokens into color list and size list."""
+    pattern = re.compile(r"^([가-힣]+)\s+([A-Za-z0-9/+\-]+)$")
+    colors: List[str] = []
+    sizes: List[str] = []
+    matched = 0
+    for token in tokens:
+        m = pattern.match(token.strip())
+        if m:
+            matched += 1
+            color = m.group(1)
+            size = m.group(2).upper()
+            if color not in colors:
+                colors.append(color)
+            if size not in sizes:
+                sizes.append(size)
+    if tokens and matched >= len(tokens) * 0.5:
+        return colors, sizes
+    return [], list(tokens)
+
+
+def extract_sizes_from_api(goods_no: str, goods_sale_type: str, opt_kind_cd: str) -> Tuple[str, str]:
+    """Extract sizes/colors from options API and actual-size API."""
+    option_kind = (opt_kind_cd or "").upper()
+    options_data = fetch_goods_options(goods_no, goods_sale_type, opt_kind_cd)
+
+    option_tokens: List[str] = []
+    basic_options = options_data.get("basic", [])
+    size_options = []
+    for option in basic_options:
+        option_name = str(option.get("name", "")).strip().lower()
+        if option_name in {"\uc0ac\uc774\uc988", "size"}:
+            size_options.append(option)
+
+    source_options = size_options if size_options else basic_options
+    for option in source_options:
+        for value in option.get("optionValues", []):
+            token = str(value.get("name", "")).strip()
+            if token:
+                option_tokens.append(token)
+
+    detected_colors, pure_size_tokens = split_color_size_tokens(option_tokens)
+    if detected_colors:
+        color_str = normalize_korean_color(", ".join(detected_colors))
+        normalized_sizes = normalize_size_tokens(pure_size_tokens, option_kind)
+        size_str = ", ".join(normalized_sizes) if normalized_sizes else ""
+        return size_str, color_str
+
+    normalized_option_tokens = normalize_size_tokens(option_tokens, option_kind)
+    if normalized_option_tokens:
+        return ", ".join(normalized_option_tokens), ""
+
+    actual_size = fetch_actual_size(goods_no)
+    actual_tokens = [str(item.get("name", "")).strip() for item in actual_size.get("sizes", []) if item.get("name")]
+    normalized_actual_tokens = normalize_size_tokens(actual_tokens, option_kind)
+    if normalized_actual_tokens:
+        return ", ".join(normalized_actual_tokens), ""
+    return "", ""
+
+
+def extract_sizes_from_table(soup: BeautifulSoup, option_kind: str = "") -> List[str]:
+    """Extract sizes from table cells."""
+    size_values: List[str] = []
+    valid_text_sizes = {
+        "FREE",
+        "O/S",
+        "OS",
+        "ONE SIZE",
+        "XXS",
+        "XS",
+        "S",
+        "M",
+        "L",
+        "XL",
+        "XXL",
+        "XXXL",
+        "\ud504\ub9ac",
+        "\uc6d0\uc0ac\uc774\uc988",
+        "\uc2a4\ubab0",
+        "\ubbf8\ub514\uc6c0",
+        "\ub77c\uc9c0",
+        "\uc5d1\uc2a4\ub77c\uc9c0",
+        "\ud22c\uc5d1\uc2a4\ub77c\uc9c0",
+    }
+    option_kind = option_kind.upper()
+
+    for cell in soup.select('td[class*="StandardSizeTable"], th[class*="StandardSizeTable"]'):
+        text = cell.get_text(" ", strip=True)
+        if not text:
+            continue
+        upper_text = text.upper()
+        if upper_text in valid_text_sizes or text in valid_text_sizes:
+            if text not in size_values:
+                size_values.append(text)
+            continue
+        if text.isdigit():
+            number = int(text)
+            if option_kind == "SHOES":
+                if 200 <= number <= 300 and number % 5 == 0 and text not in size_values:
+                    size_values.append(text)
+            else:
+                if 40 <= number <= 130 and text not in size_values:
+                    size_values.append(text)
+
+    return normalize_size_tokens(size_values, option_kind)
+
+
+def extract_sizes_from_review_options(soup: BeautifulSoup, option_kind: str = "") -> List[int]:
+    """Extract size candidates from review option labels."""
+    option_kind = option_kind.upper()
+    values: List[int] = []
+    for tag in soup.select('span[class*="text-body_13px_reg"][class*="text-black"]'):
+        text = tag.get_text(" ", strip=True)
+        if not text.isdigit():
+            continue
+        number = int(text)
+        if option_kind == "SHOES":
+            if 200 <= number <= 300 and number % 5 == 0:
+                values.append(number)
+        else:
+            if 40 <= number <= 130:
+                values.append(number)
+    return sorted(set(values))
+
+
+def extract_sizes(soup: BeautifulSoup, option_kind: str = "") -> str:
+    """Extract available size candidates from page."""
+    text_candidates: List[str] = []
+    numeric_candidates: List[int] = []
+    text_sizes = {
+        "FREE",
+        "O/S",
+        "OS",
+        "ONE SIZE",
+        "XXS",
+        "XS",
+        "S",
+        "M",
+        "L",
+        "XL",
+        "XXL",
+        "XXXL",
+        "\ud504\ub9ac",
+        "\uc6d0\uc0ac\uc774\uc988",
+        "\uc2a4\ubab0",
+        "\ubbf8\ub514\uc6c0",
+        "\ub77c\uc9c0",
+        "\uc5d1\uc2a4\ub77c\uc9c0",
+        "\ud22c\uc5d1\uc2a4\ub77c\uc9c0",
+    }
+    numeric_sizes = {
+        44,
+        55,
+        66,
+        77,
+        88,
+        90,
+        95,
+        100,
+        105,
+        110,
+        115,
+        120,
+        130,
+        135,
+        140,
+        145,
+        150,
+        155,
+        160,
+        200,
+        205,
+        210,
+        215,
+        220,
+        225,
+        230,
+        235,
+        240,
+        245,
+        250,
+        255,
+        260,
+        265,
+        270,
+        275,
+        280,
+        285,
+        290,
+        295,
+        300,
+    }
+
+    table_sizes = extract_sizes_from_table(soup, option_kind)
+    review_sizes = extract_sizes_from_review_options(soup, option_kind)
+
+    if review_sizes:
+        if table_sizes:
+            table_numbers = [int(x) for x in table_sizes if x.isdigit()]
+            if table_numbers:
+                low, high = min(review_sizes), max(review_sizes)
+                narrowed = [n for n in table_numbers if low <= n <= high]
+                narrowed = find_longest_step_sequence(narrowed, (5, 10))
+                if narrowed:
+                    return ", ".join(str(n) for n in narrowed)
+        return ", ".join(str(n) for n in review_sizes)
+
+    if table_sizes:
+        if all(item.isdigit() for item in table_sizes):
+            numeric = [int(item) for item in table_sizes]
+            numeric = find_longest_step_sequence(numeric, (5, 10))
+            if option_kind.upper() == "SHOES" and len(numeric) >= 4:
+                return ", ".join(str(n) for n in numeric)
+            if option_kind.upper() != "SHOES" and len(numeric) >= 2:
+                return ", ".join(str(n) for n in numeric)
+            return ""
+        if len(table_sizes) >= 2:
+            return ", ".join(table_sizes)
+        return ""
+
+    for text in soup.stripped_strings:
+        value = text.strip()
+        upper_value = value.upper()
+
+        if upper_value in text_sizes or value in text_sizes:
+            if value not in text_candidates:
+                text_candidates.append(value)
+        if has_hangul(value) and value in text_sizes and value not in text_candidates:
+            text_candidates.append(value)
+        if value.isdigit() and int(value) in numeric_sizes:
+            numeric_candidates.append(int(value))
+
+    option_kind = option_kind.upper()
+    if option_kind == "SHOES" or any(number >= 200 for number in numeric_candidates):
+        size_numbers = [number for number in numeric_candidates if 200 <= number <= 300]
+        numeric_sequence = find_longest_step_sequence(size_numbers, (5,))
+    else:
+        size_numbers = [number for number in numeric_candidates if number < 200]
+        numeric_sequence = find_longest_step_sequence(size_numbers, (5, 10))
+
+    formatted_numeric = [str(number) for number in numeric_sequence]
+    if option_kind.upper() == "SHOES" and len(formatted_numeric) >= 4:
+        return ", ".join(formatted_numeric)
+    if option_kind.upper() != "SHOES" and len(formatted_numeric) >= 2:
+        return ", ".join(formatted_numeric)
+    if text_candidates:
+        normalized_text = normalize_size_tokens(text_candidates[:12], option_kind)
+        return ", ".join(normalized_text)
+    return ""
