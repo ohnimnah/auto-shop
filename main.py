@@ -69,12 +69,9 @@ from app_config import (
 )
 from sheet_service import (
     batch_update_values as svc_batch_update_values,
-    column_index_to_letter as svc_column_index_to_letter,
     get_existing_row_values as svc_get_existing_row_values,
     get_existing_rows_bulk as svc_get_existing_rows_bulk,
     get_target_sheet_names as svc_get_target_sheet_names,
-    get_sheet_name_by_gid as svc_get_sheet_name_by_gid,
-    is_url_cell as svc_is_url_cell,
     read_urls_from_sheet as svc_read_urls_from_sheet,
     get_row_dynamic_values as svc_get_row_dynamic_values,
     get_rows_dynamic_values_bulk as svc_get_rows_dynamic_values_bulk,
@@ -88,52 +85,16 @@ from image_service import (
     create_thumbnail_for_folder as svc_create_thumbnail_for_folder,
     download_brand_logo as svc_download_brand_logo,
     download_thumbnail_images as svc_download_thumbnail_images,
-    extract_brand_logo_url as svc_extract_brand_logo_url,
     resolve_image_folder_from_paths as svc_resolve_image_folder_from_paths,
 )
 from crawler_service import (
     build_image_folder_name as svc_build_image_folder_name,
-    build_image_identity_key as svc_build_image_identity_key,
-    classify_size_token as svc_classify_size_token,
-    clean_product_name as svc_clean_product_name,
-    extract_actual_size_text as svc_extract_actual_size_text,
-    extract_actual_size_table_text as svc_extract_actual_size_table_text,
-    extract_color_from_api as svc_extract_color_from_api,
-    extract_musinsa_sku as svc_extract_musinsa_sku,
-    extract_brand_en_from_musinsa as svc_extract_brand_en_from_musinsa,
-    extract_brand_text as svc_extract_brand_text,
-    extract_color_from_name as svc_extract_color_from_name,
-    extract_mss_product_state as svc_extract_mss_product_state,
-    extract_musinsa_thumbnail_urls as svc_extract_musinsa_thumbnail_urls,
-    extract_product_json as svc_extract_product_json,
-    fetch_actual_size as svc_fetch_actual_size,
-    fetch_goods_options as svc_fetch_goods_options,
-    fetch_json as svc_fetch_json,
-    find_longest_step_sequence as svc_find_longest_step_sequence,
-    get_color_name_map as svc_get_color_name_map,
-    has_hangul as svc_has_hangul,
-    is_date_like_size_token as svc_is_date_like_size_token,
-    is_color_count_placeholder as svc_is_color_count_placeholder,
-    normalize_image_source as svc_normalize_image_source,
-    normalize_english_color as svc_normalize_english_color,
-    normalize_korean_color as svc_normalize_korean_color,
-    normalize_size_tokens as svc_normalize_size_tokens,
-    extract_sizes as svc_extract_sizes,
-    extract_sizes_from_api as svc_extract_sizes_from_api,
-    extract_sizes_from_option_ui as svc_extract_sizes_from_option_ui,
-    extract_sizes_from_review_options as svc_extract_sizes_from_review_options,
-    extract_sizes_from_table as svc_extract_sizes_from_table,
-    extract_size_from_fit_info_block as svc_extract_size_from_fit_info_block,
     scrape_musinsa_product as svc_scrape_musinsa_product,
-    sanitize_path_component as svc_sanitize_path_component,
-    split_color_size_tokens as svc_split_color_size_tokens,
-    split_name_and_color as svc_split_name_and_color,
 )
 from pipeline_service import (
     build_incremental_payload as svc_build_incremental_payload,
     determine_progress_status as svc_determine_progress_status,
     is_empty_cell as svc_is_empty_cell,
-    row_has_existing_output as svc_row_has_existing_output,
     row_needs_image_download as svc_row_needs_image_download,
     row_needs_update as svc_row_needs_update,
     is_crawler_ready_status as svc_is_crawler_ready_status,
@@ -158,7 +119,6 @@ if sys.stdout.encoding and sys.stdout.encoding.lower().replace("-", "") in ("cp9
     sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding="utf-8", errors="replace")
     sys.stderr = io.TextIOWrapper(sys.stderr.buffer, encoding="utf-8", errors="replace")
 
-from bs4 import BeautifulSoup
 from google.oauth2.service_account import Credentials
 from googleapiclient.discovery import build
 
@@ -260,10 +220,6 @@ def initialize_runtime_paths(data_dir: str = "", credentials_file: str = ""):
 
 
 # ==================== Google Sheets 연동 ====================
-
-def column_index_to_letter(index: int) -> str:
-    """0-based 열 인덱스를 Google Sheets 열 문자로 변환한다."""
-    return svc_column_index_to_letter(index)
 
 
 def get_sheet_header_map(service, sheet_name: str) -> Dict[str, int]:
@@ -404,19 +360,9 @@ def get_sheets_service():
         sys.exit(1)
 
 
-def get_sheet_name_by_gid(service, gid: int) -> str:
-    """GID로 시트 이름을 찾는다"""
-    return svc_get_sheet_name_by_gid(service, SPREADSHEET_ID, gid)
-
-
 def get_target_sheet_names(service) -> List[str]:
     """SHEET_GIDS로 시트 이름을 찾거나 default sheet name을 반환"""
     return svc_get_target_sheet_names(service, SPREADSHEET_ID, SHEET_GIDS, SHEET_NAME)
-
-
-def is_url_cell(value: str) -> bool:
-    """셀값이 URL인지 감지"""
-    return svc_is_url_cell(value)
 
 
 def read_urls_from_sheet(service, sheet_name: str) -> List[Tuple[int, str]]:
@@ -430,48 +376,9 @@ def read_urls_from_sheet(service, sheet_name: str) -> List[Tuple[int, str]]:
     )
 
 
-def has_hangul(text: str) -> bool:
-    """문자열에 한글이 포함되어 있는지 확인"""
-    return svc_has_hangul(text)
-
-
-def fetch_json(url: str) -> Dict[str, object]:
-    """JSON API를 호출한다"""
-    return svc_fetch_json(url)
-
-
-def sanitize_path_component(value: str) -> str:
-    """파일/폴더명으로 안전한 문자열로 정리한다"""
-    return svc_sanitize_path_component(value)
-
-
 def build_image_folder_name(row_num: int, product_name: str) -> str:
     """이미지 폴더명을 '행번호. 상품명' 형식으로 만든다"""
     return svc_build_image_folder_name(row_num, ROW_START, product_name)
-
-
-def normalize_image_source(src: str) -> str:
-    """무신사 이미지 URL을 다운로드 가능한 형태로 정규화한다"""
-    return svc_normalize_image_source(src)
-
-
-def build_image_identity_key(image_url: str) -> str:
-    """같은 원본 사진의 다른 사이즈 URL을 하나로 묶기 위한 키를 만든다"""
-    return svc_build_image_identity_key(image_url)
-
-
-def extract_musinsa_thumbnail_urls(
-    soup: BeautifulSoup,
-    product_json: Dict[str, object],
-    goods_no: str,
-) -> List[str]:
-    """무신사 상품 페이지에서 이미지 URL 목록을 추출한다"""
-    return svc_extract_musinsa_thumbnail_urls(
-        soup=soup,
-        product_json=product_json,
-        goods_no=goods_no,
-        max_thumbnail_images=MAX_THUMBNAIL_IMAGES,
-    )
 
 
 def download_thumbnail_images(image_urls: List[str], folder_name: str) -> str:
@@ -484,11 +391,6 @@ def download_thumbnail_images(image_urls: List[str], folder_name: str) -> str:
     )
 
 
-def extract_brand_logo_url(soup: BeautifulSoup, product_json: Dict[str, object]) -> str:
-    """Extract brand logo URL from Musinsa page/json."""
-    return svc_extract_brand_logo_url(soup, product_json)
-
-
 def download_brand_logo(logo_url: str, folder_name: str, image_paths: str = "") -> str:
     """Save brand logo as __brand_logo.png in product image folder."""
     return svc_download_brand_logo(
@@ -499,169 +401,9 @@ def download_brand_logo(logo_url: str, folder_name: str, image_paths: str = "") 
     )
 
 
-def get_color_name_map() -> Dict[str, str]:
-    """무신사 색상 코드표를 가져온다"""
-    return svc_get_color_name_map()
-
-
-def fetch_goods_options(goods_no: str, goods_sale_type: str, opt_kind_cd: str) -> Dict[str, object]:
-    """상품 옵션 정보를 가져온다"""
-    return svc_fetch_goods_options(goods_no, goods_sale_type, opt_kind_cd)
-
-
-def fetch_actual_size(goods_no: str) -> Dict[str, object]:
-    """상품 실측 사이즈 정보를 가져온다"""
-    return svc_fetch_actual_size(goods_no)
-
-
-def extract_actual_size_text(goods_no: str) -> str:
-    """무신사 실측 API에서 실측표 텍스트를 추출해 한 줄 문자열로 반환한다."""
-    return svc_extract_actual_size_text(goods_no)
-
-
-def extract_actual_size_table_text(soup: BeautifulSoup, option_kind: str = "") -> str:
-    """페이지의 실측 표를 읽어 한 줄 문자열로 반환한다."""
-    return svc_extract_actual_size_table_text(soup, option_kind)
-
-
-def extract_size_from_fit_info_block(soup: BeautifulSoup, option_kind: str = "") -> str:
-    """무신사 사이즈 정보 문단에서 '내 사이즈 FREE[999]' 같은 텍스트를 추출한다."""
-    return svc_extract_size_from_fit_info_block(soup, option_kind)
-
-
-def extract_product_json(soup: BeautifulSoup) -> Dict[str, object]:
-    """페이지 내 JSON-LD Product 데이터를 추출한다"""
-    return svc_extract_product_json(soup)
-
-
-def extract_mss_product_state(soup: BeautifulSoup) -> Dict[str, object]:
-    """window.__MSS__.product.state 또는 __MSS_FE__.product.state를 추출한다"""
-    return svc_extract_mss_product_state(soup)
-
-
-def clean_product_name(name: str) -> str:
-    """상품명에서 색상/품번 접미부를 제거한다"""
-    return svc_clean_product_name(name)
-
-
-def split_name_and_color(raw_name: str) -> Tuple[str, str]:
-    """상품명과 색상 접미부를 분리한다"""
-    return svc_split_name_and_color(raw_name)
-
-
-def extract_color_from_name(raw_name: str) -> str:
-    """???? ?? ?? ??? ???? ???? ????"""
-    return svc_extract_color_from_name(raw_name)
-
-
-def is_color_count_placeholder(text: str) -> bool:
-    """'2color', '4 colors', '3컬러' 같은 색상 개수 표기인지 확인한다."""
-    return svc_is_color_count_placeholder(text)
-
-def normalize_korean_color(color_text: str) -> str:
-    """한국어 색상 문자열을 보기 좋게 정리한다"""
-    return svc_normalize_korean_color(color_text)
-
-
-def normalize_english_color(color_text: str) -> str:
-    """영문 색상 문자열을 보기 좋게 정리한다"""
-    return svc_normalize_english_color(color_text)
-
-
-def extract_brand_text(product_json: Dict[str, object], title_text: str) -> str:
-    """브랜드명을 추출한다"""
-    return svc_extract_brand_text(product_json, title_text)
-
-
-def extract_brand_en_from_musinsa(driver, product_url: str) -> str:
-    """무신사 상품 페이지에서 브랜드 영문명을 추출한다.
-    상품 페이지의 브랜드 링크(/brand/slug)를 찾아
-    브랜드 페이지 og:title에서 '한글(ENGLISH)' 패턴으로 영문명을 가져온다."""
-    return svc_extract_brand_en_from_musinsa(driver, product_url)
-
-
-def find_longest_step_sequence(values: List[int], allowed_steps: Tuple[int, ...]) -> List[int]:
-    """허용된 간격을 갖는 가장 긴 수열을 찾는다"""
-    return svc_find_longest_step_sequence(values, allowed_steps)
-
-
-def classify_size_token(token: str) -> str:
-    """사이즈 토큰 타입을 반환한다: numeric, english, korean, mixed, other"""
-    return svc_classify_size_token(token)
-
-
-def is_date_like_size_token(token: str) -> bool:
-    """사이즈 토큰으로 보기 어려운 날짜형 문자열을 걸러낸다."""
-    return svc_is_date_like_size_token(token)
-
-
-def normalize_size_tokens(tokens: List[str], option_kind: str = "") -> List[str]:
-    """사이즈 토큰을 숫자/영문/한글 한 종류만 남도록 정규화한다"""
-    return svc_normalize_size_tokens(tokens, option_kind)
-
-
-def extract_color_from_api(goods_options: Dict[str, object]) -> str:
-    """옵션 API의 colorCode를 색상명으로 변환한다"""
-    return svc_extract_color_from_api(goods_options)
-
-
-def split_color_size_tokens(tokens: List[str]) -> Tuple[List[str], List[str]]:
-    """'한글색상 영문사이즈' 패턴 토큰에서 색상과 사이즈를 분리한다.
-    절반 이상 패턴 일치 시 (색상 목록, 사이즈 목록) 반환, 아니면 ([], 원래 토큰) 반환."""
-    return svc_split_color_size_tokens(tokens)
-
-
-def extract_sizes_from_api(goods_no: str, goods_sale_type: str, opt_kind_cd: str) -> Tuple[str, str]:
-    """옵션 API와 실측 API를 이용해 사이즈(, 색상)를 추출한다.
-    반환: (size_str, color_str) — color_str은 '한글색상 영문사이즈' 패턴 감지 시에만 채워짐"""
-    return svc_extract_sizes_from_api(goods_no, goods_sale_type, opt_kind_cd)
-
-
-def extract_sizes_from_table(soup: BeautifulSoup, option_kind: str = "") -> List[str]:
-    """무신사 표 영역에서 사이즈 값을 우선 추출한다"""
-    return svc_extract_sizes_from_table(soup, option_kind)
-
-
-def extract_sizes_from_option_ui(soup: BeautifulSoup, option_kind: str = "") -> str:
-    """옵션 UI에 렌더된 사이즈 텍스트를 최대한 직접 추출한다."""
-    return svc_extract_sizes_from_option_ui(soup, option_kind)
-
-
-def extract_sizes_from_review_options(soup: BeautifulSoup, option_kind: str = "") -> List[int]:
-    """리뷰의 선택옵션 영역에서 노출된 사이즈를 추출한다"""
-    return svc_extract_sizes_from_review_options(soup, option_kind)
-
-
-def extract_sizes(soup: BeautifulSoup, option_kind: str = "") -> str:
-    """페이지에서 사용 가능한 사이즈 후보를 추출한다"""
-    return svc_extract_sizes(soup, option_kind)
-
-
-def format_price(price_value: object) -> str:
-    """숫자 또는 문자열 가격을 숫자 문자열로 변환한다"""
-    return svc_format_price(price_value)
-
-
 def is_empty_cell(value: str) -> bool:
     """셀 값이 비어있는지 확인한다"""
     return svc_is_empty_cell(value)
-
-
-def extract_musinsa_sku(
-    raw_product_name: str,
-    product_name: str,
-    mss_state: Dict[str, object],
-    product_json: Dict[str, object] = None,
-    soup: object = None,
-) -> str:
-    """무신사 원본 데이터에서 품번을 추출한다"""
-    return svc_extract_musinsa_sku(
-        raw_product_name=raw_product_name,
-        product_name=product_name,
-        mss_state=mss_state,
-        product_json=product_json,
-        soup=soup,
-    )
 
 
 def get_existing_row_values(service, sheet_name: str, row_num: int) -> Dict[str, str]:
@@ -774,24 +516,6 @@ def row_needs_update(existing_values: Dict[str, str], require_image_paths: bool 
         buyma_sell_price_column=BAIMA_SELL_PRICE_COLUMN,
         shipping_cost_column=SHIPPING_COST_COLUMN,
         image_paths_column=IMAGE_PATHS_COLUMN,
-    )
-
-
-def row_has_existing_output(existing_values: Dict[str, str]) -> bool:
-    """자동 입력 대상 열에 이미 값이 하나라도 있으면 True"""
-    return svc_row_has_existing_output(
-        existing_values=existing_values,
-        brand_column=BRAND_COLUMN,
-        brand_en_column=BRAND_EN_COLUMN,
-        product_name_kr_column=PRODUCT_NAME_KR_COLUMN,
-        musinsa_sku_column=MUSINSA_SKU_COLUMN,
-        color_kr_column=COLOR_KR_COLUMN,
-        size_column=SIZE_COLUMN,
-        actual_size_column=ACTUAL_SIZE_COLUMN,
-        price_column=PRICE_COLUMN,
-        buyma_sell_price_column=BAIMA_SELL_PRICE_COLUMN,
-        image_paths_column=IMAGE_PATHS_COLUMN,
-        shipping_cost_column=SHIPPING_COST_COLUMN,
     )
 
 
