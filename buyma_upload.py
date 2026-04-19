@@ -420,7 +420,7 @@ def wait_for_buyma_login(driver) -> bool:
     if not email or not password:
         email, password = _prompt_buyma_credentials()
 
-    force_relogin = os.environ.get("AUTO_SHOP_FORCE_BUYMA_RELOGIN", "1").strip().lower() in {
+    force_relogin = os.environ.get("AUTO_SHOP_FORCE_BUYMA_RELOGIN", "0").strip().lower() in {
         "1", "true", "yes", "y", "on"
     }
 

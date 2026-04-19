@@ -240,12 +240,16 @@ class AutoShopLauncher(tk.Tk):
             bg="#0a0f20",
             fg="#d9ecff",
             insertbackground="#d9ecff",
+            selectbackground="#2a3f73",
+            selectforeground="#f5fbff",
             relief=tk.FLAT,
             borderwidth=0,
         )
         self.log.grid(row=1, column=0, sticky="nsew", pady=(8, 8))
         self.log.insert(tk.END, "실행 로그가 여기에 표시됩니다.\n")
-        self.log.configure(state=tk.DISABLED)
+        # Text 위젯의 disabled 스타일은 OS/테마별로 글자가 사라져 보일 수 있어
+        # 항상 NORMAL 상태를 유지하고 키 입력만 차단해 읽기 전용처럼 사용한다.
+        self.log.bind("<Key>", lambda _e: "break")
 
         bottom_bar = tk.Frame(right, bg="#11182f")
         bottom_bar.grid(row=2, column=0, sticky="ew")
@@ -634,8 +638,10 @@ class AutoShopLauncher(tk.Tk):
             env["PYTHONUNBUFFERED"] = "1"
             env["AUTO_SHOP_IMAGES_DIR"] = self._get_configured_images_dir()
             env["AUTO_SHOP_DATA_DIR"] = self.data_dir
-            if action == "watch-upload":
-                env["AUTO_SHOP_FORCE_BUYMA_RELOGIN"] = "1"
+            for proxy_key in ("HTTP_PROXY", "HTTPS_PROXY", "ALL_PROXY", "http_proxy", "https_proxy", "all_proxy"):
+                env[proxy_key] = ""
+            env["NO_PROXY"] = "*"
+            env["no_proxy"] = "*"
             proc = subprocess.Popen(
                 command,
                 cwd=SCRIPT_DIR,
@@ -722,15 +728,11 @@ class AutoShopLauncher(tk.Tk):
         self.today_fail_var.set(str(self.today_fail))
 
     def append_log(self, text: str) -> None:
-        self.log.configure(state=tk.NORMAL)
         self.log.insert(tk.END, text)
         self.log.see(tk.END)
-        self.log.configure(state=tk.DISABLED)
 
     def clear_log(self) -> None:
-        self.log.configure(state=tk.NORMAL)
         self.log.delete("1.0", tk.END)
-        self.log.configure(state=tk.DISABLED)
 
     def _build_command(self, action: str) -> list[str]:
         if action == "install":
@@ -1239,8 +1241,10 @@ class AutoShopLauncher(tk.Tk):
             env["PYTHONUNBUFFERED"] = "1"
             env["AUTO_SHOP_IMAGES_DIR"] = self._get_configured_images_dir()
             env["AUTO_SHOP_DATA_DIR"] = self.data_dir
-            if self.current_action in {"upload-review", "upload-auto", "watch-upload"}:
-                env["AUTO_SHOP_FORCE_BUYMA_RELOGIN"] = "1"
+            for proxy_key in ("HTTP_PROXY", "HTTPS_PROXY", "ALL_PROXY", "http_proxy", "https_proxy", "all_proxy"):
+                env[proxy_key] = ""
+            env["NO_PROXY"] = "*"
+            env["no_proxy"] = "*"
             self.process = subprocess.Popen(
                 command,
                 cwd=SCRIPT_DIR,
@@ -1443,55 +1447,63 @@ class AutoShopLauncher(tk.Tk):
         if not self.process or not self.process.stdout:
             return
 
+        action = self.current_action or ""
         for line in self.process.stdout:
-            self.log_queue.put(line)
+            if action == "watch":
+                self.log_queue.put(f"[scout] {line}")
+            else:
+                self.log_queue.put(line)
 
         return_code = self.process.wait()
         self.log_queue.put(f"\n작업 종료 (code: {return_code})\n")
         self.log_queue.put(f"__PROCESS_DONE__:{return_code}")
 
     def _drain_log_queue(self) -> None:
-        while not self.log_queue.empty():
-            msg = self.log_queue.get_nowait()
-            if msg.startswith("__TEAM_PROCESS_DONE__:"):
-                team_key = ""
-                return_code = 1
+        try:
+            while not self.log_queue.empty():
+                msg = self.log_queue.get_nowait()
                 try:
-                    _, team_key, code_text = msg.split(":", 2)
-                    return_code = int(code_text)
-                except Exception:
-                    return_code = 1
-                proc = self.team_processes.get(team_key)
-                if proc and proc.poll() is not None:
-                    self.team_processes.pop(team_key, None)
-                if self.team_watch_enabled.get(team_key, False):
-                    self._set_stage_status(team_key, "감시중")
-                else:
-                    self._set_stage_status(team_key, "대기")
-            elif msg.startswith("__PROCESS_DONE__:"):
-                return_code = 1
-                try:
-                    return_code = int(msg.split(":", 1)[1])
-                except Exception:
-                    return_code = 1
-                success = return_code == 0
-                self.today_processed += 1
-                if success:
-                    self.today_success += 1
-                else:
-                    self.today_fail += 1
-                self._update_stat_cards()
-                self._mark_current_stage_done(success)
-                if self.current_stage_key and self.team_watch_enabled.get(self.current_stage_key, False):
-                    self._set_stage_status(self.current_stage_key, "감시중")
-                self._set_running_ui(False)
-                self.status_var.set("대기중")
-                self.process = None
-            else:
-                self._update_stage_from_log(msg)
-                self.append_log(msg)
-
-        self.after(100, self._drain_log_queue)
+                    if msg.startswith("__TEAM_PROCESS_DONE__:"):
+                        team_key = ""
+                        return_code = 1
+                        try:
+                            _, team_key, code_text = msg.split(":", 2)
+                            return_code = int(code_text)
+                        except Exception:
+                            return_code = 1
+                        proc = self.team_processes.get(team_key)
+                        if proc and proc.poll() is not None:
+                            self.team_processes.pop(team_key, None)
+                        if self.team_watch_enabled.get(team_key, False):
+                            self._set_stage_status(team_key, "감시중")
+                        else:
+                            self._set_stage_status(team_key, "대기")
+                    elif msg.startswith("__PROCESS_DONE__:"):
+                        return_code = 1
+                        try:
+                            return_code = int(msg.split(":", 1)[1])
+                        except Exception:
+                            return_code = 1
+                        success = return_code == 0
+                        self.today_processed += 1
+                        if success:
+                            self.today_success += 1
+                        else:
+                            self.today_fail += 1
+                        self._update_stat_cards()
+                        self._mark_current_stage_done(success)
+                        if self.current_stage_key and self.team_watch_enabled.get(self.current_stage_key, False):
+                            self._set_stage_status(self.current_stage_key, "감시중")
+                        self._set_running_ui(False)
+                        self.status_var.set("대기중")
+                        self.process = None
+                    else:
+                        self._update_stage_from_log(msg)
+                        self.append_log(msg)
+                except Exception as msg_exc:
+                    self.append_log(f"[launcher] 로그 처리 오류: {msg_exc}\n")
+        finally:
+            self.after(100, self._drain_log_queue)
 
     def stop_action(self) -> None:
         if not self.process or self.process.poll() is not None:

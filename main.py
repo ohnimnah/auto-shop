@@ -797,8 +797,13 @@ def main():
         if args.watch:
             interval = max(5, int(args.interval))
             print(f"감시 모드 시작: {interval}초 간격으로 새 링크를 확인합니다.")
+            cycle = 0
             while True:
+                cycle += 1
+                now_text = time.strftime("%Y-%m-%d %H:%M:%S")
+                print(f"[scout] 감시 사이클 #{cycle} 시작 ({now_text})", flush=True)
                 for sheet_name in sheet_names:
+                    print(f"[scout] 시트 점검 시작: {sheet_name}", flush=True)
                     process_sheet_once(
                         service,
                         driver,
@@ -806,6 +811,8 @@ def main():
                         watch_mode=True,
                         download_images=args.download_images,
                     )
+                    print(f"[scout] 시트 점검 완료: {sheet_name}", flush=True)
+                print(f"[scout] 감시 사이클 #{cycle} 완료", flush=True)
                 print(f"다음 확인까지 {interval}초 대기...")
                 time.sleep(interval)
         else:
