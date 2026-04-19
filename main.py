@@ -71,6 +71,7 @@ from sheet_service import (
     batch_update_values as svc_batch_update_values,
     get_existing_row_values as svc_get_existing_row_values,
     get_existing_rows_bulk as svc_get_existing_rows_bulk,
+    get_sheet_name_by_gid as svc_get_sheet_name_by_gid,
     get_target_sheet_names as svc_get_target_sheet_names,
     read_urls_from_sheet as svc_read_urls_from_sheet,
     get_row_dynamic_values as svc_get_row_dynamic_values,
@@ -112,6 +113,7 @@ from shipping_service import (
 )
 from browser_service import setup_chrome_driver as svc_setup_chrome_driver
 from product_model import Product
+from listing_queue_service import collect_listing_queue_once, resolve_listing_queue_target
 
 # Windows cp949 터미널에서 유니코드 출력 오류 방지
 if sys.stdout.encoding and sys.stdout.encoding.lower().replace("-", "") in ("cp949", "euckr"):
@@ -133,6 +135,7 @@ SHEET_GIDS = list(DEFAULT_SHEET_GIDS)
 # GID를 사용하지 않을 때는 아래 default sheet name을 설정합니다.
 SHEET_NAME = DEFAULT_SHEET_NAME
 ROW_START = DEFAULT_ROW_START
+LISTING_QUEUE_SHEET_NAME = "목록 페이지 url"
 
 
 def _load_sheet_runtime_config() -> None:
@@ -719,6 +722,21 @@ def parse_args():
         action="store_true",
         help="진행상태가 '썸네일진행대기'인 행의 이미지 폴더로 썸네일을 자동 생성",
     )
+    parser.add_argument(
+        "--collect-listings",
+        action="store_true",
+        help="목록 페이지 url 시트의 페이지URL에서 상품ID/상품URL을 수집해 큐 시트에 누적",
+    )
+    parser.add_argument(
+        "--queue-sheet-name",
+        default=LISTING_QUEUE_SHEET_NAME,
+        help="목록 수집 큐 시트 이름(기본: 목록 페이지 url)",
+    )
+    parser.add_argument(
+        "--queue-sheet-url",
+        default="",
+        help="목록 수집 큐 시트 탭 URL(권장). gid로 탭 이름을 자동 해석",
+    )
     return parser.parse_args()
 
 
@@ -758,6 +776,36 @@ def main():
     if args.upload:
         from buyma_upload import upload_products
         upload_products(specific_row=args.upload_row)
+        return
+
+    # 목록 페이지 수집 모드 (safe additive)
+    if args.collect_listings:
+        print("Starting listing-page queue collection")
+        service = get_sheets_service()
+        target_spreadsheet_id, target_queue_sheet_name = resolve_listing_queue_target(
+            service=service,
+            default_spreadsheet_id=SPREADSHEET_ID,
+            queue_sheet_name=args.queue_sheet_name,
+            queue_sheet_url=args.queue_sheet_url,
+            get_sheet_name_by_gid_fn=svc_get_sheet_name_by_gid,
+        )
+        driver = setup_chrome_driver()
+        try:
+            collect_listing_queue_once(
+                service=service,
+                driver=driver,
+                spreadsheet_id=target_spreadsheet_id,
+                queue_sheet_name=target_queue_sheet_name,
+                get_sheet_header_map_fn=lambda svc, sname: svc_get_sheet_header_map(
+                    svc,
+                    target_spreadsheet_id,
+                    sname,
+                    HEADER_ROW,
+                ),
+            )
+        finally:
+            driver.quit()
+            print("브라우저를 종료합니다.")
         return
 
     print("Starting Musinsa data extraction")

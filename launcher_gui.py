@@ -462,6 +462,7 @@ class AutoShopLauncher(tk.Tk):
             scout_watch_label = "팀 감시 중지" if self._is_scout_watch_running() else "팀 감시 시작"
             return [
                 ("정찰 시작", "run"),
+                ("목록 수집", "collect-listings"),
                 (scout_watch_label, "scout-watch-toggle"),
             ]
         if team_key == "assets":
@@ -687,7 +688,7 @@ class AutoShopLauncher(tk.Tk):
 
     def _sync_stage_from_action(self, action: str) -> None:
         self.current_action = action
-        if action in {"run", "watch"}:
+        if action in {"run", "watch", "collect-listings"}:
             self.current_stage_key = "scout"
         elif action == "save-images":
             self.current_stage_key = "assets"
@@ -751,6 +752,13 @@ class AutoShopLauncher(tk.Tk):
 
         if action == "run":
             return build_unbuffered_python_command(os.path.join(SCRIPT_DIR, "main.py"))
+        if action == "collect-listings":
+            cfg = self._load_sheet_config()
+            queue_sheet_url = (cfg.get("queue_sheet_url") or "").strip()
+            command = build_unbuffered_python_command(os.path.join(SCRIPT_DIR, "main.py"), "--collect-listings")
+            if queue_sheet_url:
+                command.extend(["--queue-sheet-url", queue_sheet_url])
+            return command
         if action == "watch":
             return build_unbuffered_python_command(os.path.join(SCRIPT_DIR, "main.py"), "--watch")
         if action == "watch-images":
@@ -1204,12 +1212,22 @@ class AutoShopLauncher(tk.Tk):
         if not gids:
             gids = [1698424449]
 
+        queue_sheet_url = simpledialog.askstring(
+            "시트 설정",
+            "목록 수집 탭 URL을 입력하세요. (선택, gid 포함 URL 권장)",
+            initialvalue=(current.get("queue_sheet_url") or "").strip(),
+            parent=self,
+        )
+        if queue_sheet_url is None:
+            return False
+
         config = {
             "spreadsheet_id": spreadsheet_id,
             "sheet_name": sheet_name,
             "sheet_gids": gids,
             "row_start": 2,
             "images_dir": (current.get("images_dir") or "").strip(),
+            "queue_sheet_url": (queue_sheet_url or "").strip(),
         }
         if not self._save_sheet_config(config):
             return False
@@ -1223,7 +1241,7 @@ class AutoShopLauncher(tk.Tk):
         self.refresh_first_run_wizard()
 
     def _ensure_sheet_config_before_action(self, action: str) -> bool:
-        if action not in {"run", "watch", "watch-images", "watch-thumbnails", "watch-upload", "upload-review", "upload-auto", "save-images"}:
+        if action not in {"run", "collect-listings", "watch", "watch-images", "watch-thumbnails", "watch-upload", "upload-review", "upload-auto", "save-images"}:
             return True
         cfg = self._load_sheet_config()
         sid = self._normalize_spreadsheet_id(cfg.get("spreadsheet_id", ""))
