@@ -12,3 +12,9 @@ chrome_profile/
 # Python cache
 __pycache__/
 *.pyc
+
+# Backup/obsolete files
+backups/
+*.backup_*
+*_backup_*.py
+main_backup_*.py
