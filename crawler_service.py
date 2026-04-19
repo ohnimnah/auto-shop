@@ -978,3 +978,65 @@ def extract_sizes(soup: BeautifulSoup, option_kind: str = "") -> str:
         normalized_text = normalize_size_tokens(text_candidates[:12], option_kind)
         return ", ".join(normalized_text)
     return ""
+
+
+def extract_musinsa_sku(
+    raw_product_name: str,
+    product_name: str,
+    mss_state: Dict[str, object],
+    product_json: Dict[str, object] = None,
+    soup: object = None,
+) -> str:
+    """Extract Musinsa SKU/model code from multiple sources."""
+    raw_text = (raw_product_name or "").strip()
+
+    suffix_match = re.search(r"/\s*([A-Z0-9-]{4,})\s*$", raw_text)
+    if suffix_match:
+        return suffix_match.group(1)
+
+    if isinstance(mss_state, dict):
+        for field in ("styleNo", "modelNo", "articleNo", "modelNm", "referenceNo"):
+            val = str(mss_state.get(field, "")).strip()
+            if val and re.fullmatch(r"[A-Z0-9-]{4,}", val, re.IGNORECASE):
+                return val.upper()
+
+    if isinstance(product_json, dict):
+        for field in ("mpn", "sku", "model", "productID"):
+            val = str(product_json.get(field, "")).strip()
+            if val and re.fullmatch(r"[A-Z0-9-]{4,}", val, re.IGNORECASE):
+                return val.upper()
+
+    if soup is not None:
+        page_text = soup.get_text(separator=" ")
+        label_match = re.search(
+            r"(?:품번|스타일\s*번호|Style\s*No\.?|Model\s*No\.?|모델번호)\s*[:\s]+([A-Z0-9][A-Z0-9-]{3,})",
+            page_text,
+            re.IGNORECASE,
+        )
+        if label_match:
+            return label_match.group(1).upper()
+
+        for tag in soup.select('th, td, li, dt, dd, span[class*="info"], span[class*="detail"]'):
+            text = tag.get_text(strip=True)
+            sku_cell = re.search(
+                r"(?:품번|스타일번호|모델번호)[\s:：]+([A-Z0-9][A-Z0-9-]{3,})",
+                text,
+                re.IGNORECASE,
+            )
+            if sku_cell:
+                return sku_cell.group(1).upper()
+
+    base_text = f"{raw_text} {product_name or ''}".strip()
+    sku_patterns = [
+        r"\b([A-Z]{2,}[0-9]{2,}[A-Z0-9-]*)\b",
+        r"\b([A-Z][0-9]{2,}[A-Z][A-Z0-9-]{2,})\b",
+        r"\b([A-Z0-9]{2,}-[A-Z0-9]{2,}(?:-[A-Z0-9]+)*)\b",
+        r"\b([0-9]{3,}[A-Z]{2,}[A-Z0-9-]*)\b",
+    ]
+    for pattern in sku_patterns:
+        m = re.search(pattern, base_text)
+        if m:
+            candidate = m.group(1)
+            if re.search(r"[A-Z]", candidate) and re.search(r"[0-9]", candidate):
+                return candidate
+    return ""

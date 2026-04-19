@@ -100,6 +100,7 @@ from crawler_service import (
     extract_color_from_api as svc_extract_color_from_api,
     extract_musinsa_categories as svc_extract_musinsa_categories,
     extract_musinsa_gender_large as svc_extract_musinsa_gender_large,
+    extract_musinsa_sku as svc_extract_musinsa_sku,
     extract_brand_en_from_musinsa as svc_extract_brand_en_from_musinsa,
     extract_brand_text as svc_extract_brand_text,
     extract_color_from_name as svc_extract_color_from_name,
@@ -726,66 +727,13 @@ def extract_musinsa_sku(
     soup: object = None,
 ) -> str:
     """무신사 원본 데이터에서 품번을 추출한다"""
-    raw_text = (raw_product_name or "").strip()
-
-    # 1) 상품명 끝 '/ XXXXX' 패턴 우선
-    suffix_match = re.search(r'/\s*([A-Z0-9-]{4,})\s*$', raw_text)
-    if suffix_match:
-        return suffix_match.group(1)
-
-    # 2) API 상태값: styleNo, modelNo, articleNo 등 여러 필드 확인
-    if isinstance(mss_state, dict):
-        for field in ('styleNo', 'modelNo', 'articleNo', 'modelNm', 'referenceNo'):
-            val = str(mss_state.get(field, '')).strip()
-            if val and re.fullmatch(r'[A-Z0-9-]{4,}', val, re.IGNORECASE):
-                return val.upper()
-
-    # 3) JSON-LD Product의 mpn / sku 필드
-    if isinstance(product_json, dict):
-        for field in ('mpn', 'sku', 'model', 'productID'):
-            val = str(product_json.get(field, '')).strip()
-            if val and re.fullmatch(r'[A-Z0-9-]{4,}', val, re.IGNORECASE):
-                return val.upper()
-
-    # 4) 페이지 내 품번 표기 탐지 (soup 기반)
-    if soup is not None:
-        page_text = soup.get_text(separator=' ')
-        # "품번 : XXXX" / "Style No. XXXX" / "모델번호 : XXXX" 등
-        label_match = re.search(
-            r'(?:품번|스타일\s*번호|Style\s*No\.?|Model\s*No\.?|모델번호)\s*[:\s]+([A-Z0-9][A-Z0-9-]{3,})',
-            page_text, re.IGNORECASE
-        )
-        if label_match:
-            return label_match.group(1).upper()
-
-        # 상품 상세정보 테이블 내 품번 셀
-        for tag in soup.select('th, td, li, dt, dd, span[class*="info"], span[class*="detail"]'):
-            text = tag.get_text(strip=True)
-            sku_cell = re.search(
-                r'(?:품번|스타일번호|모델번호)[\s:：]+([A-Z0-9][A-Z0-9-]{3,})',
-                text, re.IGNORECASE
-            )
-            if sku_cell:
-                return sku_cell.group(1).upper()
-
-    # 5) 상품명 내 SKU 형태 탐지 (다양한 패턴)
-    base_text = f"{raw_text} {product_name or ''}".strip()
-
-    sku_patterns = [
-        r'\b([A-Z]{2,}[0-9]{2,}[A-Z0-9-]*)\b',               # 영문시작: S260106HBP13
-        r'\b([A-Z][0-9]{2,}[A-Z][A-Z0-9-]{2,})\b',            # 영숫자혼합: A12BC34
-        r'\b([A-Z0-9]{2,}-[A-Z0-9]{2,}(?:-[A-Z0-9]+)*)\b',    # 하이픈: SU25-CW-P001
-        r'\b([0-9]{3,}[A-Z]{2,}[A-Z0-9-]*)\b',                 # 숫자시작: 123ABC
-    ]
-    for pattern in sku_patterns:
-        m = re.search(pattern, base_text)
-        if m:
-            candidate = m.group(1)
-            # 단순 숫자열이나 너무 짧은 건 제외
-            if re.search(r'[A-Z]', candidate) and re.search(r'[0-9]', candidate):
-                return candidate
-
-    return ""
+    return svc_extract_musinsa_sku(
+        raw_product_name=raw_product_name,
+        product_name=product_name,
+        mss_state=mss_state,
+        product_json=product_json,
+        soup=soup,
+    )
 
 
 def get_existing_row_values(service, sheet_name: str, row_num: int) -> Dict[str, str]:
