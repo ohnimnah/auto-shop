@@ -124,6 +124,18 @@ from pipeline_service import (
     is_image_ready_status as svc_is_image_ready_status,
     is_thumbnail_ready_status as svc_is_thumbnail_ready_status,
 )
+from buyma_service import (
+    extract_buyma_item_page_price as svc_extract_buyma_item_page_price,
+    extract_buyma_listing_entries as svc_extract_buyma_listing_entries,
+    extract_buyma_listing_prices as svc_extract_buyma_listing_prices,
+    extract_buyma_shipping_included_prices as svc_extract_buyma_shipping_included_prices,
+    extract_discounted_product_price as svc_extract_discounted_product_price,
+    extract_yen_values as svc_extract_yen_values,
+    is_relevant_buyma_item as svc_is_relevant_buyma_item,
+    is_relevant_buyma_listing_entry as svc_is_relevant_buyma_listing_entry,
+    normalize_buyma_query as svc_normalize_buyma_query,
+    normalize_price as svc_normalize_price,
+)
 
 # Windows cp949 터미널에서 유니코드 출력 오류 방지
 if sys.stdout.encoding and sys.stdout.encoding.lower().replace("-", "") in ("cp949", "euckr"):
@@ -1503,299 +1515,37 @@ def setup_chrome_driver():
 
 def normalize_price(text: str) -> str:
     """가격 문자열에서 숫자만 추출하여 정상화"""
-    if not text:
-        return "가격 미확인"
-    match = re.search(r'(\d{1,3}(?:,\d{3})*)\s*원', text)
-    if match:
-        return f"{int(match.group(1).replace(',', '')):,}"
-    digits = ''.join(filter(str.isdigit, text))
-    if digits:
-        return f"{int(digits):,}"
-    return "가격 미확인"
+    return svc_normalize_price(text)
 
 
 def extract_discounted_product_price(soup: BeautifulSoup) -> str:
     """페이지에서 쿠폰가를 제외한 상품 할인판매가를 추출한다"""
-    if soup is None:
-        return "가격 미확인"
-
-    candidates: List[int] = []
-
-    # 상품 가격 UI 영역 우선 탐색 (쿠폰 영역 제외)
-    selectors = [
-        '[class*="CurrentPrice"]',
-        '[class*="CalculatedPrice"]',
-        '[class*="PriceTotalWrap"]',
-        '[class*="DiscountWrap"]',
-        '[class*="sale_price"]',
-        '[class*="price"]',
-    ]
-    for selector in selectors:
-        for tag in soup.select(selector):
-            text = tag.get_text(' ', strip=True)
-            if not text:
-                continue
-            # 쿠폰 적용가는 제외
-            if '쿠폰' in text:
-                continue
-            for raw in re.findall(r'(\d{1,3}(?:,\d{3})*)\s*원', text):
-                try:
-                    value = int(raw.replace(',', ''))
-                except ValueError:
-                    continue
-                if 1000 <= value <= 100000000:
-                    candidates.append(value)
-
-    # 라벨 기반 패턴 (판매가/할인가/현재가)
-    page_text = soup.get_text(' ', strip=True)
-    patterns = [
-        r'(?:할인가|판매가|현재가)[^0-9]{0,20}(\d{1,3}(?:,\d{3})*)\s*원',
-        r'(\d{1,3}(?:,\d{3})*)\s*원[^가-힣A-Za-z0-9]{0,10}(?:할인)',
-    ]
-    for pattern in patterns:
-        for raw in re.findall(pattern, page_text, re.IGNORECASE):
-            try:
-                value = int(str(raw).replace(',', ''))
-            except ValueError:
-                continue
-            if 1000 <= value <= 100000000:
-                candidates.append(value)
-
-    if not candidates:
-        return "가격 미확인"
-
-    return f"{min(candidates):,}"
+    return svc_extract_discounted_product_price(soup)
 
 
 def extract_yen_values(text: str) -> List[int]:
     """문자열에서 엔화 금액 후보를 정수 목록으로 추출한다"""
-    if not text:
-        return []
-    matches = re.findall(r'[¥￥]\s*([0-9]{1,3}(?:,[0-9]{3})+|[0-9]{3,})', text)
-    values: List[int] = []
-    for raw in matches:
-        try:
-            value = int(raw.replace(',', ''))
-        except ValueError:
-            continue
-        # 비정상적으로 작은/큰 값은 제외
-        if 500 <= value <= 10000000:
-            values.append(value)
-    return values
+    return svc_extract_yen_values(text)
 
 
 def extract_buyma_listing_prices(soup: BeautifulSoup) -> List[int]:
     """BUYMA 검색 첫 페이지에서 셀러 상품 카드의 가격만 추출한다"""
-    prices: List[int] = []
-
-    # 1) BUYMA 상품 액션 블록(item-url) 기반 추출
-    action_blocks = soup.select('[item-url*="/item/"]')
-    for action in action_blocks:
-        container = action
-        price_tags = []
-        for _ in range(5):
-            if not container:
-                break
-            price_tags = container.select('span.Price_Txt')
-            if price_tags:
-                break
-            container = container.parent
-
-        for tag in price_tags:
-            prices.extend(extract_yen_values(tag.get_text(' ', strip=True)))
-
-    if prices:
-        return prices
-
-    # 2) fallback: 실제 상품 상세 링크(/item/숫자/) 주변에서만 추출
-    item_links = soup.select('a[href*="/item/"]')
-    for link in item_links:
-        href = link.get('href', '')
-        if not re.search(r'/item/\d+/?', href):
-            continue
-
-        container = link
-        price_tags = []
-        for _ in range(6):
-            if not container:
-                break
-            price_tags = container.select('span.Price_Txt')
-            if price_tags:
-                break
-            container = container.parent
-
-        for tag in price_tags:
-            prices.extend(extract_yen_values(tag.get_text(' ', strip=True)))
-
-    return prices
+    return svc_extract_buyma_listing_prices(soup)
 
 
 def extract_buyma_listing_entries(soup: BeautifulSoup) -> List[Dict[str, object]]:
     """BUYMA 검색 첫 페이지에서 상품카드의 제목/가격/링크를 함께 추출한다"""
-    entries: List[Dict[str, object]] = []
-    seen_urls = set()
-
-    # 검색 페이지의 표시 개수(예: "該当件数 8件")를 읽어 추천/연관 영역을 제외하기 위한 상한으로 사용
-    result_count = None
-    page_text = soup.get_text(' ', strip=True)
-    count_match = re.search(r'該当件数\s*([0-9]+)件', page_text)
-    if count_match:
-        try:
-            result_count = int(count_match.group(1))
-        except ValueError:
-            result_count = None
-
-    for link in soup.select('a[href*="/item/"]'):
-        href = link.get('href', '').strip()
-        if not re.search(r'/item/\d+/?', href):
-            continue
-
-        full_url = href if href.startswith('http') else f"https://www.buyma.com{href}"
-        full_url = full_url.split('?')[0]
-        if full_url in seen_urls:
-            continue
-        seen_urls.add(full_url)
-
-        container = link
-        title_text = link.get_text(' ', strip=True)
-        price_values: List[int] = []
-
-        for _ in range(6):
-            if not container:
-                break
-            if not title_text:
-                title_tag = container.select_one('a[href*="/item/"], h3, [class*="title"], [class*="name"]')
-                if title_tag:
-                    title_text = title_tag.get_text(' ', strip=True)
-
-            # 1) 대표 가격 클래스 우선
-            price_tag = container.select_one('span.Price_Txt, [class*="price"], [class*="Price"]')
-            if price_tag:
-                price_values = extract_yen_values(price_tag.get_text(' ', strip=True))
-                price_values = [p for p in price_values if p >= 3000]
-                if price_values:
-                    break
-
-            # 2) 클래스가 바뀐 경우를 대비해 카드 텍스트 전체에서 보정 추출
-            context_text = container.get_text(' ', strip=True)
-            text_prices = extract_yen_values(context_text)
-            text_prices = [p for p in text_prices if p >= 3000]
-            if text_prices:
-                price_values = text_prices
-                break
-            container = container.parent
-
-        if not price_values:
-            continue
-
-        entries.append({
-            'url': full_url,
-            'title': title_text,
-            'price': min(price_values),
-        })
-
-    if result_count is not None and result_count > 0 and len(entries) > result_count:
-        entries = entries[:result_count]
-
-    return entries
+    return svc_extract_buyma_listing_entries(soup)
 
 
 def extract_buyma_shipping_included_prices(soup: BeautifulSoup) -> List[int]:
     """검색 페이지 텍스트에서 '¥xx,xxx 送料込' 형태 가격을 추출한다"""
-    text = soup.get_text(' ', strip=True)
-    patterns = [
-        r'[¥￥]\s*([0-9]{1,3}(?:,[0-9]{3})+|[0-9]{3,})\s*送料込',
-        r'([0-9]{1,3}(?:,[0-9]{3})+|[0-9]{3,})\s*円\s*送料込',
-    ]
-
-    prices: List[int] = []
-    for pattern in patterns:
-        for raw in re.findall(pattern, text):
-            try:
-                value = int(raw.replace(',', ''))
-            except ValueError:
-                continue
-            if 3000 <= value <= 10000000:
-                prices.append(value)
-
-    return prices
+    return svc_extract_buyma_shipping_included_prices(soup)
 
 
 def extract_buyma_item_page_price(soup: BeautifulSoup) -> int:
     """BUYMA 상품 상세 페이지에서 판매가격을 추출한다"""
-    page_text = soup.get_text(' ', strip=True)
-
-    def clean_price_context(text: str) -> str:
-        cleaned = re.sub(r'\s+', ' ', text)
-        cleaned = re.sub(
-            r'参考価格\s*[¥￥]?\s*[0-9]{1,3}(?:,[0-9]{3})+|参考価格\s*[¥￥]?\s*[0-9]{3,}',
-            ' ',
-            cleaned,
-        )
-        cleaned = re.sub(
-            r'あなただけの特別価格\s*[¥￥]?\s*[0-9]{1,3}(?:,[0-9]{3})+|あなただけの特別価格\s*[¥￥]?\s*[0-9]{3,}',
-            ' ',
-            cleaned,
-        )
-        return cleaned
-
-    price_texts: List[str] = []
-    selectors = [
-        '[class*="price"]',
-        '[class*="Price"]',
-        '.product_price',
-        '.Price_Txt',
-    ]
-    for selector in selectors:
-        for tag in soup.select(selector):
-            text = tag.get_text(' ', strip=True)
-            if text:
-                price_texts.append(text)
-
-    cleaned_texts = [clean_price_context(text) for text in price_texts]
-
-    # 우선순위 1: 타임세일 가격
-    sale_candidates: List[int] = []
-    for text in cleaned_texts:
-        for raw in re.findall(r'タイムセール.*?[¥￥]\s*([0-9]{1,3}(?:,[0-9]{3})+|[0-9]{3,})', text):
-            try:
-                sale_candidates.append(int(raw.replace(',', '')))
-            except ValueError:
-                continue
-    sale_candidates = [p for p in sale_candidates if p >= 3000]
-    if sale_candidates:
-        return min(sale_candidates)
-
-    # 우선순위 2: 일반 판매가격(参考価格/개인특가 제외 후)
-    direct_candidates: List[int] = []
-    for text in cleaned_texts:
-        for raw in re.findall(r'(?:^|\s)価格[^\d¥￥]{0,20}[¥￥]\s*([0-9]{1,3}(?:,[0-9]{3})+|[0-9]{3,})', text):
-            try:
-                direct_candidates.append(int(raw.replace(',', '')))
-            except ValueError:
-                continue
-    direct_candidates = [p for p in direct_candidates if p >= 3000]
-    if direct_candidates:
-        return min(direct_candidates)
-
-    # 우선순위 3: 가격 관련 영역 전체에서 엔화 값 추출
-    price_candidates: List[int] = []
-    for text in cleaned_texts:
-        price_candidates.extend(extract_yen_values(text))
-
-    # 0원/비정상 저가를 제외하고 반환
-    price_candidates = [p for p in price_candidates if p >= 3000]
-    if price_candidates:
-        return min(price_candidates)
-
-    # 우선순위 4: 페이지 전체 fallback
-    cleaned_page_text = clean_price_context(page_text)
-    fallback_candidates = extract_yen_values(cleaned_page_text)
-    fallback_candidates = [p for p in fallback_candidates if p >= 3000]
-    if fallback_candidates:
-        return min(fallback_candidates)
-
-    return 0
+    return svc_extract_buyma_item_page_price(soup)
 
 
 def is_relevant_buyma_item(
@@ -1805,38 +1555,7 @@ def is_relevant_buyma_item(
     brand: str,
 ) -> bool:
     """BUYMA 상세 페이지가 현재 상품과 관련 있는지 판별한다"""
-    title_tag = soup.select_one('h1')
-    title_text = title_tag.get_text(' ', strip=True) if title_tag else ''
-    page_text = soup.get_text(' ', strip=True)
-    haystack = f"{title_text} {page_text[:3000]}".lower()
-    full_haystack = f"{title_text} {page_text}".lower()
-
-    sku = (musinsa_sku or '').strip().lower()
-    if sku:
-        if sku in full_haystack:
-            return True
-        # SKU 일부만 포함된 경우 대비
-        if len(sku) >= 6 and sku[:6] in full_haystack:
-            return True
-
-    english = re.sub(r'\s+', ' ', (english_name or '').strip()).lower()
-    tokens = [
-        t for t in re.findall(r'[a-z0-9]{4,}', english)
-        if t not in {'with', 'from', 'size', 'color', 'shoes', 'black', 'white'}
-    ]
-
-    if tokens:
-        hits = sum(1 for token in tokens if token in haystack)
-        if hits >= 2:
-            return True
-
-    brand_text = (brand or '').strip().lower()
-    if brand_text and brand_text in haystack and tokens:
-        hits = sum(1 for token in tokens[:3] if token in haystack)
-        if hits >= 1:
-            return True
-
-    return False
+    return svc_is_relevant_buyma_item(soup, musinsa_sku, english_name, brand)
 
 
 def is_relevant_buyma_listing_entry(
@@ -1846,70 +1565,13 @@ def is_relevant_buyma_listing_entry(
     brand: str,
 ) -> bool:
     """검색 결과 카드 제목이 현재 상품과 관련 있는지 더 엄격하게 판별한다."""
-    title_lower = re.sub(r'\s+', ' ', (title or '').strip()).lower()
-    if not title_lower:
-        return False
-
-    sku = (musinsa_sku or '').strip().lower()
-    if sku:
-        if sku in title_lower:
-            return True
-        if len(sku) >= 6 and sku[:6] in title_lower:
-            return True
-
-    english = re.sub(r'\s+', ' ', (english_name or '').strip()).lower()
-    tokens = [
-        t for t in re.findall(r'[a-z0-9]{4,}', english)
-        if t not in {'with', 'from', 'size', 'color', 'shoes', 'black', 'white'}
-    ]
-    brand_text = (brand or '').strip().lower()
-
-    # 브랜드만 일치하거나 토큰 1개만 일치하는 카드는 다른 상품이 섞이기 쉬워 제외
-    if brand_text and brand_text not in title_lower:
-        return False
-
-    if tokens:
-        hits = sum(1 for token in tokens if token in title_lower)
-        if hits >= 2:
-            return True
-
-    return False
+    return svc_is_relevant_buyma_listing_entry(title, musinsa_sku, english_name, brand)
 
 
 def normalize_buyma_query(product_name: str, brand: str) -> List[str]:
     """바이마 검색용 질의를 우선순위 순으로 생성한다
     SKU 형태 > 상품명+브랜드 > 상품명 순서로 우선도 결정"""
-    cleaned_name = re.sub(r'\s+', ' ', (product_name or '').strip())
-    cleaned_name = re.sub(r'[\[\](){}]', ' ', cleaned_name)
-    cleaned_name = re.sub(r'\s+', ' ', cleaned_name).strip()
-    cleaned_brand = re.sub(r'\s+', ' ', (brand or '').strip())
-
-    # 상품명에서 SKU 형태 추출: 대문자+숫자 조합이나 4자리 이상 숫자
-    sku_match = re.search(r'\b([A-Z]{2,}[0-9]{2,}[A-Z0-9]*|[0-9]{4,})\b', cleaned_name)
-    sku_candidates = [sku_match.group(1)] if sku_match else []
-
-    # 상품명에서 영문 부분만 추출 (한글 제거)
-    english_parts = re.findall(r'[A-Za-z0-9\s\-/]+', cleaned_name)
-    english_name = ' '.join(english_parts)
-    english_name = re.sub(r'\s+', ' ', english_name).strip()
-
-    candidates = [
-        *sku_candidates,  # SKU/품번 우선
-        f"{cleaned_brand} {english_name}".strip(),  # 브랜드 + 영문
-        english_name,  # 영문만
-        cleaned_brand,  # 브랜드만
-    ]
-
-    # 너무 긴 질의는 검색 노이즈가 커져서 앞부분만 사용
-    normalized: List[str] = []
-    seen = set()
-    for query in candidates:
-        query = query[:80].strip()
-        if len(query) < 2 or query in seen:
-            continue
-        seen.add(query)
-        normalized.append(query)
-    return normalized
+    return svc_normalize_buyma_query(product_name, brand)
 
 
 def fetch_buyma_lowest_price(driver, product_name: str, brand: str, musinsa_sku: str = "") -> str:
