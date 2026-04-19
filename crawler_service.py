@@ -2,11 +2,17 @@
 
 import json
 import re
+import time
 import urllib.parse
 import urllib.request
 from typing import Dict, List, Tuple
 
 from bs4 import BeautifulSoup
+from selenium.webdriver.common.by import By
+from selenium.webdriver.support import expected_conditions as EC
+from selenium.webdriver.support.ui import WebDriverWait
+
+from product_model import Product
 
 
 _COLOR_NAME_MAP: Dict[str, str] | None = None
@@ -1216,3 +1222,201 @@ def extract_sizes_from_option_ui(soup: BeautifulSoup, option_kind: str = "") -> 
         if token not in unique_tokens:
             unique_tokens.append(token)
     return ", ".join(unique_tokens)
+
+
+def scrape_musinsa_product(
+    driver,
+    url: str,
+    row_num: int,
+    existing_sku: str = "",
+    download_images: bool = False,
+    images_only: bool = False,
+    crawl_page_settle_seconds: float = 2.0,
+    max_thumbnail_images: int = 20,
+    download_images_fn=None,
+    fetch_buyma_lowest_price_fn=None,
+) -> Product:
+    """Scrape one Musinsa product and return Product model."""
+    from buyma_service import format_price, normalize_price, extract_discounted_product_price
+
+    try:
+        print(f"    페이지 로드 중... {url}")
+        driver.get(url)
+        WebDriverWait(driver, 15).until(EC.presence_of_element_located((By.TAG_NAME, "body")))
+        time.sleep(crawl_page_settle_seconds)
+        soup = BeautifulSoup(driver.page_source, "html.parser")
+        title_text = soup.title.string.strip() if soup.title else ""
+        product_json = extract_product_json(soup)
+        brand_logo_url = ""
+        try:
+            from image_service import extract_brand_logo_url
+
+            brand_logo_url = extract_brand_logo_url(soup, product_json)
+        except Exception:
+            brand_logo_url = ""
+        mss_state = extract_mss_product_state(soup)
+        brand_en_from_state = ""
+        try:
+            brand_info = mss_state.get("brandInfo") if isinstance(mss_state, dict) else None
+            if isinstance(brand_info, dict):
+                brand_en_from_state = str(brand_info.get("brandEnglishName", "")).strip()
+            if not brand_en_from_state and isinstance(mss_state, dict):
+                brand_slug = str(mss_state.get("brand", "")).strip()
+                if brand_slug:
+                    brand_en_from_state = brand_slug.upper().replace("-", " ")
+        except Exception:
+            brand_en_from_state = ""
+
+        goods_no = str(mss_state.get("goodsNo", "")).strip()
+        raw_product_name = str(mss_state.get("goodsNm") or product_json.get("name", "")).strip()
+        product_name = clean_product_name(raw_product_name)
+        if product_name == "상품명 미확인" and title_text:
+            product_name = clean_product_name(
+                re.split(r"\s*-\s*사이즈|\s*\|\s*무신사|\s*-\s*무신사", title_text)[0].strip()
+            )
+
+        if images_only:
+            image_paths = ""
+            if download_images and download_images_fn:
+                image_urls = extract_musinsa_thumbnail_urls(
+                    soup=soup,
+                    product_json=product_json,
+                    goods_no=goods_no,
+                    max_thumbnail_images=max_thumbnail_images,
+                )
+                image_folder_name = build_image_folder_name(row_num, 2, product_name)
+                image_paths = download_images_fn(image_urls, image_folder_name)
+            return Product(
+                product_name_kr=product_name,
+                musinsa_sku=existing_sku.strip() if existing_sku else "",
+                image_paths=image_paths,
+                brand_logo_url=brand_logo_url,
+            )
+
+        goods_sale_type = str(mss_state.get("goodsSaleType", "SALE")).strip()
+        opt_kind_cd = str(mss_state.get("optKindCd", "")).strip()
+        goods_options = fetch_goods_options(goods_no, goods_sale_type, opt_kind_cd)
+
+        if product_name == "상품명 미확인":
+            selectors_name = [
+                "h1",
+                '[class*="title"]',
+                ".product-detail__sc-190p98n-0",
+                '[class*="product_title"]',
+                'div[class*="name"]',
+                ".product-title",
+            ]
+            for selector in selectors_name:
+                tag = soup.select_one(selector)
+                if tag:
+                    text = tag.get_text(separator=" ", strip=True)
+                    if text and len(text) > 5:
+                        product_name = clean_product_name(text)
+                        break
+
+        musinsa_sku = extract_musinsa_sku(raw_product_name, product_name, mss_state, product_json, soup)
+        if not musinsa_sku and existing_sku:
+            print(f"    [품번 fallback] 무신사에서 품번을 못 찾아 시트 내 품번 사용: {existing_sku}")
+            musinsa_sku = existing_sku.strip()
+
+        brand = extract_brand_text(product_json, title_text)
+        color_from_name = normalize_korean_color(extract_color_from_name(raw_product_name))
+        color_from_api = extract_color_from_api(goods_options)
+        size_text, color_from_size = extract_sizes_from_api(goods_no, goods_sale_type, opt_kind_cd)
+        actual_size_text = extract_actual_size_text(goods_no) or "못찾음"
+
+        if color_from_size:
+            color_kr = color_from_size
+        elif color_from_api:
+            color_kr = color_from_api
+        else:
+            color_kr = color_from_name
+        if not color_kr:
+            color_kr = "none"
+        if not size_text:
+            size_text = extract_size_from_fit_info_block(soup, opt_kind_cd)
+        if not size_text:
+            size_text = extract_sizes_from_option_ui(soup, opt_kind_cd)
+        if not size_text:
+            size_text = extract_sizes(soup, opt_kind_cd)
+
+        discounted_price_text = extract_discounted_product_price(soup)
+        if discounted_price_text != "가격 미확인":
+            price_text = discounted_price_text
+        else:
+            offers = product_json.get("offers", {}) if isinstance(product_json, dict) else {}
+            price_text = format_price(offers.get("price") if isinstance(offers, dict) else None)
+
+        if price_text == "가격 미확인":
+            for selector in [
+                '[class*="CurrentPrice"]',
+                '[class*="CalculatedPrice"]',
+                '[class*="DiscountWrap"]',
+                '[class*="PriceTotalWrap"]',
+                ".product-detail__sc-1p1ulhg-6",
+                '[class*="PriceWrap"]',
+                '[class*="price"]',
+                '[class*="product_price"]',
+                '[class*="sale_price"]',
+                '[class*="original_price"]',
+            ]:
+                for price_tag in soup.select(selector):
+                    text = price_tag.get_text(separator=" ", strip=True)
+                    if "결제 시" in text and "할인" in text:
+                        continue
+                    normalized = normalize_price(text)
+                    if normalized != "가격 미확인":
+                        price_text = normalized
+                        break
+                if price_text != "가격 미확인":
+                    break
+
+        if price_text == "가격 미확인":
+            page_text = soup.get_text()
+            matches = re.findall(r"(\d{1,3}(?:,\d{3})*)\s*원", page_text)
+            if matches:
+                price_text = normalize_price(matches[0])
+
+        image_paths = ""
+        if download_images and download_images_fn:
+            image_urls = extract_musinsa_thumbnail_urls(
+                soup=soup,
+                product_json=product_json,
+                goods_no=goods_no,
+                max_thumbnail_images=max_thumbnail_images,
+            )
+            image_folder_name = build_image_folder_name(row_num, 2, product_name)
+            image_paths = download_images_fn(image_urls, image_folder_name)
+
+        buyma_price_text = ""
+        if fetch_buyma_lowest_price_fn:
+            buyma_price_text = fetch_buyma_lowest_price_fn(driver, product_name, brand, musinsa_sku)
+
+        cat_large, cat_middle, cat_small = extract_musinsa_categories(soup, mss_state)
+        gender_large = extract_musinsa_gender_large(mss_state, cat_large, cat_middle, cat_small)
+        if gender_large:
+            cat_large, cat_middle, cat_small = remap_categories_with_gender(
+                gender_large, cat_large, cat_middle, cat_small
+            )
+
+        brand_en = brand_en_from_state or extract_brand_en_from_musinsa(driver, url)
+        return Product(
+            brand=brand,
+            brand_en=brand_en,
+            product_name_kr=product_name,
+            color_kr=color_kr,
+            size=size_text,
+            actual_size=actual_size_text,
+            price=price_text,
+            buyma_price=buyma_price_text,
+            musinsa_sku=musinsa_sku,
+            image_paths=image_paths,
+            brand_logo_url=brand_logo_url,
+            opt_kind_cd=opt_kind_cd,
+            musinsa_category_large=cat_large,
+            musinsa_category_middle=cat_middle,
+            musinsa_category_small=cat_small,
+        )
+    except Exception as e:
+        print(f"   크롤링 오류 발생: {e}")
+        return Product()

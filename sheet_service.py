@@ -5,9 +5,9 @@ from typing import Dict, List, Tuple
 
 
 def column_index_to_letter(index: int) -> str:
-    """0-based 열 인덱스를 Google Sheets 열 문자로 변환한다."""
+    """Convert 0-based column index to Google Sheets column letter."""
     if index < 0:
-        raise ValueError("열 인덱스는 0 이상이어야 합니다.")
+        raise ValueError("index must be >= 0")
     result = ""
     current = index + 1
     while current:
@@ -17,7 +17,7 @@ def column_index_to_letter(index: int) -> str:
 
 
 def get_sheet_header_map(service, spreadsheet_id: str, sheet_name: str, header_row: int) -> Dict[str, int]:
-    """헤더명을 읽어 헤더명 -> 0-based 열 인덱스 맵을 반환한다."""
+    """Read header row and return header-name -> column-index map."""
     try:
         result = service.spreadsheets().values().get(
             spreadsheetId=spreadsheet_id,
@@ -31,7 +31,7 @@ def get_sheet_header_map(service, spreadsheet_id: str, sheet_name: str, header_r
                 header_map[header] = idx
         return header_map
     except Exception as e:
-        print(f" 헤더 조회 실패 ({sheet_name}): {e}")
+        print(f" header lookup failed ({sheet_name}): {e}")
         return {}
 
 
@@ -43,7 +43,7 @@ def get_row_dynamic_values(
     header_map: Dict[str, int],
     header_names: List[str],
 ) -> Dict[str, str]:
-    """헤더명 기준으로 특정 행의 동적 컬럼 값을 읽는다."""
+    """Read dynamic column values for one row by header names."""
     target_indexes = [header_map[name] for name in header_names if name in header_map]
     if not target_indexes:
         return {}
@@ -60,7 +60,7 @@ def get_row_dynamic_values(
         ).execute()
         row = result.get("values", [[]])[0] if result.get("values") else []
     except Exception as e:
-        print(f" {sheet_name} {row_num}행 동적 컬럼 조회 실패: {e}")
+        print(f" {sheet_name} {row_num} dynamic column read failed: {e}")
         return {}
 
     values: Dict[str, str] = {}
@@ -81,7 +81,7 @@ def get_rows_dynamic_values_bulk(
     header_map: Dict[str, int],
     header_names: List[str],
 ) -> Dict[int, Dict[str, str]]:
-    """헤더명 기준 동적 컬럼 값을 여러 행에서 한 번에 읽어 반환한다."""
+    """Read dynamic column values for multiple rows in one request."""
     if not row_numbers:
         return {}
 
@@ -103,7 +103,7 @@ def get_rows_dynamic_values_bulk(
         ).execute()
         rows = result.get("values", [])
     except Exception as e:
-        print(f" {sheet_name} 동적 컬럼 일괄 조회 실패: {e}")
+        print(f" {sheet_name} dynamic column bulk read failed: {e}")
         return {row_num: {} for row_num in row_numbers}
 
     row_set = set(row_numbers)
@@ -135,11 +135,10 @@ def update_cell_by_header(
     header_name: str,
     value: str,
 ) -> bool:
-    """헤더명 기준으로 특정 셀 값을 업데이트한다."""
+    """Update one cell by header name."""
     col_index = header_map.get(header_name)
     if col_index is None:
         return False
-
     try:
         service.spreadsheets().values().update(
             spreadsheetId=spreadsheet_id,
@@ -149,26 +148,23 @@ def update_cell_by_header(
         ).execute()
         return True
     except Exception as e:
-        print(f" {sheet_name} {row_num}행 {header_name} 업데이트 실패: {e}")
+        print(f" {sheet_name} {row_num} {header_name} update failed: {e}")
         return False
 
 
 def parse_margin_rate(value: str) -> float | None:
-    """마진률 셀 문자열을 퍼센트 숫자로 변환한다."""
+    """Parse margin-rate string to percentage float."""
     text = (value or "").strip()
     if not text:
         return None
-
     has_percent = "%" in text
     cleaned = re.sub(r"[^0-9.\-]", "", text)
     if not cleaned:
         return None
-
     try:
         parsed = float(cleaned)
     except ValueError:
         return None
-
     if has_percent:
         return parsed
     if 0 <= parsed <= 1:
@@ -177,7 +173,7 @@ def parse_margin_rate(value: str) -> float | None:
 
 
 def get_sheet_name_by_gid(service, spreadsheet_id: str, gid: int) -> str:
-    """GID로 시트 이름을 찾는다."""
+    """Resolve sheet title by gid."""
     try:
         spreadsheet = service.spreadsheets().get(spreadsheetId=spreadsheet_id).execute()
         for sheet in spreadsheet.get("sheets", []):
@@ -185,7 +181,7 @@ def get_sheet_name_by_gid(service, spreadsheet_id: str, gid: int) -> str:
             if props.get("sheetId") == gid:
                 return props.get("title")
     except Exception as e:
-        print(f" 시트 메타데이터 조회 실패: {e}")
+        print(f" sheet metadata lookup failed: {e}")
     return ""
 
 
@@ -195,23 +191,23 @@ def get_target_sheet_names(
     sheet_gids: List[int],
     fallback_sheet_name: str,
 ) -> List[str]:
-    """GID 목록으로 시트명을 찾고 실패 시 기본 시트명을 반환한다."""
+    """Resolve target sheet names from gids with fallback."""
     sheet_names: List[str] = []
     for gid in sheet_gids:
         title = get_sheet_name_by_gid(service, spreadsheet_id, gid)
         if title:
             sheet_names.append(title)
         else:
-            print(f" GID {gid}에 해당하는 시트 이름을 찾을 수 없습니다")
+            print(f" could not resolve sheet name for gid {gid}")
 
     if not sheet_names:
         sheet_names = [fallback_sheet_name]
-        print(f" GID 기반 시트 이름 찾기에 실패했습니다. 기본 시트 이름 '{fallback_sheet_name}'을(를) 사용합니다.")
+        print(f" gid-based sheet resolve failed. using fallback '{fallback_sheet_name}'")
     return sheet_names
 
 
 def is_url_cell(value: str) -> bool:
-    """셀값이 URL인지 감지한다."""
+    """Return True if value looks like URL."""
     if not isinstance(value, str):
         return False
     value = value.strip()
@@ -225,7 +221,7 @@ def read_urls_from_sheet(
     url_column: str,
     row_start: int,
 ) -> List[Tuple[int, str]]:
-    """Google Sheets에서 URL을 읽어 row 번호와 URL 목록을 반환한다."""
+    """Read URL column and return (row_num, url) list."""
     try:
         result = service.spreadsheets().values().get(
             spreadsheetId=spreadsheet_id,
@@ -276,7 +272,6 @@ def get_existing_row_values(
         ).execute()
         rows = result.get("values", [])
         row = rows[0] if rows else []
-
         return {
             sequence_column: row[0] if len(row) > 0 else "",
             url_column: row[1] if len(row) > 1 else "",
@@ -298,7 +293,7 @@ def get_existing_row_values(
             category_small_column: row[24] if len(row) > 24 else "",
         }
     except Exception as e:
-        print(f" {sheet_name} {row_num}행 기존 데이터 조회 실패: {e}")
+        print(f" {sheet_name} {row_num} existing row read failed: {e}")
         return {}
 
 
@@ -329,7 +324,6 @@ def get_existing_rows_bulk(
     """Read multiple rows (A~Y) in one request and map selected columns."""
     if not row_numbers:
         return {}
-
     min_row = min(row_numbers)
     max_row = max(row_numbers)
     try:
@@ -338,11 +332,10 @@ def get_existing_rows_bulk(
             range=f"'{sheet_name}'!A{min_row}:Y{max_row}",
         ).execute()
         values = result.get("values", [])
-
         row_map: Dict[int, Dict[str, str]] = {}
         for offset, row_num in enumerate(range(min_row, max_row + 1)):
             row_values = values[offset] if offset < len(values) else []
-            mapped = {
+            row_map[row_num] = {
                 sequence_column: row_values[0] if len(row_values) > 0 else "",
                 url_column: row_values[1] if len(row_values) > 1 else "",
                 brand_column: row_values[2] if len(row_values) > 2 else "",
@@ -362,10 +355,9 @@ def get_existing_rows_bulk(
                 category_middle_column: row_values[23] if len(row_values) > 23 else "",
                 category_small_column: row_values[24] if len(row_values) > 24 else "",
             }
-            row_map[row_num] = mapped
         return row_map
     except Exception as e:
-        print(f" {sheet_name} 기존 데이터 일괄 조회 실패: {e}")
+        print(f" {sheet_name} existing rows bulk read failed: {e}")
         return {}
 
 
@@ -396,15 +388,11 @@ def batch_update_values(
     updates: List[Dict[str, object]],
     value_input_option: str = "USER_ENTERED",
 ) -> bool:
-    """Batch update values with `[{range, values}]` payload."""
+    """Batch update values with '[{range, values}]' payload."""
     if not updates:
         return True
-
     try:
-        body = {
-            "valueInputOption": value_input_option,
-            "data": updates,
-        }
+        body = {"valueInputOption": value_input_option, "data": updates}
         service.spreadsheets().values().batchUpdate(
             spreadsheetId=spreadsheet_id,
             body=body,

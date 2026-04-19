@@ -7,6 +7,7 @@
 
 import json
 import argparse
+from dataclasses import asdict, is_dataclass
 import os
 import re
 import sys
@@ -128,6 +129,7 @@ from crawler_service import (
     extract_sizes_from_table as svc_extract_sizes_from_table,
     extract_size_from_fit_info_block as svc_extract_size_from_fit_info_block,
     remap_categories_with_gender as svc_remap_categories_with_gender,
+    scrape_musinsa_product as svc_scrape_musinsa_product,
     sanitize_path_component as svc_sanitize_path_component,
     split_color_size_tokens as svc_split_color_size_tokens,
     split_name_and_color as svc_split_name_and_color,
@@ -141,6 +143,7 @@ from pipeline_service import (
     row_needs_update as svc_row_needs_update,
     is_crawler_ready_status as svc_is_crawler_ready_status,
     is_image_ready_status as svc_is_image_ready_status,
+    process_sheet_once as svc_process_sheet_once,
     is_thumbnail_ready_status as svc_is_thumbnail_ready_status,
 )
 from buyma_service import (
@@ -157,6 +160,8 @@ from buyma_service import (
     normalize_buyma_query as svc_normalize_buyma_query,
     normalize_price as svc_normalize_price,
 )
+from browser_service import setup_chrome_driver as svc_setup_chrome_driver
+from product_model import Product
 
 # Windows cp949 터미널에서 유니코드 출력 오류 방지
 if sys.stdout.encoding and sys.stdout.encoding.lower().replace("-", "") in ("cp949", "euckr"):
@@ -164,13 +169,6 @@ if sys.stdout.encoding and sys.stdout.encoding.lower().replace("-", "") in ("cp9
     sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding="utf-8", errors="replace")
     sys.stderr = io.TextIOWrapper(sys.stderr.buffer, encoding="utf-8", errors="replace")
 
-from selenium import webdriver
-from selenium.webdriver.common.by import By
-from selenium.webdriver.support.ui import WebDriverWait
-from selenium.webdriver.support import expected_conditions as EC
-from selenium.webdriver.chrome.options import Options as ChromeOptions
-from selenium.webdriver.chrome.service import Service
-from webdriver_manager.chrome import ChromeDriverManager
 from bs4 import BeautifulSoup
 from google.oauth2.service_account import Credentials
 from googleapiclient.discovery import build
@@ -927,6 +925,13 @@ def write_to_sheet(
 ):
     """Google Sheets의 A, C~O 열에 한 행 데이터를 쓴다"""
     try:
+        if product_info is not None and not isinstance(product_info, dict):
+            if is_dataclass(product_info):
+                product_info = asdict(product_info)
+            elif hasattr(product_info, "to_dict"):
+                product_info = product_info.to_dict()
+            else:
+                product_info = {}
         if existing_values is None:
             existing_values = get_existing_row_values(service, sheet_name, row_num)
         updates = build_incremental_payload(sheet_name, row_num, product_info, existing_values)
@@ -960,173 +965,64 @@ def process_sheet_once(
     make_thumbnails: bool = False,
 ):
     """단일 시트를 1회 스캔하여 필요한 행만 처리"""
-    print(f"'{sheet_name}' 시트에서 B열 링크를 읽는 중...")
-    rows = read_urls_from_sheet(service, sheet_name)
-    if not rows:
-        print(f"'{sheet_name}' 시트의 B열에 처리할 URL이 없습니다.")
-        return
-
-    header_map = get_sheet_header_map(service, sheet_name)
-    has_margin_header = MARGIN_RATE_HEADER in header_map
-    has_status_header = PROGRESS_STATUS_HEADER in header_map
-    if not has_margin_header:
-        print(f"'{sheet_name}' 시트: '{MARGIN_RATE_HEADER}' 헤더를 찾지 못했습니다.")
-    if not has_status_header:
-        print(f"'{sheet_name}' 시트: '{PROGRESS_STATUS_HEADER}' 헤더를 찾지 못했습니다.")
-
-    row_numbers = [row_num for row_num, _ in rows]
-    existing_rows_map = get_existing_rows_bulk(service, sheet_name, row_numbers)
-    dynamic_rows_map = get_rows_dynamic_values_bulk(
-        service,
-        sheet_name,
-        row_numbers,
-        header_map,
-        [MARGIN_RATE_HEADER, PROGRESS_STATUS_HEADER],
+    api = {
+        "read_urls_from_sheet": read_urls_from_sheet,
+        "get_sheet_header_map": get_sheet_header_map,
+        "get_existing_rows_bulk": get_existing_rows_bulk,
+        "get_rows_dynamic_values_bulk": get_rows_dynamic_values_bulk,
+        "parse_margin_rate": parse_margin_rate,
+        "is_thumbnail_ready_status": is_thumbnail_ready_status,
+        "is_image_ready_status": is_image_ready_status,
+        "row_needs_image_download": row_needs_image_download,
+        "row_needs_update": row_needs_update,
+        "is_empty_cell": is_empty_cell,
+        "is_crawler_ready_status": is_crawler_ready_status,
+        "update_cell_by_header": update_cell_by_header,
+        "resolve_image_folder_from_paths": resolve_image_folder_from_paths,
+        "build_thumbnail_brand": build_thumbnail_brand,
+        "create_thumbnail_for_folder": create_thumbnail_for_folder,
+        "scrape_musinsa_product": scrape_musinsa_product,
+        "write_image_paths_only": write_image_paths_only,
+        "build_image_folder_name": build_image_folder_name,
+        "download_brand_logo": download_brand_logo,
+        "read_shipping_table": read_shipping_table,
+        "estimate_weight": estimate_weight,
+        "lookup_shipping_cost": lookup_shipping_cost,
+        "write_to_sheet": write_to_sheet,
+        "get_row_dynamic_values": get_row_dynamic_values,
+        "determine_progress_status": determine_progress_status,
+        "get_existing_row_values": get_existing_row_values,
+    }
+    cfg = {
+        "MARGIN_RATE_HEADER": MARGIN_RATE_HEADER,
+        "PROGRESS_STATUS_HEADER": PROGRESS_STATUS_HEADER,
+        "SHIPPING_COST_COLUMN": SHIPPING_COST_COLUMN,
+        "STATUS_COMPLETED": STATUS_COMPLETED,
+        "STATUS_UPLOAD_READY": STATUS_UPLOAD_READY,
+        "IMAGE_PATHS_COLUMN": IMAGE_PATHS_COLUMN,
+        "STATUS_THUMBNAILING": STATUS_THUMBNAILING,
+        "STATUS_THUMBNAILS_DONE": STATUS_THUMBNAILS_DONE,
+        "STATUS_ERROR": STATUS_ERROR,
+        "THUMB_ROW_DELAY_SECONDS": THUMB_ROW_DELAY_SECONDS,
+        "MUSINSA_SKU_COLUMN": MUSINSA_SKU_COLUMN,
+        "STATUS_DOWNLOADING": STATUS_DOWNLOADING,
+        "STATUS_IMAGES_SAVED": STATUS_IMAGES_SAVED,
+        "IMAGE_ROW_DELAY_SECONDS": IMAGE_ROW_DELAY_SECONDS,
+        "STATUS_CRAWLING": STATUS_CRAWLING,
+        "STATUS_HOLD": STATUS_HOLD,
+        "STATUS_CRAWLED": STATUS_CRAWLED,
+        "CRAWLER_ROW_DELAY_SECONDS": CRAWLER_ROW_DELAY_SECONDS,
+    }
+    return svc_process_sheet_once(
+        service=service,
+        driver=driver,
+        sheet_name=sheet_name,
+        watch_mode=watch_mode,
+        download_images=download_images,
+        make_thumbnails=make_thumbnails,
+        api=api,
+        cfg=cfg,
     )
-
-    target_rows: List[Tuple[int, str]] = []
-    for row_num, url in rows:
-        existing_values = existing_rows_map.get(row_num, {})
-        dynamic_values = dynamic_rows_map.get(row_num, {})
-        margin_rate = parse_margin_rate(dynamic_values.get(MARGIN_RATE_HEADER, ""))
-        current_status = dynamic_values.get(PROGRESS_STATUS_HEADER, "")
-
-        if make_thumbnails:
-            if is_thumbnail_ready_status(current_status):
-                target_rows.append((row_num, url))
-        elif download_images:
-            # 이미지 저장은 상태가 '이미지진행대기'인 행만 처리한다.
-            if is_image_ready_status(current_status) and row_needs_image_download(existing_values):
-                target_rows.append((row_num, url))
-        else:
-            # 감시 모드에서도 "빈 칸이 있는 행"은 계속 보충 입력 대상으로 포함한다.
-            needs_update = row_needs_update(existing_values, require_image_paths=False)
-            shipping_missing = is_empty_cell(existing_values.get(SHIPPING_COST_COLUMN, ""))
-            status_normalized = (current_status or "").strip()
-            should_backfill_shipping = (
-                shipping_missing and status_normalized not in {STATUS_COMPLETED, STATUS_UPLOAD_READY, "업로드중"}
-            )
-            if (is_crawler_ready_status(current_status) and needs_update) or should_backfill_shipping:
-                target_rows.append((row_num, url))
-
-    if not target_rows:
-        print(f"'{sheet_name}' 시트: 신규 작성 대상이 없습니다.")
-        return
-
-    print(f"'{sheet_name}' 시트: {len(target_rows)}개 행을 처리합니다.")
-
-    if make_thumbnails:
-        print(f"'{sheet_name}' 시트: 썸네일 자동 생성 모드로 처리합니다.")
-        for idx, _url in target_rows:
-            print(f"[{sheet_name}] {idx}행 썸네일 생성 중")
-            existing_values_for_row = existing_rows_map.get(idx, {})
-            folder_path = resolve_image_folder_from_paths(existing_values_for_row.get(IMAGE_PATHS_COLUMN, ""))
-            brand = build_thumbnail_brand(existing_values_for_row)
-            if has_status_header:
-                update_cell_by_header(service, sheet_name, idx, header_map, PROGRESS_STATUS_HEADER, STATUS_THUMBNAILING)
-            if create_thumbnail_for_folder(folder_path, brand):
-                if has_status_header:
-                    if update_cell_by_header(service, sheet_name, idx, header_map, PROGRESS_STATUS_HEADER, STATUS_THUMBNAILS_DONE):
-                        print(f" {sheet_name} {idx}행 상태 업데이트: {STATUS_THUMBNAILS_DONE}")
-            elif has_status_header:
-                if update_cell_by_header(service, sheet_name, idx, header_map, PROGRESS_STATUS_HEADER, STATUS_ERROR):
-                    print(f" {sheet_name} {idx}행 상태 업데이트: {STATUS_ERROR}")
-            time.sleep(THUMB_ROW_DELAY_SECONDS)
-        return
-
-    if download_images:
-        print(f"'{sheet_name}' 시트: 이미지 저장 모드(N열 기준)로 처리합니다.")
-        for idx, url in target_rows:
-            print(f"[{sheet_name}] {idx}행 이미지 저장 중: {url}")
-            existing_values_for_row = existing_rows_map.get(idx, {})
-            sheet_sku = existing_values_for_row.get(MUSINSA_SKU_COLUMN, "")
-            if has_status_header:
-                update_cell_by_header(service, sheet_name, idx, header_map, PROGRESS_STATUS_HEADER, STATUS_DOWNLOADING)
-            product_info = scrape_musinsa_product(
-                driver,
-                url,
-                idx,
-                existing_sku=sheet_sku,
-                download_images=True,
-                images_only=True,
-            )
-            write_image_paths_only(
-                service,
-                sheet_name,
-                idx,
-                product_info.get('image_paths', ''),
-                existing_values_for_row,
-            )
-            logo_url = (product_info.get('brand_logo_url') or '').strip()
-            if logo_url and product_info.get('image_paths', ''):
-                folder_name = build_image_folder_name(idx, product_info.get('product_name_kr', ''))
-                download_brand_logo(logo_url, folder_name, product_info.get('image_paths', ''))
-            if product_info.get('image_paths', '') and has_status_header:
-                if update_cell_by_header(service, sheet_name, idx, header_map, PROGRESS_STATUS_HEADER, STATUS_IMAGES_SAVED):
-                    print(f" {sheet_name} {idx}행 상태 업데이트: {STATUS_IMAGES_SAVED}")
-            time.sleep(IMAGE_ROW_DELAY_SECONDS)
-        return
-
-    shipping_table = read_shipping_table(service, sheet_name)
-    if not shipping_table:
-        print(f"'{sheet_name}' 시트: 배송비 기준표(Z/AA/AB)를 읽지 못해 O열 배송비는 비워집니다.")
-    for idx, url in target_rows:
-        print(f"[{sheet_name}] {idx}행 처리 중: {url}")
-        existing_values_for_row = existing_rows_map.get(idx, {})
-        sheet_sku = existing_values_for_row.get(MUSINSA_SKU_COLUMN, "")
-        if has_status_header:
-            update_cell_by_header(service, sheet_name, idx, header_map, PROGRESS_STATUS_HEADER, STATUS_CRAWLING)
-        product_info = scrape_musinsa_product(
-            driver,
-            url,
-            idx,
-            existing_sku=sheet_sku,
-            download_images=download_images,
-        )
-        # 배송비 산출: 상품명 + 카테고리로 무게 추정 → W/X/Y 기준표로 배송비 산출
-        estimated_weight = estimate_weight(
-            product_info.get('product_name_kr', ''),
-            product_info.get('opt_kind_cd', ''),
-        )
-        shipping_cost = lookup_shipping_cost(shipping_table, estimated_weight)
-        if shipping_cost:
-            product_info['shipping_cost'] = shipping_cost
-            print(f"    배송비 산출: 추정 {estimated_weight}kg -> KRW {shipping_cost}")
-        else:
-            print(f"    배송비 산출 실패: 기준표/무게 매칭을 확인하세요 (추정 {estimated_weight}kg)")
-        write_to_sheet(
-            service,
-            sheet_name,
-            idx,
-            product_info,
-            existing_rows_map.get(idx, {}),
-        )
-        if has_status_header:
-            dynamic_values = get_row_dynamic_values(
-                service,
-                sheet_name,
-                idx,
-                header_map,
-                [MARGIN_RATE_HEADER, PROGRESS_STATUS_HEADER],
-            )
-            margin_rate = parse_margin_rate(dynamic_values.get(MARGIN_RATE_HEADER, ""))
-            current_status = dynamic_values.get(PROGRESS_STATUS_HEADER, "")
-            next_status = determine_progress_status(margin_rate)
-
-            # 정찰 단계 입력이 완료되면 다음 단계(CRAWLED)로 전환한다.
-            # 단, 마진률이 임계값 미만이면 보류 상태를 유지한다.
-            if next_status != STATUS_HOLD:
-                refreshed_values = get_existing_row_values(service, sheet_name, idx)
-                if not row_needs_update(refreshed_values, require_image_paths=False):
-                    next_status = STATUS_CRAWLED
-
-            if current_status != next_status:
-                if update_cell_by_header(service, sheet_name, idx, header_map, PROGRESS_STATUS_HEADER, next_status):
-                    if margin_rate is None:
-                        print(f" {sheet_name} {idx}행 상태 업데이트: {next_status} (마진률 미확인)")
-                    else:
-                        print(f" {sheet_name} {idx}행 상태 업데이트: {next_status} (마진률 {margin_rate:.2f}%)")
-        time.sleep(CRAWLER_ROW_DELAY_SECONDS)  # 차단 방지를 위한 대기 시간 유지
 
 
 def parse_args():
@@ -1179,19 +1075,7 @@ def parse_args():
 
 def setup_chrome_driver():
     """Chrome WebDriver 설정"""
-    chrome_options = ChromeOptions()
-    if HEADLESS:
-        chrome_options.add_argument("--headless=new")
-    chrome_options.add_argument("--disable-blink-features=AutomationControlled")
-    chrome_options.add_argument("--disable-dev-shm-usage")
-    chrome_options.add_argument("--no-sandbox")
-    chrome_options.add_argument("--disable-gpu")
-    chrome_options.add_argument("--window-size=1920,1080")
-    chrome_options.add_argument(
-        "user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
-    )
-    service = Service(ChromeDriverManager().install())
-    return webdriver.Chrome(service=service, options=chrome_options)
+    return svc_setup_chrome_driver(headless=HEADLESS)
 
 
 def normalize_price(text: str) -> str:
@@ -1306,216 +1190,20 @@ def scrape_musinsa_product(
     existing_sku: str = "",
     download_images: bool = False,
     images_only: bool = False,
-) -> dict:
-    """Selenium을 사용하여 무신사 상품 페이지에서 A~O 구조용 정보를 추출"""
-    try:
-        print(f"    페이지 로드 중... {url}")
-        driver.get(url)
-        WebDriverWait(driver, 15).until(
-            EC.presence_of_element_located((By.TAG_NAME, "body"))
-        )
-        time.sleep(CRAWL_PAGE_SETTLE_SECONDS)
-        soup = BeautifulSoup(driver.page_source, 'html.parser')
-        title_text = soup.title.string.strip() if soup.title else ""
-        product_json = extract_product_json(soup)
-        brand_logo_url = extract_brand_logo_url(soup, product_json)
-        mss_state = extract_mss_product_state(soup)
-        brand_en_from_state = ""
-        try:
-            brand_info = mss_state.get('brandInfo') if isinstance(mss_state, dict) else None
-            if isinstance(brand_info, dict):
-                brand_en_from_state = str(brand_info.get('brandEnglishName', '')).strip()
-            if not brand_en_from_state and isinstance(mss_state, dict):
-                brand_slug = str(mss_state.get('brand', '')).strip()
-                if brand_slug:
-                    brand_en_from_state = brand_slug.upper().replace('-', ' ')
-        except Exception:
-            brand_en_from_state = ""
-        goods_no = str(mss_state.get('goodsNo', '')).strip()
-
-        raw_product_name = str(mss_state.get('goodsNm') or product_json.get('name', '')).strip()
-        product_name = clean_product_name(raw_product_name)
-        if product_name == "상품명 미확인" and title_text:
-            product_name = clean_product_name(
-                re.split(r'\s*-\s*사이즈|\s*\|\s*무신사|\s*-\s*무신사', title_text)[0].strip()
-            )
-
-        if images_only:
-            image_paths = ""
-            if download_images:
-                image_urls = extract_musinsa_thumbnail_urls(soup, product_json, goods_no)
-                image_folder_name = build_image_folder_name(row_num, product_name)
-                image_paths = download_thumbnail_images(image_urls, image_folder_name)
-
-            return {
-                'brand': '',
-                'brand_en': '',
-                'product_name_kr': product_name,
-                'color_kr': '',
-                'size': '',
-                'actual_size': '못찾음',
-                'price': '',
-                'buyma_price': '',
-                'musinsa_sku': existing_sku.strip() if existing_sku else '',
-                'image_paths': image_paths,
-                'brand_logo_url': brand_logo_url,
-                'opt_kind_cd': '',
-                'musinsa_category_large': '',
-                'musinsa_category_middle': '',
-                'musinsa_category_small': '',
-            }
-
-        goods_sale_type = str(mss_state.get('goodsSaleType', 'SALE')).strip()
-        opt_kind_cd = str(mss_state.get('optKindCd', '')).strip()
-        goods_options = fetch_goods_options(goods_no, goods_sale_type, opt_kind_cd)
-
-        if product_name == "상품명 미확인":
-            selectors_name = [
-                'h1',
-                '[class*="title"]',
-                '.product-detail__sc-190p98n-0', # 무신사 최신 클래스 대응
-                '[class*="product_title"]',
-                'div[class*="name"]',
-                '.product-title',
-            ]
-            for selector in selectors_name:
-                tag = soup.select_one(selector)
-                if tag:
-                    text = tag.get_text(separator=' ', strip=True)
-                    if text and len(text) > 5:
-                        product_name = clean_product_name(text)
-                        break
-
-        musinsa_sku = extract_musinsa_sku(raw_product_name, product_name, mss_state, product_json, soup)
-        if not musinsa_sku and existing_sku:
-            print(f"    [품번 fallback] 무신사에서 품번을 못 찾아 시트 내 품번 사용: {existing_sku}")
-            musinsa_sku = existing_sku.strip()
-
-        brand = extract_brand_text(product_json, title_text)
-        color_from_name = normalize_korean_color(extract_color_from_name(raw_product_name))
-        color_from_api = extract_color_from_api(goods_options)
-        size_text, color_from_size = extract_sizes_from_api(goods_no, goods_sale_type, opt_kind_cd)
-        actual_size_text = extract_actual_size_text(goods_no)
-        if not actual_size_text:
-            actual_size_text = extract_actual_size_table_text(soup, opt_kind_cd)
-        if not actual_size_text:
-            actual_size_text = "못찾음"
-
-        # 실제 옵션 색상을 우선 반영한다. (size 파싱 > 옵션 API > 상품명)
-        if color_from_size:
-            color_kr = color_from_size
-        elif color_from_api:
-            color_kr = color_from_api
-        else:
-            color_kr = color_from_name
-        if not color_kr:
-            color_kr = "none"
-        if not size_text:
-            size_text = extract_size_from_fit_info_block(soup, opt_kind_cd)
-        if not size_text:
-            size_text = extract_sizes_from_option_ui(soup, opt_kind_cd)
-        if not size_text:
-            size_text = extract_sizes(soup, opt_kind_cd)
-        if color_kr == "none":
-            print("    색상 추출 실패: 옵션 API/상품명 fallback에서 값을 찾지 못했습니다.")
-        if not size_text:
-            print("    사이즈 추출 실패: 옵션 API, 실측 API, HTML fallback 모두 비어 있습니다.")
-
-        # J열은 쿠폰가가 아닌 상품 할인판매가를 우선 사용
-        discounted_price_text = extract_discounted_product_price(soup)
-        if discounted_price_text != "가격 미확인":
-            price_text = discounted_price_text
-        else:
-            price_text = format_price(product_json.get('offers', {}).get('price') if isinstance(product_json.get('offers'), dict) else None)
-        price_selectors = [
-            '[class*="CurrentPrice"]',
-            '[class*="CalculatedPrice"]',
-            '[class*="DiscountWrap"]',
-            '[class*="PriceTotalWrap"]',
-            '.product-detail__sc-1p1ulhg-6', # 최신 가격 클래스
-            '[class*="PriceWrap"]',
-            '[class*="price"]',
-            '[class*="product_price"]',
-            '[class*="sale_price"]',
-            '[class*="original_price"]',
-        ]
-        if price_text == "가격 미확인":
-            for selector in price_selectors:
-                for price_tag in soup.select(selector):
-                    text = price_tag.get_text(separator=' ', strip=True)
-                    if '결제 시' in text and '할인' in text:
-                        continue
-                    normalized = normalize_price(text)
-                    if normalized != "가격 미확인":
-                        price_text = normalized
-                        break
-                if price_text != "가격 미확인":
-                    break
-
-        if price_text == "가격 미확인":
-            page_text = soup.get_text()
-            matches = re.findall(r'(\d{1,3}(?:,\d{3})*)\s*원', page_text)
-            if matches:
-                price_text = normalize_price(matches[0])
-
-        image_paths = ""
-        if download_images:
-            image_urls = extract_musinsa_thumbnail_urls(soup, product_json, goods_no)
-            image_folder_name = build_image_folder_name(row_num, product_name)
-            image_paths = download_thumbnail_images(image_urls, image_folder_name)
-        buyma_price_text = fetch_buyma_lowest_price(driver, product_name, brand, musinsa_sku)
-        cat_large, cat_middle, cat_small = extract_musinsa_categories(soup, mss_state)
-        gender_large = extract_musinsa_gender_large(mss_state, cat_large, cat_middle, cat_small)
-        if gender_large:
-            cat_large, cat_middle, cat_small = remap_categories_with_gender(
-                gender_large, cat_large, cat_middle, cat_small
-            )
-        if cat_large or cat_middle or cat_small:
-            print(f"    무신사 카테고리 추출: 대='{cat_large}' / 중='{cat_middle}' / 소='{cat_small}'")
-        else:
-            print("    무신사 카테고리 추출 실패: 대/중/소가 비어 있습니다.")
-
-        # 영문 브랜드명 추출: 무신사 상태값 우선, 없으면 보조 추출
-        brand_en = brand_en_from_state or extract_brand_en_from_musinsa(driver, url)
-        if brand_en:
-            print(f"   영문 브랜드: {brand_en}")
-
-        return {
-            'brand': brand,
-            'brand_en': brand_en,
-            'product_name_kr': product_name,
-            'color_kr': color_kr,
-            'size': size_text,
-            'actual_size': actual_size_text,
-            'price': price_text,
-            'buyma_price': buyma_price_text,
-            'musinsa_sku': musinsa_sku,
-            'image_paths': image_paths,
-            'brand_logo_url': brand_logo_url,
-            'opt_kind_cd': opt_kind_cd,
-            'musinsa_category_large': cat_large,
-            'musinsa_category_middle': cat_middle,
-            'musinsa_category_small': cat_small,
-        }
-    except Exception as e:
-        print(f"   크롤링 오류 발생: {e}")
-        return {
-            'brand': '',
-            'brand_en': '',
-            'product_name_kr': '상품명 미확인',
-            'color_kr': 'none',
-            'size': '',
-            'actual_size': '못찾음',
-            'price': '가격 미확인',
-            'buyma_price': '',
-            'musinsa_sku': '',
-            'image_paths': '',
-            'brand_logo_url': '',
-            'opt_kind_cd': '',
-            'musinsa_category_large': '',
-            'musinsa_category_middle': '',
-            'musinsa_category_small': '',
-        }
+) -> Product:
+    """Selenium을 사용하여 무신사 상품 페이지에서 정보를 추출한다."""
+    return svc_scrape_musinsa_product(
+        driver=driver,
+        url=url,
+        row_num=row_num,
+        existing_sku=existing_sku,
+        download_images=download_images,
+        images_only=images_only,
+        crawl_page_settle_seconds=CRAWL_PAGE_SETTLE_SECONDS,
+        max_thumbnail_images=MAX_THUMBNAIL_IMAGES,
+        download_images_fn=download_thumbnail_images,
+        fetch_buyma_lowest_price_fn=fetch_buyma_lowest_price,
+    )
 
 
 def main():
