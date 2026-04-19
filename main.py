@@ -12,7 +12,6 @@ import os
 import re
 import sys
 import time
-import urllib.parse
 from typing import Dict, List, Tuple
 from app_config import (
     ACTUAL_SIZE_COLUMN,
@@ -100,8 +99,6 @@ from crawler_service import (
     extract_actual_size_text as svc_extract_actual_size_text,
     extract_actual_size_table_text as svc_extract_actual_size_table_text,
     extract_color_from_api as svc_extract_color_from_api,
-    extract_musinsa_categories as svc_extract_musinsa_categories,
-    extract_musinsa_gender_large as svc_extract_musinsa_gender_large,
     extract_musinsa_sku as svc_extract_musinsa_sku,
     extract_brand_en_from_musinsa as svc_extract_brand_en_from_musinsa,
     extract_brand_text as svc_extract_brand_text,
@@ -119,7 +116,6 @@ from crawler_service import (
     is_color_count_placeholder as svc_is_color_count_placeholder,
     normalize_image_source as svc_normalize_image_source,
     normalize_english_color as svc_normalize_english_color,
-    normalize_gender_label as svc_normalize_gender_label,
     normalize_korean_color as svc_normalize_korean_color,
     normalize_size_tokens as svc_normalize_size_tokens,
     extract_sizes as svc_extract_sizes,
@@ -128,7 +124,6 @@ from crawler_service import (
     extract_sizes_from_review_options as svc_extract_sizes_from_review_options,
     extract_sizes_from_table as svc_extract_sizes_from_table,
     extract_size_from_fit_info_block as svc_extract_size_from_fit_info_block,
-    remap_categories_with_gender as svc_remap_categories_with_gender,
     scrape_musinsa_product as svc_scrape_musinsa_product,
     sanitize_path_component as svc_sanitize_path_component,
     split_color_size_tokens as svc_split_color_size_tokens,
@@ -148,17 +143,11 @@ from pipeline_service import (
 )
 from buyma_service import (
     fetch_buyma_lowest_price as svc_fetch_buyma_lowest_price,
-    format_price as svc_format_price,
-    extract_buyma_item_page_price as svc_extract_buyma_item_page_price,
-    extract_buyma_listing_entries as svc_extract_buyma_listing_entries,
-    extract_buyma_listing_prices as svc_extract_buyma_listing_prices,
-    extract_buyma_shipping_included_prices as svc_extract_buyma_shipping_included_prices,
-    extract_discounted_product_price as svc_extract_discounted_product_price,
-    extract_yen_values as svc_extract_yen_values,
-    is_relevant_buyma_item as svc_is_relevant_buyma_item,
-    is_relevant_buyma_listing_entry as svc_is_relevant_buyma_listing_entry,
-    normalize_buyma_query as svc_normalize_buyma_query,
-    normalize_price as svc_normalize_price,
+)
+from shipping_service import (
+    estimate_weight as svc_estimate_weight,
+    lookup_shipping_cost as svc_lookup_shipping_cost,
+    read_shipping_table as svc_read_shipping_table,
 )
 from browser_service import setup_chrome_driver as svc_setup_chrome_driver
 from product_model import Product
@@ -268,80 +257,6 @@ def initialize_runtime_paths(data_dir: str = "", credentials_file: str = ""):
 
     print(f"데이터 폴더: {DATA_DIR}")
     print(f"자격증명 파일: {CREDENTIALS_PATH}")
-
-
-# ==================== 배송비 산출 ====================
-
-def read_shipping_table(service, sheet_name: str) -> List[Tuple[float, int]]:
-    """Z/AA/AB 영역에서 무게(kg)→배송비(원) 기준표를 읽어 리스트로 반환한다.
-    반환: [(0.5, 8950), (1.0, 11350), ...] 무게 오름차순"""
-    def _parse_table_rows(rows: List[List[str]]) -> List[Tuple[float, int]]:
-        table: List[Tuple[float, int]] = []
-        for row in rows:
-            if len(row) < 2:
-                continue
-            weight_raw = (row[0] or '').strip()
-            weight_norm = weight_raw.replace('kg', '').replace('KG', '').replace(',', '.').strip()
-            try:
-                weight = float(weight_norm)
-            except ValueError:
-                continue
-
-            # AA열 배송비를 우선 사용, 없으면 AB열을 보조 사용
-            cost_digits = re.sub(r'[^\d]', '', (row[1] or '').strip()) if len(row) > 1 else ""
-            if not cost_digits and len(row) > 2:
-                cost_digits = re.sub(r'[^\d]', '', (row[2] or '').strip())
-            if not cost_digits:
-                continue
-            table.append((weight, int(cost_digits)))
-        table.sort(key=lambda x: x[0])
-        return table
-
-    # 일시적 시트 응답 문제 대비: 1회 재시도
-    for attempt in (1, 2):
-        try:
-            result = service.spreadsheets().values().get(
-                spreadsheetId=SPREADSHEET_ID,
-                range=f"'{sheet_name}'!Z1:AB60"
-            ).execute()
-            rows = result.get('values', [])
-            table = _parse_table_rows(rows)
-            if table:
-                return table
-            if attempt == 1:
-                time.sleep(0.4)
-                continue
-            return []
-        except Exception as e:
-            if attempt == 1:
-                time.sleep(0.4)
-                continue
-            print(f" 배송비 기준표 조회 실패: {e}")
-            return []
-    return []
-
-
-def estimate_weight(product_name: str, opt_kind_cd: str) -> float:
-    """상품명 키워드 + optKindCd로 추정 무게(kg)를 반환한다"""
-    name_lower = (product_name or '').lower()
-    for keywords, weight in KEYWORD_WEIGHT_RULES:
-        for kw in keywords:
-            if kw in name_lower:
-                return weight
-    kind = (opt_kind_cd or '').upper()
-    return OPT_KIND_WEIGHT_MAP.get(kind, DEFAULT_WEIGHT_KG)
-
-
-def lookup_shipping_cost(table: List[Tuple[float, int]], weight_kg: float) -> str:
-    """무게에 해당하는 배송비를 기준표에서 찾아 '₩xx,xxx' 형태로 반환한다.
-    무게 이상인 가장 가까운 구간을 선택한다."""
-    if not table:
-        return ""
-    for tier_weight, tier_cost in table:
-        if weight_kg <= tier_weight:
-            return f"{tier_cost:,}"
-    # 기준표 최대치 초과 시 마지막 구간 사용
-    return f"{table[-1][1]:,}"
 
 
 # ==================== Google Sheets 연동 ====================
@@ -640,7 +555,7 @@ def extract_color_from_name(raw_name: str) -> str:
 
 
 def is_color_count_placeholder(text: str) -> bool:
-    """'2color', '4 colors', '3??' ?? ?? ???? ????."""
+    """'2color', '4 colors', '3컬러' 같은 색상 개수 표기인지 확인한다."""
     return svc_is_color_count_placeholder(text)
 
 def normalize_korean_color(color_text: str) -> str:
@@ -985,9 +900,19 @@ def process_sheet_once(
         "write_image_paths_only": write_image_paths_only,
         "build_image_folder_name": build_image_folder_name,
         "download_brand_logo": download_brand_logo,
-        "read_shipping_table": read_shipping_table,
-        "estimate_weight": estimate_weight,
-        "lookup_shipping_cost": lookup_shipping_cost,
+        "read_shipping_table": lambda svc, target_sheet: svc_read_shipping_table(
+            service=svc,
+            spreadsheet_id=SPREADSHEET_ID,
+            sheet_name=target_sheet,
+        ),
+        "estimate_weight": lambda product_name, opt_kind_cd: svc_estimate_weight(
+            product_name=product_name,
+            opt_kind_cd=opt_kind_cd,
+            keyword_weight_rules=KEYWORD_WEIGHT_RULES,
+            opt_kind_weight_map=OPT_KIND_WEIGHT_MAP,
+            default_weight_kg=DEFAULT_WEIGHT_KG,
+        ),
+        "lookup_shipping_cost": svc_lookup_shipping_cost,
         "write_to_sheet": write_to_sheet,
         "get_row_dynamic_values": get_row_dynamic_values,
         "determine_progress_status": determine_progress_status,
@@ -1078,111 +1003,6 @@ def setup_chrome_driver():
     return svc_setup_chrome_driver(headless=HEADLESS)
 
 
-def normalize_price(text: str) -> str:
-    """가격 문자열에서 숫자만 추출하여 정상화"""
-    return svc_normalize_price(text)
-
-
-def extract_discounted_product_price(soup: BeautifulSoup) -> str:
-    """페이지에서 쿠폰가를 제외한 상품 할인판매가를 추출한다"""
-    return svc_extract_discounted_product_price(soup)
-
-
-def extract_yen_values(text: str) -> List[int]:
-    """문자열에서 엔화 금액 후보를 정수 목록으로 추출한다"""
-    return svc_extract_yen_values(text)
-
-
-def extract_buyma_listing_prices(soup: BeautifulSoup) -> List[int]:
-    """BUYMA 검색 첫 페이지에서 셀러 상품 카드의 가격만 추출한다"""
-    return svc_extract_buyma_listing_prices(soup)
-
-
-def extract_buyma_listing_entries(soup: BeautifulSoup) -> List[Dict[str, object]]:
-    """BUYMA 검색 첫 페이지에서 상품카드의 제목/가격/링크를 함께 추출한다"""
-    return svc_extract_buyma_listing_entries(soup)
-
-
-def extract_buyma_shipping_included_prices(soup: BeautifulSoup) -> List[int]:
-    """검색 페이지 텍스트에서 '¥xx,xxx 送料込' 형태 가격을 추출한다"""
-    return svc_extract_buyma_shipping_included_prices(soup)
-
-
-def extract_buyma_item_page_price(soup: BeautifulSoup) -> int:
-    """BUYMA 상품 상세 페이지에서 판매가격을 추출한다"""
-    return svc_extract_buyma_item_page_price(soup)
-
-
-def is_relevant_buyma_item(
-    soup: BeautifulSoup,
-    musinsa_sku: str,
-    english_name: str,
-    brand: str,
-) -> bool:
-    """BUYMA 상세 페이지가 현재 상품과 관련 있는지 판별한다"""
-    return svc_is_relevant_buyma_item(soup, musinsa_sku, english_name, brand)
-
-
-def is_relevant_buyma_listing_entry(
-    title: str,
-    musinsa_sku: str,
-    english_name: str,
-    brand: str,
-) -> bool:
-    """검색 결과 카드 제목이 현재 상품과 관련 있는지 더 엄격하게 판별한다."""
-    return svc_is_relevant_buyma_listing_entry(title, musinsa_sku, english_name, brand)
-
-
-def normalize_buyma_query(product_name: str, brand: str) -> List[str]:
-    """바이마 검색용 질의를 우선순위 순으로 생성한다
-    SKU 형태 > 상품명+브랜드 > 상품명 순서로 우선도 결정"""
-    return svc_normalize_buyma_query(product_name, brand)
-
-
-def fetch_buyma_lowest_price(driver, product_name: str, brand: str, musinsa_sku: str = "") -> str:
-    """품번 우선으로 BUYMA 첫 페이지를 검색해 최저가를 반환하고, 실패 시 이름 검색으로 재시도한다"""
-    return svc_fetch_buyma_lowest_price(driver, product_name, brand, musinsa_sku)
-
-
-def extract_musinsa_categories(soup: BeautifulSoup, mss_state: Dict[str, object]) -> Tuple[str, str, str]:
-    """무신사 상품 페이지에서 대/중/소 분류를 추출한다."""
-    return svc_extract_musinsa_categories(soup, mss_state)
-
-
-def _normalize_gender_label(raw_value: str) -> str:
-    return svc_normalize_gender_label(raw_value)
-
-
-def extract_musinsa_gender_large(
-    mss_state: Dict[str, object],
-    cat_large: str = "",
-    cat_middle: str = "",
-    cat_small: str = "",
-) -> str:
-    """무신사 상태값/카테고리 텍스트에서 성별 대분류(남성/여성)를 추출한다."""
-    return svc_extract_musinsa_gender_large(
-        mss_state=mss_state,
-        cat_large=cat_large,
-        cat_middle=cat_middle,
-        cat_small=cat_small,
-    )
-
-
-def remap_categories_with_gender(
-    gender_large: str,
-    cat_large: str,
-    cat_middle: str,
-    cat_small: str,
-) -> Tuple[str, str, str]:
-    """성별을 대분류로 고정하고, 나머지 카테고리를 중/소로 재배치한다."""
-    return svc_remap_categories_with_gender(
-        gender_large=gender_large,
-        cat_large=cat_large,
-        cat_middle=cat_middle,
-        cat_small=cat_small,
-    )
-
-
 def scrape_musinsa_product(
     driver,
     url: str,
@@ -1202,7 +1022,7 @@ def scrape_musinsa_product(
         crawl_page_settle_seconds=CRAWL_PAGE_SETTLE_SECONDS,
         max_thumbnail_images=MAX_THUMBNAIL_IMAGES,
         download_images_fn=download_thumbnail_images,
-        fetch_buyma_lowest_price_fn=fetch_buyma_lowest_price,
+        fetch_buyma_lowest_price_fn=svc_fetch_buyma_lowest_price,
     )
 
 
