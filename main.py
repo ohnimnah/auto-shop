@@ -132,6 +132,7 @@ from crawler_service import (
 from pipeline_service import (
     build_incremental_payload as svc_build_incremental_payload,
     determine_progress_status as svc_determine_progress_status,
+    is_empty_cell as svc_is_empty_cell,
     row_has_existing_output as svc_row_has_existing_output,
     row_needs_image_download as svc_row_needs_image_download,
     row_needs_update as svc_row_needs_update,
@@ -140,6 +141,7 @@ from pipeline_service import (
     is_thumbnail_ready_status as svc_is_thumbnail_ready_status,
 )
 from buyma_service import (
+    format_price as svc_format_price,
     extract_buyma_item_page_price as svc_extract_buyma_item_page_price,
     extract_buyma_listing_entries as svc_extract_buyma_listing_entries,
     extract_buyma_listing_prices as svc_extract_buyma_listing_prices,
@@ -705,18 +707,12 @@ def extract_sizes(soup: BeautifulSoup, option_kind: str = "") -> str:
 
 def format_price(price_value: object) -> str:
     """숫자 또는 문자열 가격을 숫자 문자열로 변환한다"""
-    if isinstance(price_value, (int, float)):
-        return f"{int(price_value):,}"
-    if isinstance(price_value, str):
-        return normalize_price(price_value)
-    return "가격 미확인"
+    return svc_format_price(price_value)
 
 
 def is_empty_cell(value: str) -> bool:
     """셀 값이 비어있는지 확인한다"""
-    if value is None:
-        return True
-    return str(value).strip() == ""
+    return svc_is_empty_cell(value)
 
 
 def extract_musinsa_sku(

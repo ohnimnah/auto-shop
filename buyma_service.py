@@ -19,6 +19,15 @@ def normalize_price(text: str) -> str:
     return "가격 미확인"
 
 
+def format_price(price_value: object) -> str:
+    """Format numeric/string price into normalized text."""
+    if isinstance(price_value, (int, float)):
+        return f"{int(price_value):,}"
+    if isinstance(price_value, str):
+        return normalize_price(price_value)
+    return "가격 미확인"
+
+
 def extract_discounted_product_price(soup: BeautifulSoup) -> str:
     """Extract discounted product price (excluding coupon price)."""
     if soup is None:
