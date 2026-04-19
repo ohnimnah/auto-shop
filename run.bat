@@ -1,175 +1,26 @@
 @echo off
-chcp 949 > nul
+chcp 65001 > nul
 cd /d "%~dp0"
 
 echo.
 echo ============================================================
-echo   ¹«½Å»ç ÀÚµ¿È­ ½ºÅ©¸³Æ® Windows¿ë - ºü¸¥ ½ÃÀÛ
+echo   auto_shop Launcher
 echo ============================================================
 echo.
 
-set "PY_CMD=python"
-if exist ".venv\Scripts\python.exe" set "PY_CMD=.venv\Scripts\python.exe"
-
-if not exist "setup.py" (
-    echo setup.py ÆÄÀÏÀ» Ã£À» ¼ö ¾ø½À´Ï´Ù.
-    echo ÀÌ ÆÄÀÏÀÌ auto_shop Æú´õ¿¡ ÀÖ´ÂÁö È®ÀÎÇÏ¼¼¿ä.
+if not exist "launcher_gui.py" (
+    echo launcher_gui.py íŒŒì¼ì„ ì°¾ì„ ìˆ˜ ì—†ìŠµë‹ˆë‹¤.
+    echo auto_shop í´ë”ì—ì„œ ì‹¤í–‰í–ˆëŠ”ì§€ í™•ì¸í•˜ì„¸ìš”.
     pause
     exit /b 1
 )
 
-set "arg1=%~1"
-set "arg1=%arg1: =%"
-set "arg1=%arg1:[=%"
-set "arg1=%arg1:]=%"
-set "arg1=%arg1:'=%"
-set "arg1=%arg1:\"=%"
+set "PY_CMD=python"
+if exist ".venv\Scripts\python.exe" set "PY_CMD=.venv\Scripts\python.exe"
 
-if /I "%arg1%"=="1" goto do_install
-if /I "%arg1%"=="install" goto do_install
-if /I "%arg1%"=="bootstrap" goto do_install
-
-if /I "%arg1%"=="2" goto do_setup
-if /I "%arg1%"=="setup" goto do_setup
-
-if /I "%arg1%"=="3" goto do_run
-if /I "%arg1%"=="run" goto do_run
-
-if /I "%arg1%"=="4" goto do_watch
-if /I "%arg1%"=="watch" goto do_watch
-
-if /I "%arg1%"=="5" goto do_upload
-if /I "%arg1%"=="upload" goto do_upload
-
-if /I "%arg1%"=="6" goto do_thumb
-if /I "%arg1%"=="thumb" goto do_thumb
-
-if /I "%arg1%"=="7" goto do_thumb_auto
-if /I "%arg1%"=="thumb-auto" goto do_thumb_auto
-
-if /I "%arg1%"=="8" goto do_save_images
-if /I "%arg1%"=="save-images" goto do_save_images
-if /I "%arg1%"=="images" goto do_save_images
-
-if /I "%arg1%"=="9" goto do_gui
-if /I "%arg1%"=="gui" goto do_gui
-
-if /I "%arg1%"=="0" goto do_exit
-if /I "%arg1%"=="exit" goto do_exit
-
-goto menu_loop
-
-:menu_loop
-echo.
-echo ¿É¼ÇÀ» ¼±ÅÃÇÏ¼¼¿ä:
-echo.
-echo 1. ÇÊ¼ö ÀÚµ¿ ¼³Ä¡
-echo 2. ÃÊ±â ¼³Á¤
-echo 3. ÀÚµ¿È­ ½ÃÀÛ
-echo 4. °¨½Ã ¸ğµå
-echo 5. ¹ÙÀÌ¸¶ ¾÷·Îµå
-echo 6. ½æ³×ÀÏ ÆíÁı
-echo 7. ½æ³×ÀÏ ÀÚµ¿
-echo 8. ¸µÅ© ÀÌ¹ÌÁö ÀúÀå
-echo 9. GUI ½ÇÇà±â ¿­±â
-echo 0. Á¾·á
-echo.
-
-set "choice="
-set /p choice="¼±ÅÃ (0-9): "
-set "choice=%choice: =%"
-set "choice=%choice:[=%"
-set "choice=%choice:]=%"
-set "choice=%choice:'=%"
-set "choice=%choice:\"=%"
-
-if "%choice%"=="1" goto do_install
-if "%choice%"=="2" goto do_setup
-if "%choice%"=="3" goto do_run
-if "%choice%"=="4" goto do_watch
-if "%choice%"=="5" goto do_upload
-if "%choice%"=="6" goto do_thumb
-if "%choice%"=="7" goto do_thumb_auto
-if "%choice%"=="8" goto do_save_images
-if "%choice%"=="9" goto do_gui
-if "%choice%"=="0" goto do_exit
-
-echo Àß¸øµÈ ÀÔ·ÂÀÔ´Ï´Ù. 0-9 Áß¿¡¼­ ¼±ÅÃÇØÁÖ¼¼¿ä.
-echo.
-goto menu_loop
-
-:do_install
-echo.
-echo Python/ÆĞÅ°Áö ÀÚµ¿ ¼³Ä¡¸¦ ½ÃÀÛÇÕ´Ï´Ù...
-echo.
-powershell -NoProfile -ExecutionPolicy Bypass -File "%~dp0bootstrap_windows.ps1"
-pause
-goto menu_loop
-
-:do_setup
-echo.
-echo ÃÊ±â ¼³Á¤À» ½ÃÀÛÇÕ´Ï´Ù...
-echo.
-%PY_CMD% setup.py
-pause
-goto menu_loop
-
-:do_run
-echo.
-echo ÀÚµ¿È­¸¦ ½ÃÀÛÇÕ´Ï´Ù...
-echo.
-%PY_CMD% main.py
-pause
-goto menu_loop
-
-:do_watch
-echo.
-echo °¨½Ã ¸ğµå¸¦ ½ÃÀÛÇÕ´Ï´Ù...
-echo.
-%PY_CMD% main.py --watch
-pause
-goto menu_loop
-
-:do_upload
-echo.
-echo ¹ÙÀÌ¸¶ ¾÷·Îµå¸¦ ½ÃÀÛÇÕ´Ï´Ù...
-echo.
-%PY_CMD% buyma_upload.py
-pause
-goto menu_loop
-
-:do_thumb
-echo.
-echo ½æ³×ÀÏ ÆíÁıÀ» ½ÇÇàÇÕ´Ï´Ù...
+echo ëŸ°ì²˜ë¥¼ ì‹œì‘í•©ë‹ˆë‹¤...
 echo.
 %PY_CMD% launcher_gui.py
-pause
-goto menu_loop
 
-:do_thumb_auto
 echo.
-echo ½æ³×ÀÏ ÀÚµ¿ ±â´ÉÀº GUI¿¡¼­ ½ÇÇàÇÕ´Ï´Ù...
-echo.
-%PY_CMD% launcher_gui.py
 pause
-goto menu_loop
-
-:do_save_images
-echo.
-echo ¸µÅ© ÀÌ¹ÌÁö ÀúÀåÀ» ½ÃÀÛÇÕ´Ï´Ù...
-echo.
-%PY_CMD% main.py --download-images
-pause
-goto menu_loop
-
-:do_gui
-echo.
-echo GUI ½ÇÇà±â¸¦ ½ÃÀÛÇÕ´Ï´Ù...
-echo.
-%PY_CMD% launcher_gui.py
-pause
-goto menu_loop
-
-:do_exit
-echo Á¾·áÇÕ´Ï´Ù.
-exit /b

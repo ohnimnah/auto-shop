@@ -27,14 +27,25 @@ else
   fi
 fi
 
-if [ ! -d ".venv" ]; then
+VENV_PYTHON=".venv/bin/python"
+
+create_venv() {
   echo ".venv 가상환경 생성 중..."
   "$PYTHON_CMD" -m venv .venv
+}
+
+if [ ! -d ".venv" ]; then
+  create_venv
 fi
 
-VENV_PYTHON=".venv/bin/python"
 if [ ! -f "$VENV_PYTHON" ]; then
-  echo "가상환경 Python 실행 파일을 찾지 못했습니다."
+  echo "깨진 가상환경을 감지했습니다. .venv를 다시 만듭니다..."
+  rm -rf .venv
+  create_venv
+fi
+
+if [ ! -f "$VENV_PYTHON" ]; then
+  echo "가상환경 Python 실행 파일을 다시 만들어도 찾지 못했습니다."
   exit 1
 fi
 

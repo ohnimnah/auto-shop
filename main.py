@@ -603,6 +603,98 @@ def extract_actual_size_text(goods_no: str) -> str:
     return svc_extract_actual_size_text(goods_no)
 
 
+def extract_actual_size_table_text(soup: BeautifulSoup, option_kind: str = "") -> str:
+    """페이지의 실측 표를 읽어 한 줄 문자열로 반환한다."""
+    if soup is None:
+        return ""
+
+    size_labels = {
+        'FREE', 'O/S', 'OS', 'ONE SIZE', 'XXS', 'XS', 'S', 'M', 'L', 'XL', 'XXL', 'XXXL',
+        '프리', '원사이즈', '스몰', '미디움', '라지', '엑스라지', '투엑스라지'
+    }
+    option_kind = (option_kind or "").upper()
+    result_rows: List[str] = []
+
+    for table in soup.select("table"):
+        rows = table.select("tr")
+        if len(rows) < 2:
+            continue
+
+        header_cells = rows[0].find_all(["th", "td"])
+        if len(header_cells) < 2:
+            continue
+
+        headers = [cell.get_text(" ", strip=True) for cell in header_cells]
+        if len([header for header in headers[1:] if header]) < 2:
+            continue
+
+        table_rows: List[str] = []
+        for row in rows[1:]:
+            cells = row.find_all(["th", "td"])
+            if len(cells) < 2:
+                continue
+
+            raw_size = cells[0].get_text(" ", strip=True)
+            normalized_size = normalize_size_tokens([raw_size], option_kind)
+            size_name = normalized_size[0] if normalized_size else raw_size.strip()
+            upper_size_name = size_name.upper()
+
+            if not size_name:
+                continue
+
+            if (
+                upper_size_name not in size_labels
+                and not size_name.isdigit()
+                and not normalize_size_tokens([size_name], option_kind)
+            ):
+                continue
+
+            parts: List[str] = []
+            for header, cell in zip(headers[1:], cells[1:]):
+                header_text = str(header).strip()
+                value_text = cell.get_text(" ", strip=True)
+                if not header_text or not value_text or value_text in {"-", "--", "—"}:
+                    continue
+                parts.append(f"{header_text} {value_text}")
+
+            if len(parts) >= 2:
+                table_rows.append(f"{size_name}: {', '.join(parts)}")
+
+        if len(table_rows) >= 1:
+            result_rows.extend(table_rows)
+            break
+
+    return " | ".join(result_rows)
+
+
+def extract_size_from_fit_info_block(soup: BeautifulSoup, option_kind: str = "") -> str:
+    """무신사 사이즈 정보 문단에서 '내 사이즈 FREE[999]' 같은 텍스트를 추출한다."""
+    if soup is None:
+        return ""
+
+    option_kind = (option_kind or "").upper()
+    pattern = re.compile(
+        r"내\s*사이즈\s*([A-Za-z][A-Za-z/\s-]*[A-Za-z]|\d{2,3})(?:\s*\[\d+\])?",
+        re.IGNORECASE,
+    )
+
+    for tag in soup.select("div, span, li, p"):
+        text = tag.get_text(" ", strip=True)
+        if not text or "내 사이즈" not in text:
+            continue
+
+        match = pattern.search(text)
+        if not match:
+            continue
+
+        raw_size = match.group(1).strip().upper()
+        normalized = normalize_size_tokens([raw_size], option_kind)
+        if normalized:
+            return ", ".join(normalized)
+
+    return ""
+
+
 def extract_product_json(soup: BeautifulSoup) -> Dict[str, object]:
     """페이지 내 JSON-LD Product 데이터를 추출한다"""
     return svc_extract_product_json(soup)
@@ -694,6 +786,76 @@ def extract_sizes_from_api(goods_no: str, goods_sale_type: str, opt_kind_cd: str
 def extract_sizes_from_table(soup: BeautifulSoup, option_kind: str = "") -> List[str]:
     """무신사 표 영역에서 사이즈 값을 우선 추출한다"""
     return svc_extract_sizes_from_table(soup, option_kind)
+
+
+def extract_sizes_from_option_ui(soup: BeautifulSoup, option_kind: str = "") -> str:
+    """옵션 UI에 렌더된 사이즈 텍스트를 최대한 직접 추출한다."""
+    option_kind = (option_kind or "").upper()
+    collected_tokens: List[str] = []
+    selectors = [
+        '[data-option-name*="size" i]',
+        '[data-option-name*="사이즈" i]',
+        '[data-name*="size" i]',
+        '[data-name*="사이즈" i]',
+        '[aria-label*="size" i]',
+        '[aria-label*="사이즈" i]',
+        '[class*="option" i]',
+        '[class*="select" i]',
+        '[class*="dropdown" i]',
+        '[class*="size" i]',
+        '[id*="option" i]',
+        '[id*="size" i]',
+        '[role="option"]',
+        'select option',
+        'button',
+        'li',
+    ]
+
+    seen_texts = set()
+    for tag in soup.select(", ".join(selectors)):
+        text = tag.get_text(" ", strip=True)
+        if not text or text in seen_texts:
+            continue
+        seen_texts.add(text)
+
+        attrs_text = " ".join(
+            str(value)
+            for key, value in tag.attrs.items()
+            if key in {"class", "id", "aria-label", "data-name", "data-option-name", "name"}
+        )
+        context = f"{attrs_text} {text}".lower()
+        if not any(keyword in context for keyword in ("size", "사이즈", "option", "옵션", "select", "선택")):
+            continue
+
+        parts = re.split(r"[\s,/|]+", text)
+        for part in parts:
+            token = part.strip()
+            if token:
+                collected_tokens.append(token)
+
+        if len(text) <= 40:
+            collected_tokens.append(text.strip())
+
+    normalized_tokens = normalize_size_tokens(collected_tokens, option_kind)
+    if not normalized_tokens:
+        return ""
+
+    if all(token.isdigit() for token in normalized_tokens):
+        numeric = [int(token) for token in normalized_tokens]
+        steps = (5,) if option_kind == "SHOES" else (5, 10)
+        narrowed = find_longest_step_sequence(sorted(set(numeric)), steps)
+        if option_kind == "SHOES" and len(narrowed) >= 2:
+            return ", ".join(str(number) for number in narrowed)
+        if option_kind != "SHOES" and len(narrowed) >= 2:
+            return ", ".join(str(number) for number in narrowed)
+        return ""
+
+    unique_tokens: List[str] = []
+    for token in normalized_tokens:
+        if token not in unique_tokens:
+            unique_tokens.append(token)
+
+    return ", ".join(unique_tokens)
 
 
 def extract_sizes_from_review_options(soup: BeautifulSoup, option_kind: str = "") -> List[int]:
@@ -1379,6 +1541,8 @@ def scrape_musinsa_product(
         size_text, color_from_size = extract_sizes_from_api(goods_no, goods_sale_type, opt_kind_cd)
         actual_size_text = extract_actual_size_text(goods_no)
         if not actual_size_text:
+            actual_size_text = extract_actual_size_table_text(soup, opt_kind_cd)
+        if not actual_size_text:
             actual_size_text = "못찾음"
 
         # 실제 옵션 색상을 우선 반영한다. (size 파싱 > 옵션 API > 상품명)
@@ -1391,7 +1555,15 @@ def scrape_musinsa_product(
         if not color_kr:
             color_kr = "none"
         if not size_text:
+            size_text = extract_size_from_fit_info_block(soup, opt_kind_cd)
+        if not size_text:
+            size_text = extract_sizes_from_option_ui(soup, opt_kind_cd)
+        if not size_text:
             size_text = extract_sizes(soup, opt_kind_cd)
+        if color_kr == "none":
+            print("    색상 추출 실패: 옵션 API/상품명 fallback에서 값을 찾지 못했습니다.")
+        if not size_text:
+            print("    사이즈 추출 실패: 옵션 API, 실측 API, HTML fallback 모두 비어 있습니다.")
 
         # J열은 쿠폰가가 아닌 상품 할인판매가를 우선 사용
         discounted_price_text = extract_discounted_product_price(soup)
@@ -1565,5 +1737,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-
-

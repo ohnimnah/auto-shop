@@ -437,7 +437,7 @@ def compose_banner_style(
     band_h = int(size * 0.14)
     gap = max(8, size // 100)
 
-    top_box = (margin, margin, size - margin * 2, top_h)   # 양옆 여백
+    top_box = (margin, margin, size - margin * 2, top_h)
     band_y = margin + top_h
     bottom_y = band_y + band_h + gap
     bottom_h = size - bottom_y - margin

@@ -2,7 +2,9 @@
 import queue
 import random
 import re
+import base64
 import json
+import shutil
 import subprocess
 import sys
 import threading
@@ -47,6 +49,17 @@ def get_default_images_dir() -> str:
     env_images_dir = os.environ.get('AUTO_SHOP_IMAGES_DIR', '').strip()
     if env_images_dir:
         return os.path.abspath(os.path.expanduser(env_images_dir))
+    cfg_path = os.path.join(get_default_data_dir(), "sheets_config.json")
+    try:
+        if os.path.exists(cfg_path):
+            with open(cfg_path, "r", encoding="utf-8") as f:
+                cfg = json.load(f)
+            if isinstance(cfg, dict):
+                saved_images_dir = (cfg.get("images_dir") or "").strip()
+                if saved_images_dir:
+                    return os.path.abspath(os.path.expanduser(saved_images_dir))
+    except Exception:
+        pass
     return os.path.join(os.path.expanduser('~'), 'images')
 
 
@@ -71,8 +84,15 @@ class AutoShopLauncher(tk.Tk):
         self.today_processed_var = tk.StringVar(value="0")
         self.today_success_var = tk.StringVar(value="0")
         self.today_fail_var = tk.StringVar(value="0")
+        self.wizard_summary_var = tk.StringVar(value="첫 실행 준비를 확인하세요.")
+        self.wizard_status_vars: dict[str, tk.StringVar] = {
+            "runtime": tk.StringVar(value="확인 전"),
+            "credentials": tk.StringVar(value="확인 전"),
+            "sheet": tk.StringVar(value="확인 전"),
+            "mosaic": tk.StringVar(value="확인 전"),
+            "buyma": tk.StringVar(value="확인 전"),
+        }
         self.stage_vars: dict[str, tk.StringVar] = {
-            "leader": tk.StringVar(value="대기"),
             "scout": tk.StringVar(value="대기"),
             "assets": tk.StringVar(value="대기"),
             "design": tk.StringVar(value="대기"),
@@ -81,7 +101,6 @@ class AutoShopLauncher(tk.Tk):
         self.stage_card_widgets: dict[str, tk.Widget] = {}
         self.action_bubble: tk.Toplevel | None = None
         self.team_watch_actions: dict[str, str] = {
-            "scout": "watch-crawler",
             "assets": "watch-images",
             "design": "watch-thumbnails",
             "sales": "watch-upload",
@@ -147,46 +166,65 @@ class AutoShopLauncher(tk.Tk):
         board.grid_columnconfigure(2, weight=5)
         board.grid_rowconfigure(0, weight=1)
 
-        left = tk.Frame(board, bg="#121a33", padx=12, pady=12, highlightbackground="#2b3760", highlightthickness=1)
+        left = tk.Frame(board, bg="#121a33", highlightbackground="#2b3760", highlightthickness=1)
         center = tk.Frame(board, bg="#101834", padx=12, pady=12, highlightbackground="#2b3760", highlightthickness=1)
         right = tk.Frame(board, bg="#11182f", padx=12, pady=12, highlightbackground="#2b3760", highlightthickness=1)
         left.grid(row=0, column=0, sticky="nsew", padx=(0, 10))
         center.grid(row=0, column=1, sticky="nsew", padx=(0, 10))
         right.grid(row=0, column=2, sticky="nsew")
 
-        tk.Label(left, text="작전 패널", bg="#121a33", fg="#f7fbff", font=("Segoe UI", 13, "bold")).pack(anchor="w", pady=(0, 10))
+        left.grid_columnconfigure(0, weight=1)
+        left.grid_rowconfigure(0, weight=1)
+        left_canvas = tk.Canvas(left, bg="#121a33", highlightthickness=0, bd=0)
+        left_scrollbar = tk.Scrollbar(left, orient=tk.VERTICAL, command=left_canvas.yview)
+        left_canvas.configure(yscrollcommand=left_scrollbar.set)
+        left_canvas.grid(row=0, column=0, sticky="nsew")
+        left_scrollbar.grid(row=0, column=1, sticky="ns")
+
+        left_content = tk.Frame(left_canvas, bg="#121a33", padx=12, pady=12)
+        left_window = left_canvas.create_window((0, 0), window=left_content, anchor="nw")
+
+        def _sync_left_scrollregion(_event=None) -> None:
+            left_canvas.configure(scrollregion=left_canvas.bbox("all"))
+
+        def _resize_left_content(_event=None) -> None:
+            left_canvas.itemconfigure(left_window, width=left_canvas.winfo_width())
+
+        def _on_left_mousewheel(event) -> str | None:
+            if event.delta == 0:
+                return None
+            left_canvas.yview_scroll(int(-event.delta / 120), "units")
+            return "break"
+
+        left_content.bind("<Configure>", _sync_left_scrollregion)
+        left_canvas.bind("<Configure>", _resize_left_content)
+        left_canvas.bind("<Enter>", lambda _e: left_canvas.bind_all("<MouseWheel>", _on_left_mousewheel))
+        left_canvas.bind("<Leave>", lambda _e: left_canvas.unbind_all("<MouseWheel>"))
+
+        tk.Label(left_content, text="작전 패널", bg="#121a33", fg="#f7fbff", font=("Segoe UI", 13, "bold")).pack(anchor="w", pady=(0, 10))
         tk.Label(
-            left,
+            left_content,
             text="사무실 직원을 클릭하면\n말풍선으로 작업 옵션이 열립니다.",
             bg="#121a33",
             fg="#9fb1dd",
             justify=tk.LEFT,
             font=("Segoe UI", 10),
         ).pack(anchor="w", pady=(0, 10))
-        self.stop_btn = tk.Button(left, text="긴급 중지", command=self.stop_action, state=tk.DISABLED, bg="#5a2330", fg="#ffeef2", relief=tk.FLAT, activebackground="#6d2b3b")
+        self.stop_btn = tk.Button(left_content, text="긴급 중지", command=self.stop_action, state=tk.DISABLED, bg="#5a2330", fg="#ffeef2", relief=tk.FLAT, activebackground="#6d2b3b")
         self.stop_btn.pack(fill=tk.X, pady=(0, 8), ipady=7)
 
-        self.install_btn = tk.Button(left, text="필수 설치", command=lambda: self.run_action("install"), bg="#1f315d", fg="#f3f6ff", relief=tk.FLAT, activebackground="#28417c")
-        self.setup_btn = tk.Button(left, text="초기 설정", command=lambda: self.run_action("setup"), bg="#1f315d", fg="#f3f6ff", relief=tk.FLAT, activebackground="#28417c")
-        self.sheet_cfg_btn = tk.Button(left, text="시트 설정", command=self.configure_sheet_settings, bg="#284f79", fg="#ebf6ff", relief=tk.FLAT, activebackground="#33659b")
-        self.install_btn.pack(fill=tk.X, pady=2, ipady=5)
-        self.setup_btn.pack(fill=tk.X, pady=2, ipady=5)
-        self.sheet_cfg_btn.pack(fill=tk.X, pady=(2, 8), ipady=5)
+        self._build_first_run_wizard(left_content)
 
         # Keep remaining action button objects for existing run/disable logic compatibility.
-        hidden_actions = tk.Frame(left, bg="#121a33")
-        self.full_auto_btn = tk.Button(hidden_actions, text="풀 오토 실행", command=lambda: self.run_action("full-auto-upload"))
+        hidden_actions = tk.Frame(left_content, bg="#121a33")
         self.run_btn = tk.Button(hidden_actions, text="정찰팀 시작", command=lambda: self.run_action("run"))
         self.watch_btn = tk.Button(hidden_actions, text="정찰팀 감시", command=lambda: self.run_action("watch"))
         self.image_save_btn = tk.Button(hidden_actions, text="자료팀 저장", command=lambda: self.run_action("save-images"))
-        self.thumb_btn = tk.Button(hidden_actions, text="디자인팀 수동", command=self.run_thumbnail_action)
-        self.thumb_auto_btn = tk.Button(hidden_actions, text="디자인팀 자동", command=self.run_thumbnail_auto_action)
-        self.thumb_batch_btn = tk.Button(hidden_actions, text="디자인팀 배치", command=lambda: self.run_action("make-thumbnails"))
-        self.upload_review_btn = tk.Button(hidden_actions, text="판매팀 확인", command=lambda: self.run_action("upload-review"))
-        self.upload_auto_btn = tk.Button(hidden_actions, text="판매팀 자동", command=lambda: self.run_action("upload-auto"))
+        self.thumb_btn = tk.Button(hidden_actions, text="썸네일 만들기", command=self.run_thumbnail_action)
+        self.upload_review_btn = tk.Button(hidden_actions, text="검토 후 업로드", command=lambda: self.run_action("upload-review"))
+        self.upload_auto_btn = tk.Button(hidden_actions, text="한 번 자동 업로드", command=lambda: self.run_action("upload-auto"))
 
         tk.Label(center, text="작전 사무실", bg="#101834", fg="#f7fbff", font=("Segoe UI", 13, "bold")).pack(anchor="w", pady=(0, 10))
-        self._build_stage_card(center, "작전 팀장", "필수 설치 / 초기 설정 / 시트 / 풀 오토", "leader", "#8f6cff")
         self._build_stage_card(center, "정찰팀", "무신사 크롤링", "scout", "#2a67cc")
         self._build_stage_card(center, "자료팀", "이미지 저장", "assets", "#2f9f65")
         self._build_stage_card(center, "디자인팀", "썸네일 작업", "design", "#c0882e")
@@ -221,6 +259,151 @@ class AutoShopLauncher(tk.Tk):
         tk.Label(card, text=title, bg="#161f3e", fg="#afc3ef", font=("Segoe UI", 10, "bold")).pack(anchor="w")
         tk.Label(card, textvariable=value_var, bg="#161f3e", fg="#f5fbff", font=("Segoe UI", 20, "bold")).pack(anchor="w", pady=(2, 0))
 
+    def _build_first_run_wizard(self, parent: tk.Frame) -> None:
+        card = tk.Frame(parent, bg="#182446", padx=12, pady=12, highlightbackground="#5ef2c2", highlightthickness=1)
+        card.pack(fill=tk.X, pady=(2, 10))
+        tk.Label(card, text="첫 실행 마법사", bg="#182446", fg="#f7fbff", font=("Segoe UI", 12, "bold")).pack(anchor="w")
+        tk.Label(
+            card,
+            text="처음 쓰는 사람도 순서대로 눌러서 준비할 수 있게 만든 안내 영역입니다.",
+            bg="#182446",
+            fg="#afc3ef",
+            justify=tk.LEFT,
+            wraplength=260,
+            font=("Segoe UI", 9),
+        ).pack(anchor="w", pady=(4, 8))
+        tk.Label(
+            card,
+            textvariable=self.wizard_summary_var,
+            bg="#182446",
+            fg="#5ef2c2",
+            justify=tk.LEFT,
+            wraplength=260,
+            font=("Segoe UI", 10, "bold"),
+        ).pack(anchor="w", pady=(0, 8))
+
+        self._build_wizard_step(
+            card,
+            "1. 실행 준비",
+            "Python, 가상환경, 필수 패키지를 준비합니다.",
+            self.wizard_status_vars["runtime"],
+            self.run_install_from_wizard,
+            "필수 설치",
+        )
+        self._build_wizard_step(
+            card,
+            "2. Google 키 연결",
+            "credentials.json을 연결해서 시트 접근 준비를 합니다.",
+            self.wizard_status_vars["credentials"],
+            self.import_credentials_file,
+            "파일 연결",
+        )
+        self._build_wizard_step(
+            card,
+            "3. 작업 시트 연결",
+            "Spreadsheet ID, 시트 이름, GID를 저장합니다.",
+            self.wizard_status_vars["sheet"],
+            self.configure_sheet_settings,
+            "시트 설정",
+        )
+        self._build_wizard_step(
+            card,
+            "4. 모자이크 준비",
+            "썸네일 얼굴 블러에 필요한 OpenCV와 cascade 파일을 확인합니다.",
+            self.wizard_status_vars["mosaic"],
+            self.run_install_from_wizard,
+            "필수 설치",
+        )
+        self._build_wizard_step(
+            card,
+            "5. BUYMA 계정",
+            "업로드에 쓸 BUYMA 아이디와 비밀번호를 저장합니다.",
+            self.wizard_status_vars["buyma"],
+            self.configure_buyma_credentials,
+            "계정 입력",
+        )
+
+        actions = tk.Frame(card, bg="#182446")
+        actions.pack(fill=tk.X, pady=(4, 0))
+        tk.Button(
+            actions,
+            text="상태 다시 확인",
+            command=self.refresh_first_run_wizard,
+            bg="#32466f",
+            fg="#eff4ff",
+            relief=tk.FLAT,
+            activebackground="#3e5a8e",
+        ).pack(fill=tk.X, ipady=5)
+        tk.Button(
+            actions,
+            text="연결 테스트",
+            command=self.test_google_setup,
+            bg="#2b5f8a",
+            fg="#eff7ff",
+            relief=tk.FLAT,
+            activebackground="#3675aa",
+        ).pack(fill=tk.X, pady=(6, 0), ipady=5)
+        tk.Button(
+            actions,
+            text="샘플 1건 실행",
+            command=self.run_sample_check,
+            bg="#2d7b56",
+            fg="#effff7",
+            relief=tk.FLAT,
+            activebackground="#379167",
+        ).pack(fill=tk.X, pady=(6, 0), ipady=5)
+
+    def _build_wizard_step(
+        self,
+        parent: tk.Frame,
+        title: str,
+        description: str,
+        status_var: tk.StringVar,
+        command,
+        button_text: str,
+    ) -> None:
+        row = tk.Frame(parent, bg="#1e2b52", padx=10, pady=8, highlightbackground="#30416f", highlightthickness=1)
+        row.pack(fill=tk.X, pady=4)
+        tk.Label(row, text=title, bg="#1e2b52", fg="#f7fbff", font=("Segoe UI", 10, "bold")).pack(anchor="w")
+        tk.Label(
+            row,
+            text=description,
+            bg="#1e2b52",
+            fg="#9fb1dd",
+            justify=tk.LEFT,
+            wraplength=240,
+            font=("Segoe UI", 9),
+        ).pack(anchor="w", pady=(2, 6))
+        bottom = tk.Frame(row, bg="#1e2b52")
+        bottom.pack(fill=tk.X)
+        bottom.grid_columnconfigure(0, weight=1)
+        tk.Label(
+            bottom,
+            textvariable=status_var,
+            bg="#1e2b52",
+            fg="#5ef2c2",
+            justify=tk.LEFT,
+            anchor="w",
+            wraplength=165,
+            font=("Consolas", 9, "bold"),
+        ).grid(row=0, column=0, sticky="ew", padx=(0, 8))
+        tk.Button(
+            bottom,
+            text=button_text,
+            command=command,
+            bg="#334d86",
+            fg="#f3f6ff",
+            relief=tk.FLAT,
+            activebackground="#4062a6",
+        ).grid(row=0, column=1, sticky="e")
+
+    def run_install_from_wizard(self) -> None:
+        self.refresh_first_run_wizard()
+        if self.process and self.process.poll() is None:
+            messagebox.showwarning("실행 중", "이미 작업이 실행 중입니다. 먼저 중지해주세요.")
+            return
+        self.run_action("install")
+
     def _build_stage_card(self, parent: tk.Frame, team: str, desc: str, key: str, accent: str) -> None:
         card = tk.Frame(parent, bg="#1a2346", padx=10, pady=10, highlightbackground=accent, highlightthickness=1)
         card.pack(fill=tk.X, pady=5)
@@ -243,7 +426,6 @@ class AutoShopLauncher(tk.Tk):
 
     def _draw_pixel_agent(self, canvas: tk.Canvas, key: str) -> None:
         palette = {
-            "leader": ("#d7b58a", "#6b54b8", "#1f1a3d"),
             "scout": ("#d7b58a", "#2f4f9c", "#141414"),
             "assets": ("#d7b58a", "#2d7b56", "#2c2c2c"),
             "design": ("#d7b58a", "#8b5f2d", "#3a2a1f"),
@@ -272,18 +454,11 @@ class AutoShopLauncher(tk.Tk):
 
     def _get_team_actions(self, team_key: str) -> list[tuple[str, str]]:
         watch_label = "팀 감시 중지" if self.team_watch_enabled.get(team_key, False) else "팀 감시 시작"
-        if team_key == "leader":
-            return [
-                ("필수 설치", "install"),
-                ("초기 설정", "setup"),
-                ("시트 설정", "sheet-config"),
-                ("풀 오토 실행", "full-auto-upload"),
-            ]
         if team_key == "scout":
+            scout_watch_label = "팀 감시 중지" if self._is_scout_watch_running() else "팀 감시 시작"
             return [
                 ("정찰 시작", "run"),
-                ("정찰 감시", "watch"),
-                (watch_label, f"team-watch-toggle:{team_key}"),
+                (scout_watch_label, "scout-watch-toggle"),
             ]
         if team_key == "assets":
             return [
@@ -292,15 +467,13 @@ class AutoShopLauncher(tk.Tk):
             ]
         if team_key == "design":
             return [
-                ("썸네일 수동", "thumbnail-manual"),
-                ("썸네일 자동", "thumbnail-auto"),
-                ("썸네일 배치", "make-thumbnails"),
+                ("썸네일 만들기", "thumbnail-create"),
                 (watch_label, f"team-watch-toggle:{team_key}"),
             ]
         if team_key == "sales":
             return [
-                ("업로드 확인", "upload-review"),
-                ("업로드 자동", "upload-auto"),
+                ("검토 후 업로드", "upload-review"),
+                ("한 번 자동 업로드", "upload-auto"),
                 (watch_label, f"team-watch-toggle:{team_key}"),
             ]
         return []
@@ -369,16 +542,25 @@ class AutoShopLauncher(tk.Tk):
             team_key = action.split(":", 1)[1].strip()
             self._toggle_team_watch(team_key)
             return
+        if action == "scout-watch-toggle":
+            self._toggle_scout_watch()
+            return
         if action == "sheet-config":
             self.configure_sheet_settings()
             return
-        if action == "thumbnail-manual":
+        if action == "thumbnail-create":
             self.run_thumbnail_action()
             return
-        if action == "thumbnail-auto":
-            self.run_thumbnail_auto_action()
-            return
         self.run_action(action)
+
+    def _is_scout_watch_running(self) -> bool:
+        return bool(self.current_action == "watch" and self.process and self.process.poll() is None)
+
+    def _toggle_scout_watch(self) -> None:
+        if self._is_scout_watch_running():
+            self.stop_action()
+            return
+        self.run_action("watch")
 
     def _toggle_team_watch(self, team_key: str) -> None:
         if team_key not in self.team_watch_actions:
@@ -450,6 +632,7 @@ class AutoShopLauncher(tk.Tk):
         try:
             env = os.environ.copy()
             env["PYTHONUNBUFFERED"] = "1"
+            env["AUTO_SHOP_IMAGES_DIR"] = self._get_configured_images_dir()
             proc = subprocess.Popen(
                 command,
                 cwd=SCRIPT_DIR,
@@ -495,22 +678,12 @@ class AutoShopLauncher(tk.Tk):
 
     def _sync_stage_from_action(self, action: str) -> None:
         self.current_action = action
-        if action in {"install", "setup"}:
-            self.current_stage_key = "leader"
-        elif action in {"run", "watch"}:
+        if action in {"run", "watch"}:
             self.current_stage_key = "scout"
         elif action == "save-images":
             self.current_stage_key = "assets"
-        elif action == "make-thumbnails":
-            self.current_stage_key = "design"
         elif action in {"upload-review", "upload-auto"}:
             self.current_stage_key = "sales"
-        elif action == "full-auto-upload":
-            self.current_stage_key = "leader"
-            self._set_stage_status("scout", "준비")
-            self._set_stage_status("assets", "준비")
-            self._set_stage_status("design", "준비")
-            self._set_stage_status("sales", "준비")
         else:
             self.current_stage_key = None
         if self.current_stage_key:
@@ -571,13 +744,9 @@ class AutoShopLauncher(tk.Tk):
             script = os.path.join(SCRIPT_DIR, "bootstrap_mac.sh")
             return ["bash", script]
 
-        if action == "setup":
-            return build_unbuffered_python_command(os.path.join(SCRIPT_DIR, "setup.py"))
         if action == "run":
             return build_unbuffered_python_command(os.path.join(SCRIPT_DIR, "main.py"))
         if action == "watch":
-            return build_unbuffered_python_command(os.path.join(SCRIPT_DIR, "main.py"), "--watch")
-        if action == "watch-crawler":
             return build_unbuffered_python_command(os.path.join(SCRIPT_DIR, "main.py"), "--watch")
         if action == "watch-images":
             return build_unbuffered_python_command(os.path.join(SCRIPT_DIR, "main.py"), "--watch", "--download-images")
@@ -587,8 +756,6 @@ class AutoShopLauncher(tk.Tk):
             return build_unbuffered_python_command(os.path.join(SCRIPT_DIR, "buyma_upload.py"), "--watch", "--mode", "auto")
         if action == "save-images":
             return build_unbuffered_python_command(os.path.join(SCRIPT_DIR, "main.py"), "--download-images")
-        if action == "make-thumbnails":
-            return build_unbuffered_python_command(os.path.join(SCRIPT_DIR, "main.py"), "--make-thumbnails")
         if action == "upload-review":
             return build_unbuffered_python_command(os.path.join(SCRIPT_DIR, "buyma_upload.py"), "--mode", "review")
         if action == "upload-auto":
@@ -596,28 +763,14 @@ class AutoShopLauncher(tk.Tk):
 
         raise ValueError(f"Unknown action: {action}")
 
-    def _build_full_auto_sequence(self) -> list[list[str]]:
-        return [
-            self._build_command("run"),
-            self._build_command("save-images"),
-            self._build_command("make-thumbnails"),
-            self._build_command("upload-auto"),
-        ]
-
     def _set_running_ui(self, running: bool) -> None:
         normal = tk.DISABLED if running else tk.NORMAL
-        self.install_btn.configure(state=normal)
-        self.setup_btn.configure(state=normal)
-        self.sheet_cfg_btn.configure(state=normal)
-        self.full_auto_btn.configure(state=normal)
         self.run_btn.configure(state=normal)
         self.watch_btn.configure(state=normal)
         self.image_save_btn.configure(state=normal)
         self.upload_review_btn.configure(state=normal)
         self.upload_auto_btn.configure(state=normal)
         self.thumb_btn.configure(state=normal)
-        self.thumb_auto_btn.configure(state=normal)
-        self.thumb_batch_btn.configure(state=normal)
         self.stop_btn.configure(state=tk.NORMAL if running else tk.DISABLED)
 
     def _get_sheet_label_prefix(self) -> str:
@@ -629,6 +782,287 @@ class AutoShopLauncher(tk.Tk):
         self.watch_btn.configure(text=f"{prefix} 감시")
         self.image_save_btn.configure(text="자료팀 저장")
 
+    def _get_credentials_target_path(self) -> str:
+        return os.path.join(self.data_dir, "credentials.json")
+
+    def _get_buyma_credentials_target_path(self) -> str:
+        return os.path.join(self.data_dir, "buyma_credentials.json")
+
+    def _get_available_credentials_path(self) -> str:
+        target = self._get_credentials_target_path()
+        if os.path.exists(target):
+            return target
+        legacy = os.path.join(SCRIPT_DIR, "credentials.json")
+        if os.path.exists(legacy):
+            return legacy
+        return ""
+
+    def _has_buyma_credentials(self) -> bool:
+        path = self._get_buyma_credentials_target_path()
+        if not os.path.exists(path):
+            return False
+        try:
+            with open(path, "r", encoding="utf-8") as f:
+                data = json.load(f)
+            email = base64.b64decode(str(data.get("email", "")).encode()).decode().strip()
+            password = base64.b64decode(str(data.get("password", "")).encode()).decode().strip()
+            return bool(email and password)
+        except Exception:
+            return False
+
+    def _load_buyma_email(self) -> str:
+        path = self._get_buyma_credentials_target_path()
+        if not os.path.exists(path):
+            return ""
+        try:
+            with open(path, "r", encoding="utf-8") as f:
+                data = json.load(f)
+            return base64.b64decode(str(data.get("email", "")).encode()).decode().strip()
+        except Exception:
+            return ""
+
+    def _has_ready_runtime(self) -> bool:
+        python_cmd = resolve_python_executable()
+        if not python_cmd:
+            return False
+        if os.path.isfile(python_cmd) or shutil.which(python_cmd):
+            try:
+                result = subprocess.run(
+                    [
+                        python_cmd,
+                        "-c",
+                        "import selenium, PIL, bs4, googleapiclient, google.oauth2, webdriver_manager, numpy, cv2",
+                    ],
+                    stdout=subprocess.DEVNULL,
+                    stderr=subprocess.DEVNULL,
+                    text=True,
+                    timeout=20,
+                    check=False,
+                )
+                return result.returncode == 0
+            except Exception:
+                return False
+        return False
+
+    def _get_mosaic_runtime_state(self) -> str:
+        python_cmd = resolve_python_executable()
+        if not python_cmd:
+            return "missing"
+        if not (os.path.isfile(python_cmd) or shutil.which(python_cmd)):
+            return "missing"
+        try:
+            result = subprocess.run(
+                [
+                    python_cmd,
+                    "-c",
+                    (
+                        "import os; "
+                        "import cv2; "
+                        "p=cv2.data.haarcascades + 'haarcascade_frontalface_default.xml'; "
+                        "c=cv2.CascadeClassifier(p); "
+                        "state='ready' if os.path.exists(p) and not c.empty() else 'installed'; "
+                        "print(state)"
+                    ),
+                ],
+                stdout=subprocess.PIPE,
+                stderr=subprocess.DEVNULL,
+                text=True,
+                timeout=20,
+                check=False,
+            )
+            if result.returncode != 0:
+                return "missing"
+            state = (result.stdout or "").strip().lower()
+            if state in {"ready", "installed"}:
+                return state
+            return "missing"
+        except Exception:
+            return "missing"
+
+    def _has_credentials_file(self) -> bool:
+        return bool(self._get_available_credentials_path())
+
+    def _has_valid_sheet_config(self) -> bool:
+        cfg = self._load_sheet_config()
+        sid = self._normalize_spreadsheet_id(cfg.get("spreadsheet_id", ""))
+        return self._is_valid_spreadsheet_id(sid) and bool((cfg.get("sheet_name") or "").strip())
+
+    def refresh_first_run_wizard(self) -> None:
+        runtime_ready = self._has_ready_runtime()
+        credentials_ready = self._has_credentials_file()
+        sheet_ready = self._has_valid_sheet_config()
+        mosaic_state = self._get_mosaic_runtime_state()
+        mosaic_ready = mosaic_state in {"ready", "installed"}
+        buyma_ready = self._has_buyma_credentials()
+
+        runtime_text = f"{'완료' if runtime_ready else '필요'} · Python {os.path.basename(resolve_python_executable())}"
+        self.wizard_status_vars["runtime"].set(runtime_text)
+
+        credentials_path = self._get_available_credentials_path()
+        if credentials_ready:
+            self.wizard_status_vars["credentials"].set(f"완료 · {os.path.basename(credentials_path)} 연결됨")
+        else:
+            self.wizard_status_vars["credentials"].set("필요 · credentials.json 파일을 연결해주세요")
+
+        cfg = self._load_sheet_config()
+        if sheet_ready:
+            sheet_name = (cfg.get("sheet_name") or "").strip()
+            self.wizard_status_vars["sheet"].set(f"완료 · {sheet_name} 연결됨")
+        else:
+            self.wizard_status_vars["sheet"].set("필요 · Spreadsheet ID와 시트 이름을 입력해주세요")
+
+        if mosaic_state == "ready":
+            self.wizard_status_vars["mosaic"].set("완료 · 얼굴 모자이크 사용 가능")
+        elif mosaic_state == "installed":
+            self.wizard_status_vars["mosaic"].set("완료 · OpenCV 설치됨 (얼굴 블러는 일부 환경에서 제한될 수 있음)")
+        else:
+            self.wizard_status_vars["mosaic"].set("필요 · OpenCV 모자이크 구성요소를 설치해주세요")
+
+        if buyma_ready:
+            email = self._load_buyma_email()
+            self.wizard_status_vars["buyma"].set(f"완료 · {email or 'BUYMA 계정 저장됨'}")
+        else:
+            self.wizard_status_vars["buyma"].set("선택 · 업로드 전 BUYMA 계정을 저장해주세요")
+
+        if runtime_ready and credentials_ready and sheet_ready and mosaic_ready:
+            if buyma_ready:
+                self.wizard_summary_var.set("준비 완료. 이제 샘플 1건 실행이나 감시 모드를 시작할 수 있습니다.")
+            else:
+                self.wizard_summary_var.set("준비 완료. 업로드를 쓰려면 BUYMA 계정만 입력하면 됩니다.")
+        elif runtime_ready and credentials_ready and sheet_ready and mosaic_state == "missing":
+            self.wizard_summary_var.set("거의 준비 완료. 얼굴 모자이크를 쓰려면 한 번 더 필수 설치를 실행해주세요.")
+        elif not credentials_ready:
+            self.wizard_summary_var.set("다음 단계: Google 키 파일(credentials.json)을 연결해주세요.")
+        elif not sheet_ready:
+            self.wizard_summary_var.set("다음 단계: 작업할 Google 시트 정보를 입력해주세요.")
+        else:
+            self.wizard_summary_var.set("실행 준비를 마쳤습니다. 연결 테스트를 눌러 확인해보세요.")
+
+    def configure_buyma_credentials(self) -> bool:
+        current_email = self._load_buyma_email()
+        email = simpledialog.askstring(
+            "BUYMA 계정",
+            "BUYMA 아이디(이메일)를 입력하세요.",
+            initialvalue=current_email,
+            parent=self,
+        )
+        if email is None:
+            return False
+        email = email.strip()
+        if not email:
+            messagebox.showwarning("입력 오류", "BUYMA 아이디를 입력해주세요.")
+            return False
+
+        password = simpledialog.askstring(
+            "BUYMA 계정",
+            "BUYMA 비밀번호를 입력하세요.",
+            parent=self,
+            show="*",
+        )
+        if password is None:
+            return False
+        password = password.strip()
+        if not password:
+            messagebox.showwarning("입력 오류", "BUYMA 비밀번호를 입력해주세요.")
+            return False
+
+        try:
+            os.makedirs(self.data_dir, exist_ok=True)
+            payload = {
+                "email": base64.b64encode(email.encode()).decode(),
+                "password": base64.b64encode(password.encode()).decode(),
+            }
+            target_path = self._get_buyma_credentials_target_path()
+            with open(target_path, "w", encoding="utf-8") as f:
+                json.dump(payload, f, ensure_ascii=False, indent=2)
+            self.append_log(f"BUYMA 계정 저장 완료: {target_path}\n")
+            messagebox.showinfo("BUYMA 계정 저장", "BUYMA 아이디와 비밀번호를 저장했습니다.")
+            self.refresh_first_run_wizard()
+            return True
+        except Exception as exc:
+            messagebox.showerror("저장 실패", f"BUYMA 계정 저장 실패: {exc}")
+            return False
+
+    def import_credentials_file(self) -> bool:
+        initial_dir = os.path.expanduser("~/Downloads")
+        selected_path = filedialog.askopenfilename(
+            title="credentials.json 선택",
+            initialdir=initial_dir,
+            filetypes=[("JSON files", "*.json"), ("All files", "*.*")],
+            parent=self,
+        )
+        if not selected_path:
+            return False
+
+        try:
+            os.makedirs(self.data_dir, exist_ok=True)
+            target_path = self._get_credentials_target_path()
+            shutil.copy2(selected_path, target_path)
+            self.append_log(f"자격증명 파일 연결 완료: {target_path}\n")
+            messagebox.showinfo("키 연결 완료", f"credentials.json을 연결했습니다.\n저장 위치: {target_path}")
+            self.refresh_first_run_wizard()
+            return True
+        except Exception as exc:
+            messagebox.showerror("키 연결 실패", f"credentials.json 복사 실패: {exc}")
+            return False
+
+    def test_google_setup(self) -> bool:
+        credentials_path = self._get_available_credentials_path()
+        if not credentials_path:
+            messagebox.showwarning(
+                "키 파일 필요",
+                "먼저 credentials.json 파일을 연결해주세요.\n보통 Downloads에 받은 JSON 파일을 선택하면 됩니다.",
+            )
+            self.refresh_first_run_wizard()
+            return False
+
+        cfg = self._load_sheet_config()
+        spreadsheet_id = self._normalize_spreadsheet_id(cfg.get("spreadsheet_id", ""))
+        if not self._is_valid_spreadsheet_id(spreadsheet_id):
+            messagebox.showwarning("시트 설정 필요", "먼저 Spreadsheet ID 또는 시트 URL을 입력해주세요.")
+            self.refresh_first_run_wizard()
+            return False
+
+        try:
+            from google.oauth2.service_account import Credentials
+            from googleapiclient.discovery import build
+
+            creds = Credentials.from_service_account_file(
+                credentials_path,
+                scopes=["https://www.googleapis.com/auth/spreadsheets.readonly"],
+            )
+            service = build("sheets", "v4", credentials=creds)
+            spreadsheet = service.spreadsheets().get(spreadsheetId=spreadsheet_id).execute()
+            title = str(spreadsheet.get("properties", {}).get("title", "")).strip() or "제목 미확인"
+            self.append_log(f"Google Sheets 연결 테스트 성공: {title}\n")
+            messagebox.showinfo("연결 성공", f"Google Sheets 연결 확인 완료\n시트 제목: {title}")
+            self.refresh_first_run_wizard()
+            return True
+        except Exception as exc:
+            messagebox.showerror(
+                "연결 실패",
+                "Google Sheets 연결 확인에 실패했습니다.\n"
+                "1) credentials.json 파일\n"
+                "2) Spreadsheet ID\n"
+                "3) 시트 공유 대상(client_email)\n"
+                f"를 확인해주세요.\n\n상세 오류: {exc}",
+            )
+            self.refresh_first_run_wizard()
+            return False
+
+    def run_sample_check(self) -> None:
+        if not self.test_google_setup():
+            return
+        if self.process and self.process.poll() is None:
+            messagebox.showwarning("실행 중", "이미 작업이 실행 중입니다. 먼저 중지해주세요.")
+            return
+        if not messagebox.askyesno(
+            "샘플 1건 실행",
+            "현재 시트 기준으로 첫 작업 1건을 확인해보려면 정찰팀 시작을 실행합니다.\n계속할까요?",
+        ):
+            return
+        self.run_action("run")
+
     def _load_sheet_config(self) -> dict:
         try:
             if not os.path.exists(self.sheet_config_path):
@@ -639,6 +1073,13 @@ class AutoShopLauncher(tk.Tk):
         except Exception:
             return {}
 
+    def _get_configured_images_dir(self) -> str:
+        cfg = self._load_sheet_config()
+        configured = (cfg.get("images_dir") or "").strip()
+        if configured:
+            return os.path.abspath(os.path.expanduser(configured))
+        return get_default_images_dir()
+
     def _save_sheet_config(self, config: dict) -> bool:
         try:
             os.makedirs(self.data_dir, exist_ok=True)
@@ -646,25 +1087,52 @@ class AutoShopLauncher(tk.Tk):
                 json.dump(config, f, ensure_ascii=False, indent=2)
             return True
         except Exception as e:
-            messagebox.showerror("????ㅽ뙣", f"?쒗듃 ?ㅼ젙 ????ㅽ뙣: {e}")
+            messagebox.showerror("저장 실패", f"시트 설정 저장 실패: {e}")
             return False
+
+    def configure_images_directory(self) -> bool:
+        current_dir = self._get_configured_images_dir()
+        selected_dir = filedialog.askdirectory(
+            title="이미지 저장 폴더 선택",
+            initialdir=current_dir,
+            mustexist=False,
+            parent=self,
+        )
+        if not selected_dir:
+            return False
+
+        selected_dir = os.path.abspath(os.path.expanduser(selected_dir))
+        try:
+            os.makedirs(selected_dir, exist_ok=True)
+        except Exception as exc:
+            messagebox.showerror("폴더 생성 실패", f"선택한 폴더를 준비하지 못했습니다: {exc}")
+            return False
+
+        current = self._load_sheet_config()
+        current["images_dir"] = selected_dir
+        if not self._save_sheet_config(current):
+            return False
+
+        self.append_log(f"이미지 저장 경로 설정 완료: {selected_dir}\n")
+        messagebox.showinfo("이미지 경로 저장", f"앞으로 이미지 저장 기본 경로로 사용합니다.\n{selected_dir}")
+        return True
 
     def _has_sheet_config(self) -> bool:
         cfg = self._load_sheet_config()
         return bool((cfg.get("spreadsheet_id") or "").strip())
 
     def _normalize_spreadsheet_id(self, raw_value: str) -> str:
-        """?낅젰媛믪뿉??Spreadsheet ID瑜?異붿텧/?뺢퇋?뷀븳??"""
+        """입력값에서 Spreadsheet ID를 추출하고 정리한다."""
         value = (raw_value or "").strip()
         if not value:
             return ""
 
-        # URL ?꾩껜瑜??ｌ? 寃쎌슦 /d/<id>/ 遺遺꾩뿉??異붿텧
+        # 전체 URL이 들어오면 /d/<id>/ 부분에서 ID를 추출한다.
         m = re.search(r"/spreadsheets/d/([a-zA-Z0-9-_]+)", value)
         if m:
             return m.group(1)
 
-        # d/<id>, /d/<id> ?뺥깭???덉슜
+        # d/<id>, /d/<id> 형태도 허용한다.
         m = re.search(r"(?:^|/)d/([a-zA-Z0-9-_]+)", value)
         if m:
             return m.group(1)
@@ -677,20 +1145,20 @@ class AutoShopLauncher(tk.Tk):
             return False
         if "@" in sid:
             return False
-        # 援ш? ?쒗듃 ID??蹂댄넻 ?곷Ц/?レ옄/-/_ 議고빀??湲?臾몄옄??
+        # 구글 시트 ID는 보통 영문/숫자/-/_ 조합의 긴 문자열이다.
         return bool(re.fullmatch(r"[a-zA-Z0-9-_]{20,}", sid))
 
     def configure_sheet_settings(self) -> bool:
-        """?쒗듃 ?ㅼ젙 ?앹뾽???닿퀬 ??ν븳??"""
+        """시트 설정 팝업을 띄우고 저장한다."""
         current = self._load_sheet_config()
         cur_id = (current.get("spreadsheet_id") or "").strip()
-        cur_name = (current.get("sheet_name") or "?쒗듃1").strip() or "?쒗듃1"
+        cur_name = (current.get("sheet_name") or "시트1").strip() or "시트1"
         cur_gids = current.get("sheet_gids") or [1698424449]
         cur_gid_text = ",".join(str(x) for x in cur_gids if isinstance(x, int))
 
         spreadsheet_input = simpledialog.askstring(
-            "?쒗듃 ?ㅼ젙",
-            "Google Spreadsheet ID ?먮뒗 ?쒗듃 URL???낅젰?섏꽭??",
+            "시트 설정",
+            "Google Spreadsheet ID 또는 시트 URL을 입력하세요.",
             initialvalue=cur_id,
             parent=self,
         )
@@ -700,24 +1168,24 @@ class AutoShopLauncher(tk.Tk):
         spreadsheet_id = self._normalize_spreadsheet_id(spreadsheet_input)
         if not self._is_valid_spreadsheet_id(spreadsheet_id):
             messagebox.showwarning(
-                "?낅젰 ?ㅻ쪟",
-                "?좏슚??Spreadsheet ID媛 ?꾨떃?덈떎.\n?대찓?쇱씠 ?꾨땲???쒗듃 URL??/d/ ??臾몄옄?댁쓣 ?낅젰?댁＜?몄슂.",
+                "입력 오류",
+                "유효한 Spreadsheet ID가 아닙니다.\n이메일이 아니라 시트 URL의 /d/ 뒤 문자열을 입력해주세요.",
             )
             return False
 
         sheet_name = simpledialog.askstring(
-            "?쒗듃 ?ㅼ젙",
-            "?쒗듃 ?대쫫???낅젰?섏꽭??(湲곕낯: ?쒗듃1):",
+            "시트 설정",
+            "시트 이름을 입력하세요. (기본: 시트1)",
             initialvalue=cur_name,
             parent=self,
         )
         if sheet_name is None:
             return False
-        sheet_name = sheet_name.strip() or "?쒗듃1"
+        sheet_name = sheet_name.strip() or "시트1"
 
         gid_text = simpledialog.askstring(
-            "?쒗듃 ?ㅼ젙",
-            "?쒗듃 GID瑜??낅젰?섏꽭??(?щ윭 媛쒕㈃ 肄ㅻ쭏 援щ텇):",
+            "시트 설정",
+            "시트 GID를 입력하세요. (여러 개면 쉼표로 구분)",
             initialvalue=cur_gid_text or "1698424449",
             parent=self,
         )
@@ -736,31 +1204,27 @@ class AutoShopLauncher(tk.Tk):
             "sheet_name": sheet_name,
             "sheet_gids": gids,
             "row_start": 2,
+            "images_dir": (current.get("images_dir") or "").strip(),
         }
         if not self._save_sheet_config(config):
             return False
 
-        self.append_log(f"?쒗듃 ?ㅼ젙 ????꾨즺: {self.sheet_config_path}\n")
+        self.append_log(f"시트 설정 저장 완료: {self.sheet_config_path}\n")
         self._refresh_action_button_labels()
+        self.refresh_first_run_wizard()
         return True
 
     def _ensure_sheet_config_on_startup(self) -> None:
-        if self._has_sheet_config():
-            return
-        messagebox.showinfo(
-            "珥덇린 ?ㅼ젙",
-            "泥섏쓬 ?ㅽ뻾?낅땲?? Google ?쒗듃 媛믪쓣 癒쇱? ?낅젰?댁＜?몄슂.",
-        )
-        self.configure_sheet_settings()
+        self.refresh_first_run_wizard()
 
     def _ensure_sheet_config_before_action(self, action: str) -> bool:
-        if action not in {"run", "watch", "watch-crawler", "watch-images", "watch-thumbnails", "watch-upload", "upload-review", "upload-auto", "save-images", "make-thumbnails", "full-auto-upload"}:
+        if action not in {"run", "watch", "watch-images", "watch-thumbnails", "watch-upload", "upload-review", "upload-auto", "save-images"}:
             return True
         cfg = self._load_sheet_config()
         sid = self._normalize_spreadsheet_id(cfg.get("spreadsheet_id", ""))
         if self._is_valid_spreadsheet_id(sid):
             return True
-        messagebox.showwarning("?쒗듃 ?ㅼ젙 ?꾩슂", "?쒗듃 ID媛 ?녾굅???섎せ?섏뿀?듬땲?? ?쒗듃 ?ㅼ젙???ㅼ떆 ?댁＜?몄슂.")
+        messagebox.showwarning("시트 설정 필요", "시트 ID가 없거나 잘못되었습니다. 시트 설정을 다시 입력해주세요.")
         return self.configure_sheet_settings()
 
     def _start_command(self, command: list[str]) -> bool:
@@ -770,6 +1234,7 @@ class AutoShopLauncher(tk.Tk):
         try:
             env = os.environ.copy()
             env["PYTHONUNBUFFERED"] = "1"
+            env["AUTO_SHOP_IMAGES_DIR"] = self._get_configured_images_dir()
             self.process = subprocess.Popen(
                 command,
                 cwd=SCRIPT_DIR,
@@ -838,10 +1303,6 @@ class AutoShopLauncher(tk.Tk):
         self.status_var.set("작전 준비중")
 
         # BUYMA ?낅줈???≪뀡? 釉뚮씪?곗?/?낅젰 ?뺤씤???꾪빐 ?곕???李쎌뿉??吏곸젒 ?ㅽ뻾
-        if action == "full-auto-upload":
-            self.status_var.set("터미널 시퀀스 실행")
-            self._start_sequence_in_terminal(self._build_full_auto_sequence())
-            return
         if action in {"upload-review", "upload-auto"}:
             self.status_var.set("터미널 업로드 실행")
             self._start_command_in_terminal(action)
@@ -865,6 +1326,7 @@ class AutoShopLauncher(tk.Tk):
         desc_frame.pack()
         tk.Label(desc_frame, text="split  : 좌측 큰 사진 + 우측 2칸 + 하단 텍스트", fg="#555").pack(anchor="w")
         tk.Label(desc_frame, text="banner : 상단 타이틀 + 중앙 텍스트 + 하단 3칸", fg="#555").pack(anchor="w")
+        tk.Label(desc_frame, text="auto   : split 또는 banner를 자동으로 선택", fg="#555").pack(anchor="w")
 
         btn_frame = tk.Frame(dlg, padx=20, pady=12)
         btn_frame.pack()
@@ -877,6 +1339,8 @@ class AutoShopLauncher(tk.Tk):
                   font=("Arial", 10, "bold"), command=lambda: choose("split")).pack(side=tk.LEFT, padx=8)
         tk.Button(btn_frame, text="banner", width=14, bg="#e8f0fe",
                   font=("Arial", 10, "bold"), command=lambda: choose("banner")).pack(side=tk.LEFT, padx=8)
+        tk.Button(btn_frame, text="자동 선택", width=14, bg="#e8ffe8",
+                  font=("Arial", 10, "bold"), command=lambda: choose("auto")).pack(side=tk.LEFT, padx=8)
 
         cancel_frame = tk.Frame(dlg, pady=(0))
         cancel_frame.pack(pady=(0, 10))
@@ -952,6 +1416,9 @@ class AutoShopLauncher(tk.Tk):
         style = self._ask_style()
         if style is None:
             return
+        if style == "auto":
+            style = random.choice(["split", "banner"])
+            self.append_log(f"썸네일 레이아웃 자동 선택: {style}\n")
 
         python_cmd = resolve_python_executable()
         footer = f"{brand} / angduss k-closet"
@@ -967,53 +1434,9 @@ class AutoShopLauncher(tk.Tk):
             footer,
             "--blur-face",
         ]
-        self._sync_stage_from_action("make-thumbnails")
-        self._start_command(command)
-
-    def run_thumbnail_auto_action(self) -> None:
-        """?ㅽ????쒕뜡 ?먮룞 ?좏깮?쇰줈 ?몃꽕???앹꽦."""
-        if self.process and self.process.poll() is None:
-            messagebox.showwarning("실행 중", "이미 작업이 실행 중입니다. 먼저 중지해주세요.")
-            return
-
-        folder = filedialog.askdirectory(
-            title="?몃꽕???몄쭛???대?吏 ?대뜑 ?좏깮",
-            initialdir=get_default_images_dir(),
-            mustexist=True,
-        )
-        if not folder:
-            return
-
-        sheets_brand = self._fetch_brand_from_sheets(folder)
-        default_brand = sheets_brand or self._guess_brand(folder)
-        brand = simpledialog.askstring(
-            "釉뚮옖?쒕챸",
-            "?곷떒 釉뚮옖?쒕챸???낅젰?섏꽭??",
-            initialvalue=default_brand,
-            parent=self,
-        )
-        if brand is None:
-            return
-        brand = brand.strip() or default_brand or "BRAND"
-
-        style = random.choice(["split", "banner"])
-        self.append_log(f"?ㅽ????먮룞?좏깮: {style}\n")
-
-        python_cmd = resolve_python_executable()
-        footer = f"{brand} / angduss k-closet"
-        command = [
-            python_cmd,
-            os.path.join(SCRIPT_DIR, "make_thumbnails.py"),
-            folder,
-            "--style",
-            style,
-            "--brand",
-            brand,
-            "--footer",
-            footer,
-            "--blur-face",
-        ]
-        self._sync_stage_from_action("make-thumbnails")
+        self.current_action = "thumbnail-create"
+        self.current_stage_key = "design"
+        self._set_stage_status("design", "진행중")
         self._start_command(command)
 
     def _read_output(self) -> None:
@@ -1106,4 +1529,3 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
-
