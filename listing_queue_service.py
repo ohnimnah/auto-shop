@@ -10,7 +10,7 @@ import re
 import time
 from datetime import datetime
 from typing import Dict, List, Tuple
-from urllib.parse import urljoin
+from urllib.parse import parse_qs, urlencode, urljoin, urlparse, urlunparse
 
 from bs4 import BeautifulSoup
 from selenium.common.exceptions import TimeoutException, WebDriverException
@@ -128,32 +128,234 @@ def _extract_musinsa_product_id_and_url(href: str) -> Tuple[str, str]:
     return product_id, product_url
 
 
-def _collect_products_from_listing_page(
-    driver,
-    page_url: str,
-) -> Tuple[List[Tuple[str, str]], int, int]:
-    """Return (products, href_candidate_count, malformed_count)."""
-    driver.get(page_url)
-    time.sleep(1.2)
+def _normalize_page_url(url: str) -> str:
+    p = urlparse((url or "").strip())
+    if not p.scheme or not p.netloc:
+        return (url or "").strip()
+    # fragment 제거, query 정렬
+    query_items = parse_qs(p.query, keep_blank_values=True)
+    query = urlencode(sorted((k, v) for k, vals in query_items.items() for v in vals))
+    return urlunparse((p.scheme, p.netloc, p.path, p.params, query, ""))
 
-    for _ in range(4):
-        driver.execute_script("window.scrollTo(0, document.body.scrollHeight);")
-        time.sleep(0.6)
 
-    soup = BeautifulSoup(driver.page_source, "html.parser")
+def _discover_pagination_urls(page_url: str, soup: BeautifulSoup) -> List[str]:
+    base = urlparse(page_url)
+    page_urls: List[str] = []
     seen = set()
-    products: List[Tuple[str, str]] = []
-    href_candidate_count = 0
-    malformed_count = 0
-
     for a_tag in soup.select("a[href]"):
         href = (a_tag.get("href") or "").strip()
         if not href:
             continue
-        full_href = urljoin(page_url, href)
-        if "/products/" not in full_href and "/app/goods/" not in full_href and "goodsNo=" not in full_href:
+        anchor_text = (a_tag.get_text(" ", strip=True) or "").strip().lower()
+        full_url = _normalize_page_url(urljoin(page_url, href))
+        parsed = urlparse(full_url)
+        if parsed.scheme not in {"http", "https"}:
             continue
-        href_candidate_count += 1
+        if parsed.netloc != base.netloc:
+            continue
+        if parsed.path != base.path:
+            continue
+        q = parse_qs(parsed.query)
+        has_page_like = any(k in q for k in ("page", "p", "pg", "pageNo", "pageNum", "start", "offset"))
+        numeric_anchor = anchor_text.isdigit() or anchor_text in {"다음", "next", ">", "›", "»"}
+        if not has_page_like and not numeric_anchor:
+            continue
+        if full_url in seen:
+            continue
+        seen.add(full_url)
+        page_urls.append(full_url)
+    # page 번호 오름차순 정렬
+    def _page_num(url: str) -> int:
+        try:
+            return int((parse_qs(urlparse(url).query).get("page") or ["1"])[0])
+        except Exception:
+            return 1
+    page_urls.sort(key=_page_num)
+    return page_urls
+
+
+def _build_forced_page_url(base_url: str, page_num: int) -> str:
+    parsed = urlparse(base_url)
+    qs = parse_qs(parsed.query, keep_blank_values=True)
+    qs["page"] = [str(page_num)]
+    query = urlencode(sorted((k, v) for k, vals in qs.items() for v in vals))
+    return urlunparse((parsed.scheme, parsed.netloc, parsed.path, parsed.params, query, ""))
+
+
+def _build_forced_page_url_by_key(base_url: str, key: str, page_num: int) -> str:
+    parsed = urlparse(base_url)
+    qs = parse_qs(parsed.query, keep_blank_values=True)
+    qs[key] = [str(page_num)]
+    query = urlencode(sorted((k, v) for k, vals in qs.items() for v in vals))
+    return urlunparse((parsed.scheme, parsed.netloc, parsed.path, parsed.params, query, ""))
+
+
+def _extract_page_num_from_url(url: str) -> int | None:
+    try:
+        qs = parse_qs(urlparse(url).query)
+    except Exception:
+        return None
+    for key in ("page", "pageNo", "pageNum", "p", "pg"):
+        values = qs.get(key) or []
+        if not values:
+            continue
+        try:
+            num = int(str(values[0]).strip())
+            if num >= 1:
+                return num
+        except Exception:
+            continue
+    return None
+
+
+def _collect_products_from_single_page(
+    driver,
+    target_url: str,
+) -> Tuple[List[Tuple[str, str]], int, int]:
+    """Return (products, href_candidate_count, malformed_count)."""
+    def _capture_product_hrefs() -> List[str]:
+        return list(
+            driver.execute_script(
+                """
+                const out = [];
+                const origin = window.location.origin || '';
+                const links = Array.from(document.querySelectorAll('a[href]'));
+                for (const a of links) {
+                    const raw = (a.getAttribute('href') || '').trim();
+                    if (!raw) continue;
+                    if (!(raw.includes('/products/') || raw.includes('/app/goods/') || raw.includes('goodsNo='))) continue;
+                    let full = raw;
+                    if (raw.startsWith('//')) full = window.location.protocol + raw;
+                    else if (raw.startsWith('/')) full = origin + raw;
+                    out.push(full);
+                }
+                return Array.from(new Set(out));
+                """
+            )
+        )
+
+    driver.get(target_url)
+    time.sleep(1.2)
+    collected_hrefs = set(_capture_product_hrefs())
+
+    def _detect_total_expected() -> int:
+        # Try to read total product count from visible text (e.g. "총 78개")
+        text = str(driver.execute_script("return document.body ? document.body.innerText : ''") or "")
+        m = re.search(r"총\s*([0-9,]+)\s*개", text)
+        if not m:
+            m = re.search(r"([0-9,]+)\s*개", text)
+        if not m:
+            return 0
+        try:
+            return int(m.group(1).replace(",", ""))
+        except Exception:
+            return 0
+
+    expected_total = _detect_total_expected()
+
+    def _count_product_link_candidates() -> int:
+        return int(
+            driver.execute_script(
+                """
+                const links = Array.from(document.querySelectorAll('a[href]'));
+                const seen = new Set();
+                for (const a of links) {
+                    const href = (a.getAttribute('href') || '');
+                    if (!href) continue;
+                    if (href.includes('/products/') || href.includes('/app/goods/') || href.includes('goodsNo=')) {
+                        seen.add(href);
+                    }
+                }
+                return seen.size;
+                """
+            )
+        )
+
+    # Infinite-scroll pages: keep scrolling until product link count stops growing.
+    prev_count = -1
+    stable_rounds = 0
+    for _ in range(40):
+        for href in _capture_product_hrefs():
+            collected_hrefs.add(href)
+        driver.execute_script("window.scrollTo(0, document.body.scrollHeight);")
+        driver.execute_script("window.dispatchEvent(new Event('scroll'));")
+        time.sleep(0.65)
+
+        # Some pages load on small delta-scroll events.
+        driver.execute_script("window.scrollBy(0, -320);")
+        driver.execute_script("window.scrollBy(0, 460);")
+        time.sleep(0.35)
+
+        current_count = _count_product_link_candidates()
+        if current_count > prev_count:
+            prev_count = current_count
+            stable_rounds = 0
+        else:
+            stable_rounds += 1
+
+        # If we already reached detected total count, stop safely.
+        if expected_total > 0 and len(collected_hrefs) >= expected_total:
+            break
+
+        if stable_rounds >= 6:
+            break
+
+    # 일부 목록은 "더보기" 버튼으로 추가 로딩된다.
+    for _ in range(8):
+        for href in _capture_product_hrefs():
+            collected_hrefs.add(href)
+        clicked = driver.execute_script(
+            """
+            const candidates = Array.from(document.querySelectorAll('button, a[role="button"], a'));
+            for (const el of candidates) {
+                const txt = (el.textContent || '').trim();
+                if (!txt) continue;
+                if (txt.includes('더보기') || txt.includes('더 보기') || txt.includes('more')) {
+                    el.click();
+                    return true;
+                }
+            }
+            return false;
+            """
+        )
+        if not clicked:
+            break
+        time.sleep(0.6)
+        driver.execute_script("window.scrollTo(0, document.body.scrollHeight);")
+        time.sleep(0.35)
+
+    # 더보기 이후 한 번 더 안정화 스크롤
+    prev_count = -1
+    stable_rounds = 0
+    for _ in range(24):
+        for href in _capture_product_hrefs():
+            collected_hrefs.add(href)
+        driver.execute_script("window.scrollTo(0, document.body.scrollHeight);")
+        driver.execute_script("window.dispatchEvent(new Event('scroll'));")
+        time.sleep(0.6)
+        current_count = _count_product_link_candidates()
+        if current_count > prev_count:
+            prev_count = current_count
+            stable_rounds = 0
+        else:
+            stable_rounds += 1
+        if expected_total > 0 and len(collected_hrefs) >= expected_total:
+            break
+        if stable_rounds >= 5:
+            break
+
+    # final snapshot
+    for href in _capture_product_hrefs():
+        collected_hrefs.add(href)
+
+    soup = BeautifulSoup(driver.page_source, "html.parser")
+    products: List[Tuple[str, str]] = []
+    seen = set()
+    malformed_count = 0
+    href_candidate_count = len(collected_hrefs)
+
+    for href in sorted(collected_hrefs):
+        full_href = urljoin(target_url, href)
         product_id, product_url = _extract_musinsa_product_id_and_url(full_href)
         if not product_id or not product_url:
             malformed_count += 1
@@ -163,7 +365,200 @@ def _collect_products_from_listing_page(
         seen.add(product_id)
         products.append((product_id, product_url))
 
+    print(
+        f"[queue] page collect snapshot: expected={expected_total or '-'} "
+        f"captured_hrefs={len(collected_hrefs)} unique_products={len(products)}"
+    )
     return products, href_candidate_count, malformed_count
+
+
+def _collect_products_from_listing_page(
+    driver,
+    page_url: str,
+    max_pages: int = 30,
+) -> Tuple[List[Tuple[str, str]], int, int]:
+    """Collect products from first listing page + pagination pages."""
+    # 1) 첫 페이지
+    first_products, first_href_cnt, first_malformed = _collect_products_from_single_page(driver, page_url)
+    first_soup = BeautifulSoup(driver.page_source, "html.parser")
+    page_urls = _discover_pagination_urls(page_url, first_soup)
+
+    all_products: List[Tuple[str, str]] = []
+    seen_ids = set()
+    total_href_candidates = first_href_cnt
+    total_malformed = first_malformed
+
+    for pid, purl in first_products:
+        if pid in seen_ids:
+            continue
+        seen_ids.add(pid)
+        all_products.append((pid, purl))
+
+    # Try to detect displayed total count from first page.
+    expected_total = 0
+    try:
+        body_text = str(driver.execute_script("return document.body ? document.body.innerText : ''") or "")
+        m = re.search(r"총\s*([0-9,]+)\s*개", body_text)
+        if not m:
+            m = re.search(r"([0-9,]+)\s*개", body_text)
+        if m:
+            expected_total = int(m.group(1).replace(",", ""))
+    except Exception:
+        expected_total = 0
+
+    # 2) 페이지네이션 링크 순회
+    traversed = 1
+    tried_page_numbers = set([1])
+    for next_url in page_urls:
+        if traversed >= max_pages:
+            break
+        detected_page_num = _extract_page_num_from_url(next_url)
+        if detected_page_num is not None and detected_page_num in tried_page_numbers:
+            continue
+        products, href_cnt, malformed_cnt = _collect_products_from_single_page(driver, next_url)
+        traversed += 1
+        if detected_page_num is not None:
+            tried_page_numbers.add(detected_page_num)
+        total_href_candidates += href_cnt
+        total_malformed += malformed_cnt
+        for pid, purl in products:
+            if pid in seen_ids:
+                continue
+            seen_ids.add(pid)
+            all_products.append((pid, purl))
+        if expected_total > 0 and len(seen_ids) >= expected_total:
+            return all_products, total_href_candidates, total_malformed
+
+    # 3) 링크 탐색으로 못 찾는 경우를 위해 page=n 강제 순회 보강
+    # - 한두 페이지만 보이는 UI에서도 전체 페이지 수집 가능
+    # - 신규가 2페이지 연속 0건이면 조기 종료
+    consecutive_empty = 0
+    # Important: always start from page=2 so we never skip the second page.
+    # Some UI link scans include duplicate/non-query anchors that can advance
+    # `traversed` without actually visiting page 2.
+    for page_num in range(2, max_pages + 1):
+        if page_num in tried_page_numbers:
+            continue
+        forced_url = _build_forced_page_url(page_url, page_num)
+        products, href_cnt, malformed_cnt = _collect_products_from_single_page(driver, forced_url)
+        total_href_candidates += href_cnt
+        total_malformed += malformed_cnt
+
+        new_count = 0
+        for pid, purl in products:
+            if pid in seen_ids:
+                continue
+            seen_ids.add(pid)
+            all_products.append((pid, purl))
+            new_count += 1
+
+        if new_count == 0:
+            consecutive_empty += 1
+        else:
+            consecutive_empty = 0
+
+        if consecutive_empty >= 2:
+            break
+        if expected_total > 0 and len(seen_ids) >= expected_total:
+            return all_products, total_href_candidates, total_malformed
+
+    # 3-b) query key sweep for hidden pagination styles (page/pageNo/pageNum/p...)
+    if expected_total > 0 and len(seen_ids) < expected_total:
+        page_keys = ("page", "pageNo", "pageNum", "p", "pg")
+        max_needed_page = min(max_pages, max(2, (expected_total + 59) // 60 + 1))
+        for key in page_keys:
+            before_key_count = len(seen_ids)
+            for page_num in range(2, max_needed_page + 1):
+                forced_url = _build_forced_page_url_by_key(page_url, key, page_num)
+                products, href_cnt, malformed_cnt = _collect_products_from_single_page(driver, forced_url)
+                total_href_candidates += href_cnt
+                total_malformed += malformed_cnt
+                for pid, purl in products:
+                    if pid in seen_ids:
+                        continue
+                    seen_ids.add(pid)
+                    all_products.append((pid, purl))
+                if expected_total > 0 and len(seen_ids) >= expected_total:
+                    break
+            if expected_total > 0 and len(seen_ids) >= expected_total:
+                break
+            # if this key did not add anything, quickly continue
+            if len(seen_ids) == before_key_count:
+                continue
+
+    # 4) 스크롤형 + 클라이언트 페이지네이션("다음") 보강
+    #    - 일부 페이지는 URL page 파라미터보다 UI 클릭으로만 다음 데이터가 로드됨.
+    def _try_click_next_page() -> bool:
+        try:
+            return bool(
+                driver.execute_script(
+                    """
+                    function isVisible(el) {
+                      if (!el) return false;
+                      const s = window.getComputedStyle(el);
+                      if (!s || s.display === 'none' || s.visibility === 'hidden') return false;
+                      const r = el.getBoundingClientRect();
+                      return r.width > 0 && r.height > 0;
+                    }
+                    function isDisabled(el) {
+                      const a = (el.getAttribute('aria-disabled') || '').toLowerCase();
+                      if (a === 'true') return true;
+                      if (el.disabled) return true;
+                      const c = (el.className || '').toString().toLowerCase();
+                      return c.includes('disabled');
+                    }
+                    const nodes = Array.from(document.querySelectorAll('a,button,[role="button"]'));
+                    const scored = [];
+                    for (const el of nodes) {
+                      if (!isVisible(el) || isDisabled(el)) continue;
+                      const txt = (el.textContent || '').trim().toLowerCase();
+                      const cls = (el.className || '').toString().toLowerCase();
+                      const rel = (el.getAttribute('rel') || '').toLowerCase();
+                      const aria = (el.getAttribute('aria-label') || '').toLowerCase();
+                      const title = (el.getAttribute('title') || '').toLowerCase();
+                      const href = (el.getAttribute('href') || '').toLowerCase();
+                      let score = 0;
+                      if (txt.includes('다음') || txt.includes('next')) score += 8;
+                      if (aria.includes('다음') || aria.includes('next')) score += 8;
+                      if (title.includes('다음') || title.includes('next')) score += 6;
+                      if (rel === 'next') score += 10;
+                      if (href.includes('page=')) score += 3;
+                      if (cls.includes('page') || cls.includes('pager') || cls.includes('pagination')) score += 3;
+                      if (score > 0) scored.push([score, el]);
+                    }
+                    scored.sort((a, b) => b[0] - a[0]);
+                    if (!scored.length) return false;
+                    scored[0][1].click();
+                    return true;
+                    """
+                )
+            )
+        except Exception:
+            return False
+
+    unchanged_rounds = 0
+    for _ in range(8):
+        before = len(seen_ids)
+        if not _try_click_next_page():
+            break
+        time.sleep(1.1)
+        products, href_cnt, malformed_cnt = _collect_products_from_single_page(driver, driver.current_url)
+        total_href_candidates += href_cnt
+        total_malformed += malformed_cnt
+        for pid, purl in products:
+            if pid in seen_ids:
+                continue
+            seen_ids.add(pid)
+            all_products.append((pid, purl))
+        after = len(seen_ids)
+        if after == before:
+            unchanged_rounds += 1
+        else:
+            unchanged_rounds = 0
+        if unchanged_rounds >= 2:
+            break
+
+    return all_products, total_href_candidates, total_malformed
 
 
 def _read_all_queue_rows(
@@ -340,4 +735,3 @@ def collect_listing_queue_once(
         f"중복={summary['duplicate_rows']} 오류={summary['error_rows']}"
     )
     return summary
-
