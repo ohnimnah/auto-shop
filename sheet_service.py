@@ -242,3 +242,49 @@ def read_urls_from_sheet(
     except Exception as e:
         print(f" URL read failed ({sheet_name}): {e}")
         return []
+
+
+def update_value_by_range(
+    service,
+    spreadsheet_id: str,
+    range_a1: str,
+    value: str,
+    value_input_option: str = "USER_ENTERED",
+) -> bool:
+    """Update one cell/range value by A1 range."""
+    try:
+        service.spreadsheets().values().update(
+            spreadsheetId=spreadsheet_id,
+            range=range_a1,
+            valueInputOption=value_input_option,
+            body={"values": [[value]]},
+        ).execute()
+        return True
+    except Exception as e:
+        print(f" range update failed ({range_a1}): {e}")
+        return False
+
+
+def batch_update_values(
+    service,
+    spreadsheet_id: str,
+    updates: List[Dict[str, object]],
+    value_input_option: str = "USER_ENTERED",
+) -> bool:
+    """Batch update values with `[{range, values}]` payload."""
+    if not updates:
+        return True
+
+    try:
+        body = {
+            "valueInputOption": value_input_option,
+            "data": updates,
+        }
+        service.spreadsheets().values().batchUpdate(
+            spreadsheetId=spreadsheet_id,
+            body=body,
+        ).execute()
+        return True
+    except Exception as e:
+        print(f" batch update failed: {e}")
+        return False

@@ -68,6 +68,7 @@ from app_config import (
     get_default_images_dir,
 )
 from sheet_service import (
+    batch_update_values as svc_batch_update_values,
     column_index_to_letter as svc_column_index_to_letter,
     get_target_sheet_names as svc_get_target_sheet_names,
     get_sheet_name_by_gid as svc_get_sheet_name_by_gid,
@@ -77,6 +78,7 @@ from sheet_service import (
     get_rows_dynamic_values_bulk as svc_get_rows_dynamic_values_bulk,
     get_sheet_header_map as svc_get_sheet_header_map,
     parse_margin_rate as svc_parse_margin_rate,
+    update_value_by_range as svc_update_value_by_range,
     update_cell_by_header as svc_update_cell_by_header,
 )
 from image_service import (
@@ -1242,16 +1244,16 @@ def write_image_paths_only(
         print(f" {sheet_name} {row_num}행: N열이 이미 채워져 있어 건너뜁니다")
         return
 
-    try:
-        service.spreadsheets().values().update(
-            spreadsheetId=SPREADSHEET_ID,
-            range=f"'{sheet_name}'!{IMAGE_PATHS_COLUMN}{row_num}",
-            valueInputOption='USER_ENTERED',
-            body={'values': [[image_paths]]},
-        ).execute()
+    success = svc_update_value_by_range(
+        service=service,
+        spreadsheet_id=SPREADSHEET_ID,
+        range_a1=f"'{sheet_name}'!{IMAGE_PATHS_COLUMN}{row_num}",
+        value=image_paths,
+    )
+    if success:
         print(f" {sheet_name} {row_num}행 저장: N열(image_paths) 업데이트")
-    except Exception as e:
-        print(f" {sheet_name} {row_num}행 N열 저장 실패: {e}")
+    else:
+        print(f" {sheet_name} {row_num}행 N열 저장 실패")
 
 
 def write_to_sheet(
@@ -1271,18 +1273,18 @@ def write_to_sheet(
             print(f" {sheet_name} {row_num}행: 기존 값이 있어 새로 쓸 내용이 없습니다")
             return
 
-        body = {
-            'valueInputOption': 'USER_ENTERED',
-            'data': updates,
-        }
-        service.spreadsheets().values().batchUpdate(
-            spreadsheetId=SPREADSHEET_ID,
-            body=body
-        ).execute()
-        print(
-            f" {sheet_name} {row_num}행 저장: "
-            f"{len(updates)}개 셀 업데이트"
+        success = svc_batch_update_values(
+            service=service,
+            spreadsheet_id=SPREADSHEET_ID,
+            updates=updates,
         )
+        if success:
+            print(
+                f" {sheet_name} {row_num}행 저장: "
+                f"{len(updates)}개 셀 업데이트"
+            )
+        else:
+            print(f" {sheet_name} {row_num}행 저장 실패")
     except Exception as e:
         print(f" {sheet_name} {row_num}행 저장 실패: {e}")
 
