@@ -422,3 +422,172 @@ def extract_brand_en_from_musinsa(driver, product_url: str) -> str:
         return slug.upper().replace("-", " ")
     except Exception:
         return ""
+
+
+def extract_musinsa_categories(soup: BeautifulSoup, mss_state: Dict[str, object]) -> Tuple[str, str, str]:
+    """Extract Musinsa category large/middle/small from state or breadcrumb."""
+    key_candidates = [
+        ("categoryDepth1Name", "categoryDepth2Name", "categoryDepth3Name"),
+        ("dispCatNm1", "dispCatNm2", "dispCatNm3"),
+        ("itemCategoryDepth1Name", "itemCategoryDepth2Name", "itemCategoryDepth3Name"),
+    ]
+    for k1, k2, k3 in key_candidates:
+        v1 = str(mss_state.get(k1, "")).strip()
+        v2 = str(mss_state.get(k2, "")).strip()
+        v3 = str(mss_state.get(k3, "")).strip()
+        if v1 or v2 or v3:
+            return v1, v2, v3
+
+    for container_key in ("category", "categoryInfo", "itemCategory", "displayCategory"):
+        container = mss_state.get(container_key)
+        if not isinstance(container, dict):
+            continue
+        for k1, k2, k3 in key_candidates:
+            v1 = str(container.get(k1, "")).strip()
+            v2 = str(container.get(k2, "")).strip()
+            v3 = str(container.get(k3, "")).strip()
+            if v1 or v2 or v3:
+                return v1, v2, v3
+
+        v1 = str(container.get("depth1Name", "")).strip()
+        v2 = str(container.get("depth2Name", "")).strip()
+        v3 = str(container.get("depth3Name", "")).strip()
+        if v1 or v2 or v3:
+            return v1, v2, v3
+
+    texts: List[str] = []
+    selectors = [
+        'nav[aria-label*="breadcrumb"] a',
+        'nav[aria-label*="Breadcrumb"] a',
+        ".breadcrumb a",
+        '[class*="breadcrumb"] a',
+    ]
+    for selector in selectors:
+        tags = soup.select(selector)
+        if tags:
+            texts = [t.get_text(strip=True) for t in tags if t.get_text(strip=True)]
+            break
+
+    if not texts:
+        return "", "", ""
+
+    blacklist = {"홈", "HOME", "무신사", "MUSINSA"}
+    cleaned = [x for x in texts if x and x not in blacklist]
+    if not cleaned:
+        cleaned = []
+        for script in soup.find_all("script", attrs={"type": "application/ld+json"}):
+            raw_text = script.get_text(strip=True)
+            if not raw_text:
+                continue
+            try:
+                payload = json.loads(raw_text)
+            except Exception:
+                continue
+            candidates = payload if isinstance(payload, list) else [payload]
+            for candidate in candidates:
+                if not isinstance(candidate, dict):
+                    continue
+                if candidate.get("@type") != "BreadcrumbList":
+                    continue
+                items = candidate.get("itemListElement") or []
+                for item in items:
+                    if not isinstance(item, dict):
+                        continue
+                    name = str(item.get("name", "")).strip()
+                    if name and name not in blacklist:
+                        cleaned.append(name)
+        if not cleaned:
+            return "", "", ""
+
+    cats = cleaned[-3:]
+    while len(cats) < 3:
+        cats.insert(0, "")
+    return cats[0], cats[1], cats[2]
+
+
+def normalize_gender_label(raw_value: str) -> str:
+    """Normalize gender-like values into '남성'/'여성'."""
+    value = (raw_value or "").strip().lower()
+    if not value:
+        return ""
+
+    male_tokens = ("남", "남성", "male", "man", "men", "mens", "m")
+    female_tokens = ("여", "여성", "female", "woman", "women", "womens", "w")
+
+    if value in male_tokens:
+        return "남성"
+    if value in female_tokens:
+        return "여성"
+    if any(t in value for t in ("남성", "male", "mens", " men")):
+        return "남성"
+    if any(t in value for t in ("여성", "female", "womens", " women")):
+        return "여성"
+    if value.startswith("m_") or value.endswith("_m"):
+        return "남성"
+    if value.startswith("w_") or value.endswith("_w"):
+        return "여성"
+    return ""
+
+
+def extract_musinsa_gender_large(
+    mss_state: Dict[str, object],
+    cat_large: str = "",
+    cat_middle: str = "",
+    cat_small: str = "",
+) -> str:
+    """Extract gender large category from mss state/category values."""
+    keys = (
+        "sex",
+        "gender",
+        "goodsSex",
+        "goodsGender",
+        "targetSex",
+        "targetGender",
+        "displaySex",
+        "sexCd",
+        "genderCd",
+        "sexCode",
+        "genderCode",
+    )
+
+    values: List[str] = []
+    for k in keys:
+        values.append(str(mss_state.get(k, "")).strip())
+
+    for container_key in ("category", "categoryInfo", "itemCategory", "displayCategory", "goods"):
+        container = mss_state.get(container_key)
+        if not isinstance(container, dict):
+            continue
+        for k in keys:
+            values.append(str(container.get(k, "")).strip())
+
+    values.extend([cat_large, cat_middle, cat_small])
+    for value in values:
+        label = normalize_gender_label(value)
+        if label:
+            return label
+    return ""
+
+
+def remap_categories_with_gender(
+    gender_large: str,
+    cat_large: str,
+    cat_middle: str,
+    cat_small: str,
+) -> Tuple[str, str, str]:
+    """Use gender as large category and shift remaining values."""
+    if not gender_large:
+        return cat_large, cat_middle, cat_small
+
+    rest: List[str] = []
+    for value in (cat_large, cat_middle, cat_small):
+        text = (value or "").strip()
+        if not text:
+            continue
+        if normalize_gender_label(text):
+            continue
+        rest.append(text)
+
+    new_middle = rest[0] if len(rest) > 0 else ""
+    new_small = rest[1] if len(rest) > 1 else ""
+    return gender_large, new_middle, new_small
