@@ -111,7 +111,11 @@ from crawler_service import (
     split_name_and_color as svc_split_name_and_color,
 )
 from pipeline_service import (
+    build_incremental_payload as svc_build_incremental_payload,
     determine_progress_status as svc_determine_progress_status,
+    row_has_existing_output as svc_row_has_existing_output,
+    row_needs_image_download as svc_row_needs_image_download,
+    row_needs_update as svc_row_needs_update,
     is_crawler_ready_status as svc_is_crawler_ready_status,
     is_image_ready_status as svc_is_image_ready_status,
     is_thumbnail_ready_status as svc_is_thumbnail_ready_status,
@@ -1150,37 +1154,28 @@ def build_incremental_payload(
     existing_values: Dict[str, str],
 ) -> List[Dict[str, object]]:
     """기존 값이 비어 있는 셀만 채우는 payload를 구성한다"""
-    sequence = f"{row_num - ROW_START + 1:03d}"
-    candidates = [
-        (SEQUENCE_COLUMN, sequence),
-        (BRAND_COLUMN, product_info.get('brand', '')),
-        (BRAND_EN_COLUMN, product_info.get('brand_en', '')),
-        (PRODUCT_NAME_KR_COLUMN, product_info.get('product_name_kr', '')),
-        (MUSINSA_SKU_COLUMN, product_info.get('musinsa_sku', '')),
-        (COLOR_KR_COLUMN, product_info.get('color_kr', '')),
-        (SIZE_COLUMN, product_info.get('size', '')),
-        (ACTUAL_SIZE_COLUMN, product_info.get('actual_size', '')),
-        (PRICE_COLUMN, product_info.get('price', '')),
-        (BAIMA_SELL_PRICE_COLUMN, product_info.get('buyma_price', '')),
-        (IMAGE_PATHS_COLUMN, product_info.get('image_paths', '')),
-        (SHIPPING_COST_COLUMN, product_info.get('shipping_cost', '')),
-        (CATEGORY_LARGE_COLUMN, product_info.get('musinsa_category_large', '')),
-        (CATEGORY_MIDDLE_COLUMN, product_info.get('musinsa_category_middle', '')),
-        (CATEGORY_SMALL_COLUMN, product_info.get('musinsa_category_small', '')),
-    ]
-
-    updates: List[Dict[str, object]] = []
-    for column, new_value in candidates:
-        if is_empty_cell(new_value):
-            continue
-
-        current_value = existing_values.get(column, "")
-        if is_empty_cell(current_value):
-            updates.append({
-                'range': f"'{sheet_name}'!{column}{row_num}",
-                'values': [[new_value]],
-            })
-    return updates
+    return svc_build_incremental_payload(
+        sheet_name=sheet_name,
+        row_num=row_num,
+        row_start=ROW_START,
+        product_info=product_info,
+        existing_values=existing_values,
+        sequence_column=SEQUENCE_COLUMN,
+        brand_column=BRAND_COLUMN,
+        brand_en_column=BRAND_EN_COLUMN,
+        product_name_kr_column=PRODUCT_NAME_KR_COLUMN,
+        musinsa_sku_column=MUSINSA_SKU_COLUMN,
+        color_kr_column=COLOR_KR_COLUMN,
+        size_column=SIZE_COLUMN,
+        actual_size_column=ACTUAL_SIZE_COLUMN,
+        price_column=PRICE_COLUMN,
+        buyma_sell_price_column=BAIMA_SELL_PRICE_COLUMN,
+        image_paths_column=IMAGE_PATHS_COLUMN,
+        shipping_cost_column=SHIPPING_COST_COLUMN,
+        category_large_column=CATEGORY_LARGE_COLUMN,
+        category_middle_column=CATEGORY_MIDDLE_COLUMN,
+        category_small_column=CATEGORY_SMALL_COLUMN,
+    )
 
 
 def row_needs_update(existing_values: Dict[str, str], require_image_paths: bool = True) -> bool:
@@ -1188,51 +1183,44 @@ def row_needs_update(existing_values: Dict[str, str], require_image_paths: bool 
 
     require_image_paths=False면 N열(image_paths) 빈칸은 대상에서 제외한다.
     """
-    target_columns = [
-        BRAND_COLUMN,
-        BRAND_EN_COLUMN,
-        PRODUCT_NAME_KR_COLUMN,
-        MUSINSA_SKU_COLUMN,
-        COLOR_KR_COLUMN,
-        SIZE_COLUMN,
-        ACTUAL_SIZE_COLUMN,
-        PRICE_COLUMN,
-        BAIMA_SELL_PRICE_COLUMN,
-        SHIPPING_COST_COLUMN,
-    ]
-    if require_image_paths:
-        target_columns.append(IMAGE_PATHS_COLUMN)
-
-    for column in target_columns:
-        if is_empty_cell(existing_values.get(column, "")):
-            return True
-    return False
+    return svc_row_needs_update(
+        existing_values=existing_values,
+        require_image_paths=require_image_paths,
+        brand_column=BRAND_COLUMN,
+        brand_en_column=BRAND_EN_COLUMN,
+        product_name_kr_column=PRODUCT_NAME_KR_COLUMN,
+        musinsa_sku_column=MUSINSA_SKU_COLUMN,
+        color_kr_column=COLOR_KR_COLUMN,
+        size_column=SIZE_COLUMN,
+        actual_size_column=ACTUAL_SIZE_COLUMN,
+        price_column=PRICE_COLUMN,
+        buyma_sell_price_column=BAIMA_SELL_PRICE_COLUMN,
+        shipping_cost_column=SHIPPING_COST_COLUMN,
+        image_paths_column=IMAGE_PATHS_COLUMN,
+    )
 
 
 def row_has_existing_output(existing_values: Dict[str, str]) -> bool:
     """자동 입력 대상 열에 이미 값이 하나라도 있으면 True"""
-    target_columns = [
-        BRAND_COLUMN,
-        BRAND_EN_COLUMN,
-        PRODUCT_NAME_KR_COLUMN,
-        MUSINSA_SKU_COLUMN,
-        COLOR_KR_COLUMN,
-        SIZE_COLUMN,
-        ACTUAL_SIZE_COLUMN,
-        PRICE_COLUMN,
-        BAIMA_SELL_PRICE_COLUMN,
-        IMAGE_PATHS_COLUMN,
-        SHIPPING_COST_COLUMN,
-    ]
-    for column in target_columns:
-        if not is_empty_cell(existing_values.get(column, "")):
-            return True
-    return False
+    return svc_row_has_existing_output(
+        existing_values=existing_values,
+        brand_column=BRAND_COLUMN,
+        brand_en_column=BRAND_EN_COLUMN,
+        product_name_kr_column=PRODUCT_NAME_KR_COLUMN,
+        musinsa_sku_column=MUSINSA_SKU_COLUMN,
+        color_kr_column=COLOR_KR_COLUMN,
+        size_column=SIZE_COLUMN,
+        actual_size_column=ACTUAL_SIZE_COLUMN,
+        price_column=PRICE_COLUMN,
+        buyma_sell_price_column=BAIMA_SELL_PRICE_COLUMN,
+        image_paths_column=IMAGE_PATHS_COLUMN,
+        shipping_cost_column=SHIPPING_COST_COLUMN,
+    )
 
 
 def row_needs_image_download(existing_values: Dict[str, str]) -> bool:
     """N열(image_paths)이 비어있으면 이미지 저장 대상으로 본다."""
-    return is_empty_cell(existing_values.get(IMAGE_PATHS_COLUMN, ""))
+    return svc_row_needs_image_download(existing_values, IMAGE_PATHS_COLUMN)
 
 
 def write_image_paths_only(
