@@ -141,6 +141,7 @@ from pipeline_service import (
     is_thumbnail_ready_status as svc_is_thumbnail_ready_status,
 )
 from buyma_service import (
+    fetch_buyma_lowest_price as svc_fetch_buyma_lowest_price,
     format_price as svc_format_price,
     extract_buyma_item_page_price as svc_extract_buyma_item_page_price,
     extract_buyma_listing_entries as svc_extract_buyma_listing_entries,
@@ -1238,123 +1239,7 @@ def normalize_buyma_query(product_name: str, brand: str) -> List[str]:
 
 def fetch_buyma_lowest_price(driver, product_name: str, brand: str, musinsa_sku: str = "") -> str:
     """품번 우선으로 BUYMA 첫 페이지를 검색해 최저가를 반환하고, 실패 시 이름 검색으로 재시도한다"""
-    print(f"\n>>> BUYMA 최저가 검색 시작")
-    print(f"    상품명: {product_name}, 브랜드: {brand}, 품번: {musinsa_sku}")
-
-    sku_query = re.sub(r'\s+', ' ', (musinsa_sku or '').strip())
-
-    cleaned_name = re.sub(r'\s+', ' ', (product_name or '').strip())
-    cleaned_brand = re.sub(r'\s+', ' ', (brand or '').strip())
-    english_parts = re.findall(r'[A-Za-z0-9\s\-/]+', cleaned_name)
-    english_name = re.sub(r'\s+', ' ', ' '.join(english_parts)).strip()
-    english_brand_parts = re.findall(r'[A-Za-z0-9\s\-/]+', cleaned_brand)
-    english_brand = re.sub(r'\s+', ' ', ' '.join(english_brand_parts)).strip()
-
-    # 검색 우선순위: 품번 -> 영문상품명 -> 영문 조합 (한글 검색 금지)
-    query_candidates = [
-        sku_query,
-        f"{english_brand} {english_name}".strip() if english_brand and english_name else "",
-        english_name,
-    ]
-
-    if not sku_query and not english_name and english_brand:
-        query_candidates.append(english_brand)
-
-    queries: List[str] = []
-    seen = set()
-    for candidate in query_candidates:
-        query = re.sub(r'\s+', ' ', (candidate or '').strip())
-        # BUYMA 검색은 품번/영문만 사용 (한글 포함 질의 금지)
-        if re.search(r'[\uac00-\ud7a3]', query):
-            continue
-        if len(query) < 2 or query in seen:
-            continue
-        seen.add(query)
-        queries.append(query)
-
-    if not queries:
-        print("    [검색 질의 없음] 빈 값 반환")
-        return ""
-
-    print(f"    검색 시도 순서: {queries}")
-
-    for idx, query in enumerate(queries, start=1):
-        try:
-            encoded = urllib.parse.quote(query)
-            search_url = f"https://www.buyma.com/r/{encoded}/"
-            print(f"  [{idx}/{len(queries)}] BUYMA 검색: {query}")
-            print(f"    검색 URL: {search_url}")
-            driver.get(search_url)
-            WebDriverWait(driver, 10).until(
-                EC.presence_of_element_located((By.TAG_NAME, "body"))
-            )
-            time.sleep(3)
-
-            soup = BeautifulSoup(driver.page_source, 'html.parser')
-
-            entries = extract_buyma_listing_entries(soup)
-            print(f"    발견된 상품카드(첫 페이지): {len(entries)}개")
-
-            # 검색 결과 카드 URL로 상세페이지 진입 후 가격 확인
-            detail_prices: List[int] = []
-            listing_matched_prices: List[int] = []
-            candidate_entries = entries[:10]
-            print(f"    상세페이지 확인 대상: {len(candidate_entries)}개")
-
-            # 카드 수준에서는 더 엄격하게 제목 일치 여부를 본다.
-            for entry in candidate_entries:
-                if is_relevant_buyma_listing_entry(
-                    str(entry.get('title', '')),
-                    sku_query,
-                    english_name,
-                    english_brand,
-                ):
-                    listing_matched_prices.append(int(entry['price']))
-
-            for entry in candidate_entries:
-                item_url = str(entry.get('url', '')).strip()
-                if not item_url:
-                    continue
-                try:
-                    driver.get(item_url)
-                    WebDriverWait(driver, 10).until(
-                        EC.presence_of_element_located((By.TAG_NAME, "body"))
-                    )
-                    time.sleep(1.2)
-
-                    item_soup = BeautifulSoup(driver.page_source, 'html.parser')
-                    if not is_relevant_buyma_item(item_soup, sku_query, english_name, english_brand):
-                        continue
-
-                    detail_price = extract_buyma_item_page_price(item_soup)
-                    if detail_price > 0:
-                        detail_prices.append(detail_price)
-                except Exception as detail_error:
-                    print(f"    상세페이지 스킵: {detail_error}")
-
-            # 상세페이지에서 검증된 가격을 우선 사용하고, 상세 진입이 모두 실패했을 때만 카드 가격으로 보정
-            combined_prices = list(detail_prices)
-            if not combined_prices:
-                combined_prices.extend(listing_matched_prices)
-
-            if combined_prices:
-                unique_prices = sorted(set(combined_prices))
-                best_price = min(unique_prices)
-                detail_min = min(detail_prices) if detail_prices else None
-                listing_min = min(listing_matched_prices) if listing_matched_prices else None
-                print(
-                    f"    셀러가격 통합 통계: {len(unique_prices)}개, "
-                    f"최저: {best_price:,}엔, 최고: {max(unique_prices):,}엔, "
-                    f"상세최저: {detail_min if detail_min else 'none'}, 카드최저: {listing_min if listing_min else 'none'}"
-                )
-                return f"{best_price:,}"
-
-            print("    해당 질의에서는 가격을 찾지 못함")
-        except Exception as e:
-            print(f"    검색 오류: {e}")
-
-    print("  모든 검색 질의 실패 - 빈 값 반환")
-    return ""
+    return svc_fetch_buyma_lowest_price(driver, product_name, brand, musinsa_sku)
 
 
 def extract_musinsa_categories(soup: BeautifulSoup, mss_state: Dict[str, object]) -> Tuple[str, str, str]:
