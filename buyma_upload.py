@@ -247,19 +247,35 @@ def read_upload_rows(service, sheet_name: str, specific_row: int = 0) -> List[Di
         buyma_price = cell('M')
 
         if not url or not product_name or not buyma_price:
+            if specific_row and idx == specific_row:
+                missing = []
+                if not url:
+                    missing.append("URL(B열)")
+                if not product_name:
+                    missing.append("상품명(E열)")
+                if not buyma_price:
+                    missing.append("바이마판매가(M열)")
+                print(f"  {idx}행 제외: 필수값 누락 -> {', '.join(missing)}")
             continue
 
         progress_status = cell_by_index(status_index)
         normalized_status = (progress_status or "").strip()
-        if normalized_status == STATUS_COMPLETED:
-            print(f"  {idx}행 건너뜀 (진행상태: {progress_status})")
-            continue
+        # 특정 행 테스트 모드에서는 상태 필터를 우회한다.
+        if not specific_row:
+            if normalized_status == STATUS_COMPLETED:
+                print(f"  {idx}행 건너뜀 (진행상태: {progress_status})")
+                continue
 
-        if normalized_status in {STATUS_UPLOADING, "UPLOADING"}:
-            continue
+            if normalized_status in {STATUS_UPLOADING, "UPLOADING"}:
+                continue
 
-        if status_index is not None and normalized_status not in {STATUS_UPLOAD_READY, STATUS_THUMBNAILS_DONE, "THUMBNAILS_DONE", "업로드진행대기"}:
-            continue
+            if status_index is not None and normalized_status not in {
+                STATUS_UPLOAD_READY,
+                STATUS_THUMBNAILS_DONE,
+                "THUMBNAILS_DONE",
+                "업로드진행대기",
+            }:
+                continue
 
         v_cat = cell('V')
         w_cat = cell('W')
@@ -2895,6 +2911,9 @@ def fill_buyma_form(driver, row_data: Dict[str, str]) -> str:
                 print(f"  카테고리({cat_source}): {cat1} > {cat2} > {cat3}")
                 # ?카테고리 ?택
                 selected_cat1 = _select_category_by_arrow(driver, 0, cat1)
+                if not selected_cat1:
+                    # 대카테고리는 표기 흔들림이 잦아서 부분 매칭을 추가 시도한다.
+                    selected_cat1 = _find_best_option_by_arrow(driver, 0, cat1, fallback_other=False)
                 if (not selected_cat1) and cat_source.startswith("시트"):
                     # 시트값으로 실패하면 기존 자동추론으로 한 번 fallback
                     f1, f2, f3 = _infer_buyma_category(
@@ -2906,6 +2925,8 @@ def fill_buyma_form(driver, row_data: Dict[str, str]) -> str:
                         print(f"  △ 시트 카테고리 미매칭, 자동추론 fallback: {f1} > {f2} > {f3}")
                         cat1, cat2, cat3 = f1, f2, f3
                         selected_cat1 = _select_category_by_arrow(driver, 0, cat1)
+                        if not selected_cat1:
+                            selected_cat1 = _find_best_option_by_arrow(driver, 0, cat1, fallback_other=False)
 
                 if selected_cat1:
                     print(f"  대카테: {cat1}")
@@ -3177,7 +3198,7 @@ def fill_buyma_form(driver, row_data: Dict[str, str]) -> str:
                             or _check_no_variation_option(driver, prefer_shitei_nashi=True)
                         )
                         ref_ok = _force_reference_size_shitei_nashi(driver, panel=panel)
-                        if no_var_ok or ref_ok:
+                        if no_var_ok or ref_ok:
                             if actual_size_text:
                                 filled_detail = _fill_size_edit_details(driver, actual_size_text)
                                 if filled_detail:
@@ -3192,7 +3213,7 @@ def fill_buyma_form(driver, row_data: Dict[str, str]) -> str:
 
                     # 0) 테이블 기반 사이즈 일괄 입력 경로 우선
                     table_filled = _fill_size_table_rows(driver, panel, size_text)
-                    if table_filled:
+                    if table_filled:
                         if actual_size_text:
                             filled_detail = _fill_size_edit_details(driver, actual_size_text)
                             if filled_detail:
@@ -3290,7 +3311,7 @@ def fill_buyma_form(driver, row_data: Dict[str, str]) -> str:
                         or _check_no_variation_option(driver, prefer_shitei_nashi=True)
                     )
                     ref_ok = _force_reference_size_shitei_nashi(driver)
-                    if no_var_ok or ref_ok:
+                    if no_var_ok or ref_ok:
                         if actual_size_text:
                             filled_detail = _fill_size_edit_details(driver, actual_size_text)
                             if filled_detail:

@@ -1302,12 +1302,6 @@ class AutoShopLauncher(tk.Tk):
         self._sync_stage_from_action(action)
         self.status_var.set("작전 준비중")
 
-        # BUYMA ?낅줈???≪뀡? 釉뚮씪?곗?/?낅젰 ?뺤씤???꾪빐 ?곕???李쎌뿉??吏곸젒 ?ㅽ뻾
-        if action in {"upload-review", "upload-auto"}:
-            self.status_var.set("터미널 업로드 실행")
-            self._start_command_in_terminal(action)
-            return
-
         command = self._build_command(action)
         self._start_command(command)
 
