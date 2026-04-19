@@ -12,7 +12,6 @@ import re
 import sys
 import time
 import urllib.parse
-import urllib.request
 from typing import Dict, List, Tuple
 from app_config import (
     ACTUAL_SIZE_COLUMN,
@@ -70,6 +69,10 @@ from app_config import (
 )
 from sheet_service import (
     column_index_to_letter as svc_column_index_to_letter,
+    get_target_sheet_names as svc_get_target_sheet_names,
+    get_sheet_name_by_gid as svc_get_sheet_name_by_gid,
+    is_url_cell as svc_is_url_cell,
+    read_urls_from_sheet as svc_read_urls_from_sheet,
     get_row_dynamic_values as svc_get_row_dynamic_values,
     get_rows_dynamic_values_bulk as svc_get_rows_dynamic_values_bulk,
     get_sheet_header_map as svc_get_sheet_header_map,
@@ -79,16 +82,33 @@ from sheet_service import (
 from image_service import (
     build_thumbnail_brand as svc_build_thumbnail_brand,
     create_thumbnail_for_folder as svc_create_thumbnail_for_folder,
+    download_brand_logo as svc_download_brand_logo,
+    download_thumbnail_images as svc_download_thumbnail_images,
+    extract_brand_logo_url as svc_extract_brand_logo_url,
     resolve_image_folder_from_paths as svc_resolve_image_folder_from_paths,
 )
 from crawler_service import (
     build_image_folder_name as svc_build_image_folder_name,
     build_image_identity_key as svc_build_image_identity_key,
+    clean_product_name as svc_clean_product_name,
+    extract_actual_size_text as svc_extract_actual_size_text,
+    extract_brand_en_from_musinsa as svc_extract_brand_en_from_musinsa,
+    extract_brand_text as svc_extract_brand_text,
+    extract_color_from_name as svc_extract_color_from_name,
+    extract_mss_product_state as svc_extract_mss_product_state,
     extract_musinsa_thumbnail_urls as svc_extract_musinsa_thumbnail_urls,
+    extract_product_json as svc_extract_product_json,
+    fetch_actual_size as svc_fetch_actual_size,
+    fetch_goods_options as svc_fetch_goods_options,
     fetch_json as svc_fetch_json,
+    get_color_name_map as svc_get_color_name_map,
     has_hangul as svc_has_hangul,
+    is_color_count_placeholder as svc_is_color_count_placeholder,
     normalize_image_source as svc_normalize_image_source,
+    normalize_english_color as svc_normalize_english_color,
+    normalize_korean_color as svc_normalize_korean_color,
     sanitize_path_component as svc_sanitize_path_component,
+    split_name_and_color as svc_split_name_and_color,
 )
 
 # Windows cp949 터미널에서 유니코드 출력 오류 방지
@@ -415,59 +435,28 @@ def get_sheets_service():
 
 def get_sheet_name_by_gid(service, gid: int) -> str:
     """GID로 시트 이름을 찾는다"""
-    try:
-        spreadsheet = service.spreadsheets().get(spreadsheetId=SPREADSHEET_ID).execute()
-        for sheet in spreadsheet.get('sheets', []):
-            props = sheet.get('properties', {})
-            if props.get('sheetId') == gid:
-                return props.get('title')
-    except Exception as e:
-        print(f" 시트 메타데이터 조회 실패: {e}")
-    return ""
+    return svc_get_sheet_name_by_gid(service, SPREADSHEET_ID, gid)
 
 
 def get_target_sheet_names(service) -> List[str]:
     """SHEET_GIDS로 시트 이름을 찾거나 default sheet name을 반환"""
-    sheet_names = []
-    for gid in SHEET_GIDS:
-        title = get_sheet_name_by_gid(service, gid)
-        if title:
-            sheet_names.append(title)
-        else:
-            print(f" GID {gid}에 해당하는 시트 이름을 찾을 수 없습니다")
-
-    if not sheet_names:
-        sheet_names = [SHEET_NAME]
-        print(f" GID 기반 시트 이름 찾기에 실패했습니다. 기본 시트 이름 '{SHEET_NAME}'을(를) 사용합니다.")
-    return sheet_names
+    return svc_get_target_sheet_names(service, SPREADSHEET_ID, SHEET_GIDS, SHEET_NAME)
 
 
 def is_url_cell(value: str) -> bool:
     """셀값이 URL인지 감지"""
-    if not isinstance(value, str):
-        return False
-    value = value.strip()
-    return value.startswith('http://') or value.startswith('https://')
+    return svc_is_url_cell(value)
 
 
 def read_urls_from_sheet(service, sheet_name: str) -> List[Tuple[int, str]]:
     """Google Sheets에서 URL을 읽어 row 번호와 URL 목록을 반환"""
-    try:
-        result = service.spreadsheets().values().get(
-            spreadsheetId=SPREADSHEET_ID,
-            range=f"'{sheet_name}'!{URL_COLUMN}{ROW_START}:{URL_COLUMN}1000"
-        ).execute()
-        values = result.get('values', [])
-        rows = []
-        for index, row in enumerate(values, start=ROW_START):
-            if row and row[0].strip():
-                url = row[0].strip()
-                if is_url_cell(url):
-                    rows.append((index, url))
-        return rows
-    except Exception as e:
-        print(f" URL read failed ({sheet_name}): {e}")
-        return []
+    return svc_read_urls_from_sheet(
+        service,
+        SPREADSHEET_ID,
+        sheet_name,
+        URL_COLUMN,
+        ROW_START,
+    )
 
 
 def has_hangul(text: str) -> bool:
@@ -516,420 +505,98 @@ def extract_musinsa_thumbnail_urls(
 
 def download_thumbnail_images(image_urls: List[str], folder_name: str) -> str:
     """이미지를 로컬 images 폴더에 저장하고 상대 경로 목록을 반환한다"""
-    if not image_urls:
-        return ""
-
-    from datetime import date as _date
-    date_folder = _date.today().strftime("%Y%m%d")
-    image_dir = os.path.join(IMAGES_ROOT, date_folder, sanitize_path_component(folder_name))
-    os.makedirs(image_dir, exist_ok=True)
-
-    saved_paths: List[str] = []
-    for index, image_url in enumerate(image_urls[:MAX_THUMBNAIL_IMAGES], start=1):
-        try:
-            parsed = urllib.parse.urlparse(image_url)
-            ext = os.path.splitext(parsed.path)[1].lower()
-            if ext not in {'.jpg', '.jpeg', '.png', '.webp'}:
-                ext = '.jpg'
-
-            file_name = f"{index:02d}{ext}"
-            file_path = os.path.join(image_dir, file_name)
-            request = urllib.request.Request(image_url, headers={'User-Agent': 'Mozilla/5.0'})
-            with urllib.request.urlopen(request, timeout=30) as response:
-                with open(file_path, 'wb') as image_file:
-                    image_file.write(response.read())
-
-            saved_paths.append(file_path.replace('\\', '/'))
-        except Exception as image_error:
-            print(f"    이미지 다운로드 스킵: {image_error}")
-
-    return ','.join(saved_paths)
+    return svc_download_thumbnail_images(
+        image_urls=image_urls,
+        folder_name=folder_name,
+        images_root=IMAGES_ROOT,
+        max_thumbnail_images=MAX_THUMBNAIL_IMAGES,
+    )
 
 
 def extract_brand_logo_url(soup: BeautifulSoup, product_json: Dict[str, object]) -> str:
     """Extract brand logo URL from Musinsa page/json."""
-    candidates: List[str] = []
-
-    def add_candidate(src: str):
-        normalized = normalize_image_source(src or "")
-        if normalized and normalized not in candidates:
-            candidates.append(normalized)
-
-    if isinstance(product_json, dict):
-        brand_obj = product_json.get('brand')
-        if isinstance(brand_obj, dict):
-            for key in ('logoImageUrl', 'logoImage', 'logoUrl', 'logo', 'imageUrl', 'image', 'thumbnail'):
-                val = brand_obj.get(key)
-                if isinstance(val, str):
-                    add_candidate(val)
-
-    for img in soup.select('a[href*="/brand/"] img'):
-        for attr in ('src', 'data-src', 'data-original', 'data-lazy-src'):
-            src = img.get(attr, '')
-            if src:
-                add_candidate(src)
-
-    for m in soup.select('meta[property="og:image"], meta[name="twitter:image"]'):
-        src = m.get('content', '')
-        if src and ('brand' in src.lower() or 'logo' in src.lower()):
-            add_candidate(src)
-
-    for url in candidates:
-        lower = url.lower()
-        if 'brand' in lower or 'logo' in lower:
-            return url
-    return candidates[0] if candidates else ""
+    return svc_extract_brand_logo_url(soup, product_json)
 
 
 def download_brand_logo(logo_url: str, folder_name: str, image_paths: str = "") -> str:
     """Save brand logo as __brand_logo.png in product image folder."""
-    if not logo_url:
-        return ""
-
-    image_dir = resolve_image_folder_from_paths(image_paths)
-    if not image_dir:
-        from datetime import date as _date
-        date_folder = _date.today().strftime("%Y%m%d")
-        image_dir = os.path.join(IMAGES_ROOT, date_folder, sanitize_path_component(folder_name))
-    os.makedirs(image_dir, exist_ok=True)
-
-    try:
-        logo_path = os.path.join(image_dir, "__brand_logo.png")
-        request = urllib.request.Request(logo_url, headers={'User-Agent': 'Mozilla/5.0'})
-        with urllib.request.urlopen(request, timeout=30) as response:
-            raw_bytes = response.read()
-        try:
-            from io import BytesIO
-            from PIL import Image
-
-            with Image.open(BytesIO(raw_bytes)) as img:
-                img.convert("RGBA").save(logo_path, format="PNG")
-        except Exception:
-            # Pillow 변환 실패 시에도 파일은 남기되, 확장자는 PNG로 고정한다.
-            with open(logo_path, 'wb') as f:
-                f.write(raw_bytes)
-        print(f"    브랜드 로고 저장: {logo_path}")
-        return logo_path.replace('\\', '/')
-    except Exception as e:
-        print(f"    브랜드 로고 저장 실패: {e}")
-        return ""
-
-
-COLOR_NAME_MAP = None
+    return svc_download_brand_logo(
+        logo_url=logo_url,
+        folder_name=folder_name,
+        images_root=IMAGES_ROOT,
+        image_paths=image_paths,
+    )
 
 
 def get_color_name_map() -> Dict[str, str]:
     """무신사 색상 코드표를 가져온다"""
-    global COLOR_NAME_MAP
-    if COLOR_NAME_MAP is not None:
-        return COLOR_NAME_MAP
-
-    try:
-        payload = fetch_json('https://goods-detail.musinsa.com/api2/goods/color-images')
-        color_images = payload.get('data', {}).get('colorImages', [])
-        COLOR_NAME_MAP = {
-            str(item.get('colorId')): str(item.get('colorName', '')).strip()
-            for item in color_images
-            if item.get('colorId') is not None and item.get('colorName')
-        }
-    except Exception:
-        COLOR_NAME_MAP = {}
-    return COLOR_NAME_MAP
+    return svc_get_color_name_map()
 
 
 def fetch_goods_options(goods_no: str, goods_sale_type: str, opt_kind_cd: str) -> Dict[str, object]:
     """상품 옵션 정보를 가져온다"""
-    if not goods_no:
-        return {}
-
-    sale_type = goods_sale_type or 'SALE'
-    opt_kind = opt_kind_cd or 'CLOTHES'
-    url = f'https://goods-detail.musinsa.com/api2/goods/{goods_no}/options?goodsSaleType={sale_type}&optKindCd={opt_kind}'
-    try:
-        payload = fetch_json(url)
-        return payload.get('data', {})
-    except Exception:
-        return {}
+    return svc_fetch_goods_options(goods_no, goods_sale_type, opt_kind_cd)
 
 
 def fetch_actual_size(goods_no: str) -> Dict[str, object]:
     """상품 실측 사이즈 정보를 가져온다"""
-    if not goods_no:
-        return {}
-
-    url = f'https://goods-detail.musinsa.com/api2/goods/{goods_no}/actual-size'
-    try:
-        payload = fetch_json(url)
-        return payload.get('data', {})
-    except Exception:
-        return {}
+    return svc_fetch_actual_size(goods_no)
 
 
 def extract_actual_size_text(goods_no: str) -> str:
     """무신사 실측 API에서 실측표 텍스트를 추출해 한 줄 문자열로 반환한다."""
-    data = fetch_actual_size(goods_no)
-    if not isinstance(data, dict):
-        return ""
-
-    rows = data.get("sizes")
-    if not isinstance(rows, list):
-        return ""
-
-    result_rows: List[str] = []
-    for row in rows:
-        if not isinstance(row, dict):
-            continue
-
-        size_name = str(row.get("name", "")).strip()
-        values = row.get("values")
-        if not isinstance(values, list) or not values:
-            # Some Musinsa responses use "items" instead of "values"
-            values = row.get("items")
-        if not isinstance(values, list) or not values:
-            continue
-
-        parts: List[str] = []
-        for item in values:
-            if not isinstance(item, dict):
-                continue
-            measure_name = str(item.get("name", "")).strip()
-            raw_value = item.get("value", "")
-            if isinstance(raw_value, (int, float)):
-                measure_value = f"{raw_value:g}"
-            else:
-                measure_value = str(raw_value).strip()
-            if not measure_name or not measure_value:
-                continue
-            parts.append(f"{measure_name} {measure_value}")
-
-        if not parts:
-            continue
-
-        if size_name:
-            result_rows.append(f"{size_name}: {', '.join(parts)}")
-        else:
-            result_rows.append(", ".join(parts))
-
-    return " | ".join(result_rows)
+    return svc_extract_actual_size_text(goods_no)
 
 
 def extract_product_json(soup: BeautifulSoup) -> Dict[str, object]:
     """페이지 내 JSON-LD Product 데이터를 추출한다"""
-    for script in soup.find_all('script', attrs={'type': 'application/ld+json'}):
-        raw_text = script.get_text(strip=True)
-        if not raw_text:
-            continue
-        try:
-            payload = json.loads(raw_text)
-        except json.JSONDecodeError:
-            continue
-
-        candidates = payload if isinstance(payload, list) else [payload]
-        for candidate in candidates:
-            if isinstance(candidate, dict) and candidate.get('@type') == 'Product':
-                return candidate
-    return {}
+    return svc_extract_product_json(soup)
 
 
 def extract_mss_product_state(soup: BeautifulSoup) -> Dict[str, object]:
     """window.__MSS__.product.state 또는 __MSS_FE__.product.state를 추출한다"""
-    patterns = [
-        r'window\.__MSS__\.product\.state\s*=\s*(\{.*?\});',
-        r'window\.__MSS_FE__\.product\.state\s*=\s*(\{.*?\});',
-    ]
-
-    for script in soup.find_all('script'):
-        script_text = script.get_text(strip=False)
-        if not script_text:
-            continue
-
-        for pattern in patterns:
-            match = re.search(pattern, script_text, re.DOTALL)
-            if not match:
-                continue
-            try:
-                return json.loads(match.group(1))
-            except json.JSONDecodeError:
-                continue
-    return {}
+    return svc_extract_mss_product_state(soup)
 
 
 def clean_product_name(name: str) -> str:
     """상품명에서 색상/품번 접미부를 제거한다"""
-    if not name:
-        return "상품명 미확인"
-
-    cleaned = re.sub(r'\s*/\s*[A-Z0-9-]+$', '', name).strip()
-    if ' - ' in cleaned:
-        cleaned = cleaned.split(' - ', 1)[0].strip()
-    cleaned = re.sub(r'\s+(?:M|W|K|FREE|O/S|OS)$', '', cleaned, flags=re.IGNORECASE).strip()
-    return cleaned or "상품명 미확인"
+    return svc_clean_product_name(name)
 
 
 def split_name_and_color(raw_name: str) -> Tuple[str, str]:
     """상품명과 색상 접미부를 분리한다"""
-    if not raw_name:
-        return "", ""
-
-    text = re.sub(r'\s*/\s*[A-Z0-9-]+$', '', raw_name).strip()
-    if ' - ' not in text:
-        return text, ""
-
-    name_part, color_part = text.split(' - ', 1)
-    return name_part.strip(), color_part.strip()
+    return svc_split_name_and_color(raw_name)
 
 
 def extract_color_from_name(raw_name: str) -> str:
     """???? ?? ?? ??? ???? ???? ????"""
-    if not raw_name:
-        return ""
-
-    cleaned = re.sub(r'\s*/\s*[A-Z0-9-]+$', '', raw_name).strip()
-    _, color_part = split_name_and_color(cleaned)
-    if color_part and not is_color_count_placeholder(color_part):
-        return color_part
-
-    bracket_match = re.search(r'\[([^\[\]]{1,50})\]\s*$', cleaned)
-    if bracket_match:
-        candidate = bracket_match.group(1).strip()
-        if not is_color_count_placeholder(candidate):
-            return candidate
-
-    paren_match = re.search(r'\(([^()]{1,50})\)\s*$', cleaned)
-    if paren_match:
-        candidate = paren_match.group(1).strip()
-        if (
-            not is_color_count_placeholder(candidate)
-            and (any(token in candidate for token in ['/', ',', '-', ':']) or has_hangul(candidate))
-        ):
-            return candidate
-
-    return ""
+    return svc_extract_color_from_name(raw_name)
 
 
 def is_color_count_placeholder(text: str) -> bool:
     """'2color', '4 colors', '3??' ?? ?? ???? ????."""
-    value = (text or "").strip().lower()
-    if not value:
-        return False
-    compact = re.sub(r'\s+', '', value)
-
-    # english patterns: 2color, 4colors, color3, colours2
-    if re.fullmatch(r'^\d+(?:color|colors|colour|colours)$', compact):
-        return True
-    if re.fullmatch(r'^(?:color|colors|colour|colours)\d+$', compact):
-        return True
-
-    # korean patterns: 2??, 4??, ??3, ??2
-    korean_suffixes = ("\uceec\ub7ec", "\uc0c9\uc0c1")
-    m_prefix = re.fullmatch(r'^(\d+)(.+)$', compact)
-    if m_prefix and m_prefix.group(2) in korean_suffixes:
-        return True
-    m_suffix = re.fullmatch(r'^(.+?)(\d+)$', compact)
-    if m_suffix and m_suffix.group(1) in korean_suffixes:
-        return True
-    return False
+    return svc_is_color_count_placeholder(text)
 
 def normalize_korean_color(color_text: str) -> str:
     """한국어 색상 문자열을 보기 좋게 정리한다"""
-    if not color_text:
-        return ""
-
-    normalized = color_text.replace(':', ', ')
-    normalized = re.sub(r'\s*,\s*', ', ', normalized)
-    normalized = re.sub(r'\s+', ' ', normalized).strip(' ,')
-
-    tokens = []
-    for token in normalized.split(','):
-        value = token.strip()
-        if value.endswith('색') and len(value) > 1 and has_hangul(value):
-            value = value[:-1].strip()
-        if value and not is_color_count_placeholder(value):
-            tokens.append(value)
-
-    return ', '.join(tokens)
+    return svc_normalize_korean_color(color_text)
 
 
 def normalize_english_color(color_text: str) -> str:
     """영문 색상 문자열을 보기 좋게 정리한다"""
-    if not color_text:
-        return ""
-
-    normalized = color_text.replace('/', ', ')
-    normalized = re.sub(r'\s*-\s*', ', ', normalized)
-    normalized = re.sub(r'\s*,\s*', ', ', normalized)
-    normalized = re.sub(r'\s+', ' ', normalized).strip(' ,')
-    return normalized.title()
+    return svc_normalize_english_color(color_text)
 
 
 def extract_brand_text(product_json: Dict[str, object], title_text: str) -> str:
     """브랜드명을 추출한다"""
-    brand = product_json.get('brand', {}) if isinstance(product_json, dict) else {}
-    if isinstance(brand, dict) and brand.get('name'):
-        return str(brand['name']).strip()
-
-    match = re.match(r'([^()]+)\(', title_text)
-    if match:
-        return match.group(1).strip()
-    return ""
+    return svc_extract_brand_text(product_json, title_text)
 
 
 def extract_brand_en_from_musinsa(driver, product_url: str) -> str:
     """무신사 상품 페이지에서 브랜드 영문명을 추출한다.
     상품 페이지의 브랜드 링크(/brand/slug)를 찾아
     브랜드 페이지 og:title에서 '한글(ENGLISH)' 패턴으로 영문명을 가져온다."""
-    try:
-        # 0) 현재 페이지 mss 상태값에서 영문 브랜드명 우선 추출
-        try:
-            soup = BeautifulSoup(driver.page_source, 'html.parser')
-            mss_state = extract_mss_product_state(soup)
-            brand_info = mss_state.get('brandInfo') if isinstance(mss_state, dict) else None
-            if isinstance(brand_info, dict):
-                direct_en = str(brand_info.get('brandEnglishName', '')).strip()
-                if direct_en:
-                    return direct_en
-            direct_slug = str(mss_state.get('brand', '')).strip() if isinstance(mss_state, dict) else ''
-            if direct_slug:
-                return direct_slug.upper().replace('-', ' ')
-        except Exception:
-            pass
-
-        brand_links = driver.find_elements(By.CSS_SELECTOR, 'a[href*="/brand/"]')
-        slug = ''
-        for bl in brand_links:
-            href = bl.get_attribute('href') or ''
-            m = re.search(r'/brand/([a-z0-9_-]+)', href)
-            if m:
-                slug = m.group(1)
-                break
-        if not slug:
-            return ''
-
-        # 브라우저 재접속 없이 HTTP 요청으로 브랜드 페이지 og:title 조회
-        brand_url = f'https://www.musinsa.com/brand/{slug}'
-        try:
-            req = urllib.request.Request(brand_url, headers={'User-Agent': 'Mozilla/5.0'})
-            with urllib.request.urlopen(req, timeout=8) as resp:
-                html = resp.read().decode('utf-8', errors='replace')
-            # og:title -> "한글(ENGLISH)" 패턴 우선
-            m_og = re.search(
-                r'<meta[^>]+property=["\']og:title["\'][^>]+content=["\']([^"\']+)["\']',
-                html,
-                re.IGNORECASE,
-            )
-            if m_og:
-                og_title = m_og.group(1).strip()
-                m_en = re.search(r'\(([A-Za-z0-9\s&\-\.\'/]+)\)', og_title)
-                if m_en:
-                    return re.sub(r'\s+', ' ', m_en.group(1)).strip()
-        except Exception:
-            pass
-
-        # fallback: slug 기반 영문명
-        return slug.upper().replace('-', ' ')
-    except Exception as e:
-        print(f"   영문 브랜드 추출 실패: {e}")
-        return ''
+    return svc_extract_brand_en_from_musinsa(driver, product_url)
 
 
 def find_longest_step_sequence(values: List[int], allowed_steps: Tuple[int, ...]) -> List[int]:

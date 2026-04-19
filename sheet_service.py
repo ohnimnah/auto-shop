@@ -1,7 +1,7 @@
 """Google Sheets read/write helper functions."""
 
 import re
-from typing import Dict, List
+from typing import Dict, List, Tuple
 
 
 def column_index_to_letter(index: int) -> str:
@@ -174,3 +174,71 @@ def parse_margin_rate(value: str) -> float | None:
     if 0 <= parsed <= 1:
         return parsed * 100
     return parsed
+
+
+def get_sheet_name_by_gid(service, spreadsheet_id: str, gid: int) -> str:
+    """GID로 시트 이름을 찾는다."""
+    try:
+        spreadsheet = service.spreadsheets().get(spreadsheetId=spreadsheet_id).execute()
+        for sheet in spreadsheet.get("sheets", []):
+            props = sheet.get("properties", {})
+            if props.get("sheetId") == gid:
+                return props.get("title")
+    except Exception as e:
+        print(f" 시트 메타데이터 조회 실패: {e}")
+    return ""
+
+
+def get_target_sheet_names(
+    service,
+    spreadsheet_id: str,
+    sheet_gids: List[int],
+    fallback_sheet_name: str,
+) -> List[str]:
+    """GID 목록으로 시트명을 찾고 실패 시 기본 시트명을 반환한다."""
+    sheet_names: List[str] = []
+    for gid in sheet_gids:
+        title = get_sheet_name_by_gid(service, spreadsheet_id, gid)
+        if title:
+            sheet_names.append(title)
+        else:
+            print(f" GID {gid}에 해당하는 시트 이름을 찾을 수 없습니다")
+
+    if not sheet_names:
+        sheet_names = [fallback_sheet_name]
+        print(f" GID 기반 시트 이름 찾기에 실패했습니다. 기본 시트 이름 '{fallback_sheet_name}'을(를) 사용합니다.")
+    return sheet_names
+
+
+def is_url_cell(value: str) -> bool:
+    """셀값이 URL인지 감지한다."""
+    if not isinstance(value, str):
+        return False
+    value = value.strip()
+    return value.startswith("http://") or value.startswith("https://")
+
+
+def read_urls_from_sheet(
+    service,
+    spreadsheet_id: str,
+    sheet_name: str,
+    url_column: str,
+    row_start: int,
+) -> List[Tuple[int, str]]:
+    """Google Sheets에서 URL을 읽어 row 번호와 URL 목록을 반환한다."""
+    try:
+        result = service.spreadsheets().values().get(
+            spreadsheetId=spreadsheet_id,
+            range=f"'{sheet_name}'!{url_column}{row_start}:{url_column}1000",
+        ).execute()
+        values = result.get("values", [])
+        rows: List[Tuple[int, str]] = []
+        for index, row in enumerate(values, start=row_start):
+            if row and row[0].strip():
+                url = row[0].strip()
+                if is_url_cell(url):
+                    rows.append((index, url))
+        return rows
+    except Exception as e:
+        print(f" URL read failed ({sheet_name}): {e}")
+        return []
