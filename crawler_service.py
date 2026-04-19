@@ -1040,3 +1040,179 @@ def extract_musinsa_sku(
             if re.search(r"[A-Z]", candidate) and re.search(r"[0-9]", candidate):
                 return candidate
     return ""
+
+
+def extract_actual_size_table_text(soup: BeautifulSoup, option_kind: str = "") -> str:
+    """Read actual-size table from page and flatten into one-line text."""
+    if soup is None:
+        return ""
+
+    size_labels = {
+        "FREE",
+        "O/S",
+        "OS",
+        "ONE SIZE",
+        "XXS",
+        "XS",
+        "S",
+        "M",
+        "L",
+        "XL",
+        "XXL",
+        "XXXL",
+        "\ud504\ub9ac",
+        "\uc6d0\uc0ac\uc774\uc988",
+        "\uc2a4\ubab0",
+        "\ubbf8\ub514\uc6c0",
+        "\ub77c\uc9c0",
+        "\uc5d1\uc2a4\ub77c\uc9c0",
+        "\ud22c\uc5d1\uc2a4\ub77c\uc9c0",
+    }
+    option_kind = (option_kind or "").upper()
+    result_rows: List[str] = []
+
+    for table in soup.select("table"):
+        rows = table.select("tr")
+        if len(rows) < 2:
+            continue
+
+        header_cells = rows[0].find_all(["th", "td"])
+        if len(header_cells) < 2:
+            continue
+
+        headers = [cell.get_text(" ", strip=True) for cell in header_cells]
+        if len([header for header in headers[1:] if header]) < 2:
+            continue
+
+        table_rows: List[str] = []
+        for row in rows[1:]:
+            cells = row.find_all(["th", "td"])
+            if len(cells) < 2:
+                continue
+
+            raw_size = cells[0].get_text(" ", strip=True)
+            normalized_size = normalize_size_tokens([raw_size], option_kind)
+            size_name = normalized_size[0] if normalized_size else raw_size.strip()
+            upper_size_name = size_name.upper()
+            if not size_name:
+                continue
+
+            if (
+                upper_size_name not in size_labels
+                and not size_name.isdigit()
+                and not normalize_size_tokens([size_name], option_kind)
+            ):
+                continue
+
+            parts: List[str] = []
+            for header, cell in zip(headers[1:], cells[1:]):
+                header_text = str(header).strip()
+                value_text = cell.get_text(" ", strip=True)
+                if not header_text or not value_text or value_text in {"-", "--", "—"}:
+                    continue
+                parts.append(f"{header_text} {value_text}")
+
+            if len(parts) >= 2:
+                table_rows.append(f"{size_name}: {', '.join(parts)}")
+
+        if len(table_rows) >= 1:
+            result_rows.extend(table_rows)
+            break
+
+    return " | ".join(result_rows)
+
+
+def extract_size_from_fit_info_block(soup: BeautifulSoup, option_kind: str = "") -> str:
+    """Extract size from '내 사이즈 ...' text block."""
+    if soup is None:
+        return ""
+
+    option_kind = (option_kind or "").upper()
+    pattern = re.compile(
+        r"\ub0b4\s*\uc0ac\uc774\uc988\s*([A-Za-z][A-Za-z/\s-]*[A-Za-z]|\d{2,3})(?:\s*\[\d+\])?",
+        re.IGNORECASE,
+    )
+
+    for tag in soup.select("div, span, li, p"):
+        text = tag.get_text(" ", strip=True)
+        if not text or "\ub0b4 \uc0ac\uc774\uc988" not in text:
+            continue
+
+        match = pattern.search(text)
+        if not match:
+            continue
+
+        raw_size = match.group(1).strip().upper()
+        normalized = normalize_size_tokens([raw_size], option_kind)
+        if normalized:
+            return ", ".join(normalized)
+    return ""
+
+
+def extract_sizes_from_option_ui(soup: BeautifulSoup, option_kind: str = "") -> str:
+    """Extract size candidates directly from option UI texts."""
+    option_kind = (option_kind or "").upper()
+    collected_tokens: List[str] = []
+    selectors = [
+        '[data-option-name*="size" i]',
+        '[data-option-name*="사이즈" i]',
+        '[data-name*="size" i]',
+        '[data-name*="사이즈" i]',
+        '[aria-label*="size" i]',
+        '[aria-label*="사이즈" i]',
+        '[class*="option" i]',
+        '[class*="select" i]',
+        '[class*="dropdown" i]',
+        '[class*="size" i]',
+        '[id*="option" i]',
+        '[id*="size" i]',
+        '[role="option"]',
+        "select option",
+        "button",
+        "li",
+    ]
+
+    seen_texts = set()
+    for tag in soup.select(", ".join(selectors)):
+        text = tag.get_text(" ", strip=True)
+        if not text or text in seen_texts:
+            continue
+        seen_texts.add(text)
+
+        attrs_text = " ".join(
+            str(value)
+            for key, value in tag.attrs.items()
+            if key in {"class", "id", "aria-label", "data-name", "data-option-name", "name"}
+        )
+        context = f"{attrs_text} {text}".lower()
+        if not any(keyword in context for keyword in ("size", "사이즈", "option", "옵션", "select", "선택")):
+            continue
+
+        parts = re.split(r"[\s,/|]+", text)
+        for part in parts:
+            token = part.strip()
+            if token:
+                collected_tokens.append(token)
+
+        if len(text) <= 40:
+            collected_tokens.append(text.strip())
+
+    normalized_tokens = normalize_size_tokens(collected_tokens, option_kind)
+    if not normalized_tokens:
+        return ""
+
+    if all(token.isdigit() for token in normalized_tokens):
+        numeric = [int(token) for token in normalized_tokens]
+        steps = (5,) if option_kind == "SHOES" else (5, 10)
+        narrowed = find_longest_step_sequence(sorted(set(numeric)), steps)
+        if option_kind == "SHOES" and len(narrowed) >= 2:
+            return ", ".join(str(number) for number in narrowed)
+        if option_kind != "SHOES" and len(narrowed) >= 2:
+            return ", ".join(str(number) for number in narrowed)
+        return ""
+
+    unique_tokens: List[str] = []
+    for token in normalized_tokens:
+        if token not in unique_tokens:
+            unique_tokens.append(token)
+    return ", ".join(unique_tokens)
