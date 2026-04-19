@@ -56,6 +56,7 @@ from selenium.webdriver.support.ui import Select
 from webdriver_manager.chrome import ChromeDriverManager
 from google.oauth2.service_account import Credentials
 from googleapiclient.discovery import build
+from category_correction import correct_buyma_category
 
 # main.py와 동일한 시트 정보
 SPREADSHEET_ID = "1mTV-Fcybov-0uC7tNyM_GXGDoth8F_7wM__zaC1fAjs"
@@ -2917,6 +2918,13 @@ def fill_buyma_form(driver, row_data: Dict[str, str]) -> str:
                     row_data.get('brand', '')
                 )
                 cat_source = "자동추론"
+            # Existing mapping 결과(cat2)에 대해서만 보정 레이어를 적용한다.
+            musinsa_category_text = " / ".join([sheet_cat1, sheet_cat2, sheet_cat3]).strip(" /")
+            source_product_name = row_data.get('product_name_kr') or row_data.get('product_name_en') or ''
+            corrected_cat2 = correct_buyma_category(cat2, source_product_name, musinsa_category_text)
+            if corrected_cat2 != cat2:
+                print(f"  카테고리 보정: {cat2} -> {corrected_cat2}")
+                cat2 = corrected_cat2
             if cat1 and cat2:
                 print(f"  카테고리({cat_source}): {cat1} > {cat2} > {cat3}")
                 # ?카테고리 ?택
@@ -2934,6 +2942,10 @@ def fill_buyma_form(driver, row_data: Dict[str, str]) -> str:
                     if f1 and f2:
                         print(f"  △ 시트 카테고리 미매칭, 자동추론 fallback: {f1} > {f2} > {f3}")
                         cat1, cat2, cat3 = f1, f2, f3
+                        corrected_cat2 = correct_buyma_category(cat2, source_product_name, musinsa_category_text)
+                        if corrected_cat2 != cat2:
+                            print(f"  카테고리 보정(fallback): {cat2} -> {corrected_cat2}")
+                            cat2 = corrected_cat2
                         selected_cat1 = _select_category_by_arrow(driver, 0, cat1)
                         if not selected_cat1:
                             selected_cat1 = _find_best_option_by_arrow(driver, 0, cat1, fallback_other=False)
