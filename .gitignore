@@ -13,6 +13,7 @@ chrome_profile/
 
 # Local runtime data folder (when using --data-dir in project)
 .local_data/
+.runtime/
 
 # Python cache
 __pycache__/
