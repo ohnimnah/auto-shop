@@ -2529,95 +2529,27 @@ def _detect_title_input_issue(name_input, intended_title: str) -> str:
 
 
 def _normalize_buyma_title_text(text: str) -> str:
-    return re.sub(r"\s+", " ", (text or "").strip())
+    return buyma_mapper_mod.normalize_buyma_title_text(text)
 
 
 def _truncate_buyma_title_text(text: str, limit: int) -> str:
-    text = _normalize_buyma_title_text(text)
-    if limit <= 0 or _buyma_title_units(text) <= limit:
-        return text
-    if limit <= 3:
-        return _slice_buyma_title_by_units(text, limit)
-
-    ellipsis = "..."
-    ellipsis_units = _buyma_title_units(ellipsis)
-    body_limit = max(0, limit - ellipsis_units)
-    body = _slice_buyma_title_by_units(text, body_limit).rstrip()
-    return body + ellipsis
+    return buyma_mapper_mod.truncate_buyma_title_text(text, limit)
 
 
 def _buyma_char_units(ch: str) -> int:
-    # BUYMA rule of thumb: full-width=2, half-width=1
-    return 2 if unicodedata.east_asian_width(ch) in {"F", "W", "A"} else 1
+    return buyma_mapper_mod.buyma_char_units(ch)
 
 
 def _buyma_title_units(text: str) -> int:
-    return sum(_buyma_char_units(ch) for ch in (text or ""))
+    return buyma_mapper_mod.buyma_title_units(text)
 
 
 def _slice_buyma_title_by_units(text: str, limit_units: int) -> str:
-    if limit_units <= 0:
-        return ""
-    out: List[str] = []
-    used = 0
-    for ch in text:
-        u = _buyma_char_units(ch)
-        if used + u > limit_units:
-            break
-        out.append(ch)
-        used += u
-    return "".join(out)
+    return buyma_mapper_mod.slice_buyma_title_by_units(text, limit_units)
 
 
 def _build_buyma_product_title(brand_en: str, name_en: str, color_en: str, max_length: int = 0) -> str:
-    brand_en = _normalize_buyma_title_text(brand_en)
-    name_en = _normalize_buyma_title_text(name_en)
-    color_en = _normalize_buyma_title_text(color_en)
-
-    candidates = []
-
-    full_parts = []
-    if brand_en:
-        full_parts.append(f"[{brand_en}]")
-    if name_en:
-        full_parts.append(name_en)
-    if color_en:
-        full_parts.append(color_en)
-    candidates.append(_normalize_buyma_title_text(" ".join(full_parts)))
-
-    no_bracket_parts = []
-    if brand_en:
-        no_bracket_parts.append(brand_en)
-    if name_en:
-        no_bracket_parts.append(name_en)
-    if color_en:
-        no_bracket_parts.append(color_en)
-    candidates.append(_normalize_buyma_title_text(" ".join(no_bracket_parts)))
-
-    name_color = _normalize_buyma_title_text(" ".join([p for p in [name_en, color_en] if p]))
-    if name_color:
-        candidates.append(name_color)
-
-    if name_en:
-        candidates.append(name_en)
-
-    seen = set()
-    unique_candidates = []
-    for candidate in candidates:
-        if candidate and candidate not in seen:
-            seen.add(candidate)
-            unique_candidates.append(candidate)
-
-    if max_length > 0:
-        for candidate in unique_candidates:
-            if _buyma_title_units(candidate) <= max_length:
-                return candidate
-
-        if name_en:
-            return _truncate_buyma_title_text(name_en, max_length)
-        return _truncate_buyma_title_text(unique_candidates[0] if unique_candidates else "", max_length)
-
-    return unique_candidates[0] if unique_candidates else ""
+    return buyma_mapper_mod.build_buyma_product_title(brand_en, name_en, color_en, max_length)
 
 
 def _set_text_input_value(driver, input_el, text: str) -> None:
@@ -2630,47 +2562,7 @@ def _set_text_input_value(driver, input_el, text: str) -> None:
 
 
 def _build_buyma_title_retry_candidates(brand_en: str, name_en: str, color_en: str, max_length: int) -> List[str]:
-    """길이/검증 실패 시 재시도할 제목 후보를 요청 순서대로 생성한다.
-    순서: [브랜드] 이름 색상 -> [브랜드] 이름 -> 이름 -> 이름 truncation
-    """
-    brand = _normalize_buyma_title_text(brand_en)
-    name = _normalize_buyma_title_text(name_en)
-    color = _normalize_buyma_title_text(color_en)
-
-    def _fit(text: str) -> str:
-        text = _normalize_buyma_title_text(text)
-        if not text:
-            return ""
-        if max_length > 0 and _buyma_title_units(text) > max_length:
-            return _truncate_buyma_title_text(text, max_length)
-        return text
-
-    candidates: List[str] = []
-    # 1) [브랜드] 이름 색상
-    candidates.append(_fit(" ".join([p for p in [f"[{brand}]" if brand else "", name, color] if p])))
-    # 2) [브랜드] 이름
-    candidates.append(_fit(" ".join([p for p in [f"[{brand}]" if brand else "", name] if p])))
-    # 3) 이름
-    candidates.append(_fit(name))
-
-    # hard fallback: 강제 자르기
-    base_name = name
-    if max_length > 0:
-        candidates.append(_truncate_buyma_title_text(base_name, max_length))
-        candidates.append(_truncate_buyma_title_text(base_name, max(10, max_length - 3)))
-        candidates.append(_truncate_buyma_title_text(base_name, max(8, max_length - 6)))
-    else:
-        candidates.append(_truncate_buyma_title_text(base_name, 60))
-        candidates.append(_truncate_buyma_title_text(base_name, 45))
-
-    uniq: List[str] = []
-    seen = set()
-    for c in candidates:
-        c = _normalize_buyma_title_text(c)
-        if c and c not in seen:
-            seen.add(c)
-            uniq.append(c)
-    return uniq
+    return buyma_mapper_mod.build_buyma_title_retry_candidates(brand_en, name_en, color_en, max_length)
 
 
 # Phase 1 marketplace refactor:
