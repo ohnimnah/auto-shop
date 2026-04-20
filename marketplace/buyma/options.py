@@ -1,8 +1,11 @@
 """BUYMA option-related helpers."""
 
+from __future__ import annotations
+
 import re
 from typing import Dict, List
 
+from selenium.webdriver.common.keys import Keys
 from selenium.webdriver.common.by import By
 
 from marketplace.buyma.selectors import JP_SHITEI_NASHI, JP_SIZE_SHITEI_NASHI
@@ -209,6 +212,274 @@ def is_free_size_text(size_text: str) -> bool:
         "フリー", "フリーサイズ", "ワンサイズ",
     }
     return all(token in free_aliases for token in normalized_tokens)
+
+
+def select_color_system(driver, color_system: str, row_index: int = 0, *, sleep_fn, scroll_and_click) -> bool:
+    """Select a BUYMA color-system option."""
+    try:
+        color_selects = driver.find_elements(By.CSS_SELECTOR, ".sell-color-table .Select")
+        if not color_selects:
+            return False
+        color_select = color_selects[min(row_index, len(color_selects) - 1)]
+        control = color_select.find_element(By.CSS_SELECTOR, ".Select-control")
+        scroll_and_click(driver, control)
+        sleep_fn(0.4)
+
+        options = driver.find_elements(By.CSS_SELECTOR, ".Select-menu-outer .Select-option")
+        if options:
+            target = color_system.replace("系", "")
+            for opt in options:
+                txt = opt.text.strip()
+                if color_system in txt or target in txt:
+                    scroll_and_click(driver, opt)
+                    return True
+            for opt in options:
+                txt = opt.text.strip()
+                if "その他" in txt:
+                    scroll_and_click(driver, opt)
+                    return True
+            scroll_and_click(driver, options[0])
+            return True
+
+        active = driver.switch_to.active_element
+        for _ in range(25):
+            focused = driver.execute_script(
+                "var el=document.querySelector('.Select-menu-outer .Select-option.is-focused');"
+                "return el?el.textContent.trim():'';"
+            )
+            if focused and (color_system in focused or color_system.replace("系", "") in focused):
+                active.send_keys(Keys.ENTER)
+                return True
+            active.send_keys(Keys.ARROW_DOWN)
+            sleep_fn(0.05)
+        active.send_keys(Keys.ENTER)
+        return True
+    except Exception:
+        return False
+
+
+def try_add_color_row(driver, *, sleep_fn, scroll_and_click) -> bool:
+    """Click the BUYMA add-color-row action if present."""
+    try:
+        area = driver.find_element(By.CSS_SELECTOR, ".sell-color-table")
+        candidates = area.find_elements(By.CSS_SELECTOR, "button, a, [role='button'], [class*='add']")
+        for candidate in candidates:
+            txt = (candidate.text or "").strip()
+            cls = (candidate.get_attribute("class") or "")
+            if ("追加" in txt) or ("add" in cls.lower()) or ("plus" in cls.lower()):
+                scroll_and_click(driver, candidate)
+                sleep_fn(0.4)
+                return True
+    except Exception:
+        return False
+    return False
+
+
+def fill_size_supplement(driver, size_text: str, *, scroll_and_click) -> bool:
+    """Write size text into fallback variation textarea."""
+    if not size_text:
+        return False
+    try:
+        variation = driver.find_element(By.CSS_SELECTOR, ".sell-variation")
+        areas = variation.find_elements(By.CSS_SELECTOR, "textarea.bmm-c-textarea")
+        if not areas:
+            return False
+        target = areas[0]
+        scroll_and_click(driver, target)
+        existing = (target.get_attribute("value") or "").strip()
+        line = f"サイズ {size_text}"
+        if existing:
+            if line not in existing:
+                target.clear()
+                target.send_keys(existing + "\n" + line)
+        else:
+            target.clear()
+            target.send_keys(line)
+        return True
+    except Exception:
+        return False
+
+
+def fill_color_supplement(driver, color_text_en: str, *, scroll_and_click) -> bool:
+    """Write color text into fallback variation textarea."""
+    if not color_text_en:
+        return False
+    try:
+        variation = driver.find_element(By.CSS_SELECTOR, ".sell-variation")
+        areas = variation.find_elements(By.CSS_SELECTOR, "textarea.bmm-c-textarea")
+        if not areas:
+            return False
+        target = areas[0]
+        scroll_and_click(driver, target)
+        existing = (target.get_attribute("value") or "").strip()
+        colors = split_color_values(color_text_en)
+        line = f"COLOR: {', '.join(colors) if colors else color_text_en}"
+        if existing:
+            if line not in existing:
+                target.clear()
+                target.send_keys(existing + "\n" + line)
+        else:
+            target.clear()
+            target.send_keys(line)
+        return True
+    except Exception:
+        return False
+
+
+def select_option_in_select_control(driver, select_el, target_text: str, *, sleep_fn, scroll_and_click) -> bool:
+    """Select target_text in a React Select control with exact match preference."""
+    try:
+        control = select_el.find_element(By.CSS_SELECTOR, ".Select-control")
+        scroll_and_click(driver, control)
+        sleep_fn(0.2)
+        options = driver.find_elements(By.CSS_SELECTOR, ".Select-menu-outer .Select-option")
+
+        def _norm(s: str) -> str:
+            text = (s or "").strip().replace(" ", "").replace("\u3000", "").lower()
+            text = text.replace("サイズ", "").replace("size", "").replace("cm", "").replace("㎝", "")
+            return re.sub(r"\s+", "", text)
+
+        def _to_mm(s: str):
+            text = (s or "").strip().lower().replace("　", " ").replace("㎝", "cm")
+            num = re.sub(r"[^0-9.]", "", text)
+            if not num:
+                return None
+            try:
+                if "." in num:
+                    val = float(num)
+                    if 20 <= val <= 35:
+                        return int(round(val * 10))
+                    if 200 <= val <= 350:
+                        return int(round(val))
+                else:
+                    iv = int(num)
+                    if 200 <= iv <= 350:
+                        return iv
+                    if 20 <= iv <= 35:
+                        return iv * 10
+            except Exception:
+                return None
+            return None
+
+        target_norm = _norm(target_text)
+        target_mm = _to_mm(target_text)
+        has_range_suffix = ("以上" in (target_text or "")) or ("以下" in (target_text or ""))
+
+        for opt in options:
+            txt = (opt.text or "").strip()
+            if _norm(txt) == target_norm:
+                scroll_and_click(driver, opt)
+                sleep_fn(0.3)
+                return True
+
+        if target_mm is not None and not has_range_suffix:
+            for opt in options:
+                txt = (opt.text or "").strip()
+                if _to_mm(txt) == target_mm:
+                    scroll_and_click(driver, opt)
+                    sleep_fn(0.3)
+                    return True
+            try:
+                query_candidates = [str(target_text).strip()]
+                query_from_mm = target_mm / 10.0
+                query_candidates.append(f"{query_from_mm:.1f}")
+                if abs(query_from_mm - int(query_from_mm)) < 1e-9:
+                    query_candidates.append(str(int(query_from_mm)))
+                sel_input = select_el.find_element(By.CSS_SELECTOR, ".Select-input input")
+                for query in query_candidates:
+                    if not query:
+                        continue
+                    sel_input.clear()
+                    sel_input.send_keys(query)
+                    sleep_fn(0.35)
+                    filtered = driver.find_elements(By.CSS_SELECTOR, ".Select-menu-outer .Select-option")
+                    for opt in filtered:
+                        txt = (opt.text or "").strip()
+                        if _to_mm(txt) == target_mm:
+                            scroll_and_click(driver, opt)
+                            sleep_fn(0.3)
+                            return True
+                sel_input.send_keys(Keys.ESCAPE)
+            except Exception:
+                pass
+            return False
+
+        if target_norm in {"s", "m", "l"}:
+            return False
+
+        for opt in options:
+            txt = (opt.text or "").strip()
+            txt_norm = _norm(txt)
+            if target_norm and target_norm in txt_norm:
+                if target_norm == "s" and "xs" in txt_norm:
+                    continue
+                scroll_and_click(driver, opt)
+                sleep_fn(0.3)
+                return True
+        return False
+    except Exception:
+        return False
+
+
+def infer_reference_jp_size(size_raw: str) -> str:
+    """Map a raw size to BUYMA's JP reference size label."""
+    if is_free_size_text(size_raw):
+        return JP_SHITEI_NASHI
+
+    text = (size_raw or "").strip().upper()
+    if not text:
+        return ""
+    if "/" in text:
+        text = text.split("/")[0].strip()
+
+    paren_alpha = re.search(r"\(([A-Z]{1,4})\)", text)
+    if paren_alpha:
+        text = paren_alpha.group(1)
+
+    alpha_match = re.search(r"(?<![A-Z])(XXXS|XXS|XS|S|M|L|XL|XXL|XXXL)(?![A-Z])", text)
+    if alpha_match:
+        text = alpha_match.group(1)
+
+    if text in {"XXS", "XS"}:
+        return "XS以下"
+    if text == "S":
+        return "S"
+    if text == "M":
+        return "M"
+    if text == "L":
+        return "L"
+    if text in {"XL", "XXL", "XXXL"}:
+        return "XL以上"
+
+    only_num = re.sub(r"[^0-9.]", "", text)
+    if only_num:
+        try:
+            if "." in only_num:
+                fv = float(only_num)
+                if 200 <= fv <= 350:
+                    cm = fv / 10.0
+                elif 20 <= fv <= 35:
+                    cm = fv
+                else:
+                    return text
+            else:
+                iv = int(only_num)
+                if 200 <= iv <= 350:
+                    cm = iv / 10.0
+                elif 20 <= iv <= 35:
+                    cm = float(iv)
+                else:
+                    return text
+
+            mm_val = int(round(cm * 10))
+            if mm_val >= 275:
+                return "27cm以上"
+            if abs(cm - round(cm)) < 1e-9:
+                return str(int(round(cm)))
+            return f"{cm:.1f}"
+        except Exception:
+            return text
+    return text
 
 
 def apply_buyma_option_selection(
