@@ -5,6 +5,11 @@ from __future__ import annotations
 from selenium.webdriver.common.by import By
 from selenium.webdriver.common.keys import Keys
 from typing import Callable, Dict, List, Tuple
+from marketplace.buyma.standard_category import (
+    StandardCategory,
+    map_standard_to_buyma_category,
+    resolve_standard_category,
+)
 
 
 FEMALE_KEYWORDS = [
@@ -203,6 +208,24 @@ def build_buyma_category_plan(
 
     musinsa_category_text = " / ".join([sheet_cat1, sheet_cat2, sheet_cat3]).strip(" /")
     source_product_name = product_name_kr or product_name_en or ""
+
+    standard_category, combined_text = resolve_standard_category(
+        sheet_cat1,
+        sheet_cat2,
+        sheet_cat3,
+        source_product_name,
+    )
+    semantic_buyma_cat2 = map_standard_to_buyma_category(standard_category, combined_text)
+    semantic_used = standard_category != StandardCategory.ETC and bool(semantic_buyma_cat2)
+    semantic_fallback_used = False
+
+    if semantic_used:
+        cat2 = semantic_buyma_cat2
+        cat3 = ""
+        cat_source = f"{cat_source}+semantic"
+    else:
+        semantic_fallback_used = True
+
     corrected_cat2 = category_corrector(cat2, source_product_name, musinsa_category_text)
     fallback_cat1, fallback_cat2, fallback_cat3 = infer_buyma_category(product_name_kr, product_name_en, brand)
     corrected_fallback_cat2 = category_corrector(
@@ -210,6 +233,13 @@ def build_buyma_category_plan(
         source_product_name,
         musinsa_category_text,
     )
+
+    print(f"  [category][semantic] musinsa={sheet_cat1} / {sheet_cat2} / {sheet_cat3}")
+    print(f"  [category][semantic] product_name={source_product_name}")
+    print(f"  [category][semantic] combined_text={combined_text}")
+    print(f"  [category][semantic] standard_category={standard_category.value}")
+    print(f"  [category][semantic] final_buyma_cat2={corrected_cat2}")
+    print(f"  [category][semantic] fallback_used={semantic_fallback_used}")
 
     return {
         "sheet_cat1": sheet_cat1,
@@ -221,6 +251,9 @@ def build_buyma_category_plan(
         "cat_source": cat_source,
         "musinsa_category_text": musinsa_category_text,
         "source_product_name": source_product_name,
+        "combined_text": combined_text,
+        "standard_category": standard_category.value,
+        "semantic_fallback_used": semantic_fallback_used,
         "fallback_cat1": fallback_cat1,
         "fallback_cat2": corrected_fallback_cat2,
         "fallback_cat3": fallback_cat3,
