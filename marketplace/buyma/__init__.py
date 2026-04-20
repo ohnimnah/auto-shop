@@ -1,0 +1,1 @@
+"""BUYMA marketplace integration package."""

@@ -57,6 +57,16 @@ from webdriver_manager.chrome import ChromeDriverManager
 from google.oauth2.service_account import Credentials
 from googleapiclient.discovery import build
 from category_correction import correct_buyma_category
+from marketplace.common import sheet_source as common_sheet_source_mod
+from marketplace.common.runtime import get_runtime_data_dir as common_get_runtime_data_dir
+from marketplace.buyma import category as buyma_category_mod
+from marketplace.buyma import images as buyma_images_mod
+from marketplace.buyma import login as buyma_login_mod
+from marketplace.buyma import mapper as buyma_mapper_mod
+from marketplace.buyma import options as buyma_options_mod
+from marketplace.buyma import selectors as buyma_selectors
+from marketplace.buyma import submit as buyma_submit_mod
+from marketplace.buyma import validate as buyma_validate_mod
 
 # main.py와 동일한 시트 정보
 SPREADSHEET_ID = "1mTV-Fcybov-0uC7tNyM_GXGDoth8F_7wM__zaC1fAjs"
@@ -69,8 +79,8 @@ STATUS_UPLOAD_READY = "썸네일완료"
 STATUS_THUMBNAILS_DONE = "썸네일완료"
 STATUS_UPLOADING = "업로드중"
 STATUS_COMPLETED = "출품완료"
-JP_SHITEI_NASHI = "\u6307\u5b9a\u306a\u3057"  # 指定なし
-JP_SIZE_SHITEI_NASHI = "\u30b5\u30a4\u30ba\u6307\u5b9a\u306a\u3057"  # サイズ指定なし
+JP_SHITEI_NASHI = buyma_selectors.JP_SHITEI_NASHI  # 指定なし
+JP_SIZE_SHITEI_NASHI = buyma_selectors.JP_SIZE_SHITEI_NASHI  # サイズ指定なし
 
 
 def get_runtime_data_dir() -> str:
@@ -108,16 +118,7 @@ def _load_sheet_runtime_config() -> None:
         if not isinstance(cfg, dict):
             return
 
-        sid = (cfg.get('spreadsheet_id') or '').strip()
-        # URL 전체 전달된 경우에도 /d/<id>/에서 ID만 추출
-        if sid:
-            m = re.search(r'/spreadsheets/d/([a-zA-Z0-9-_]+)', sid)
-            if m:
-                sid = m.group(1)
-            else:
-                m2 = re.search(r'(?:^|/)d/([a-zA-Z0-9-_]+)', sid)
-                if m2:
-                    sid = m2.group(1)
+        sid = common_sheet_source_mod.extract_spreadsheet_id(cfg.get('spreadsheet_id') or '')
         if sid:
             SPREADSHEET_ID = sid
 
@@ -140,9 +141,9 @@ def _load_sheet_runtime_config() -> None:
 
 _load_sheet_runtime_config()
 
-BUYMA_SELL_URL = "https://www.buyma.com/my/sell/new?tab=b"
-BUYMA_LOGIN_URL = "https://www.buyma.com/login/"
-BUYMA_LOGOUT_URL = "https://www.buyma.com/logout/"
+BUYMA_SELL_URL = buyma_selectors.BUYMA_SELL_URL
+BUYMA_LOGIN_URL = buyma_selectors.BUYMA_LOGIN_URL
+BUYMA_LOGOUT_URL = buyma_selectors.BUYMA_LOGOUT_URL
 
 # 바이마 로그인 정보 저장경로 (로컬)
 BUYMA_CRED_PATH = os.path.join(get_runtime_data_dir(), "buyma_credentials.json")
@@ -2880,6 +2881,171 @@ def _build_buyma_title_retry_candidates(brand_en: str, name_en: str, color_en: s
     return uniq
 
 
+# Phase 1 marketplace refactor:
+# bind low-risk responsibilities to extracted marketplace modules while preserving
+# the existing function names/call sites in this legacy entrypoint.
+get_runtime_data_dir = common_get_runtime_data_dir
+
+
+def get_credentials_path() -> str:
+    return common_sheet_source_mod.get_credentials_path(os.path.dirname(__file__))
+
+
+def get_sheets_service():
+    return common_sheet_source_mod.get_sheets_service(get_credentials_path())
+
+
+def get_sheet_name(service) -> str:
+    return common_sheet_source_mod.resolve_sheet_name(service, SPREADSHEET_ID, SHEET_GIDS, SHEET_NAME)
+
+
+column_index_to_letter = common_sheet_source_mod.column_index_to_letter
+
+
+def get_sheet_header_map(service, sheet_name: str) -> Dict[str, int]:
+    return common_sheet_source_mod.get_sheet_header_map(service, SPREADSHEET_ID, sheet_name, HEADER_ROW)
+
+
+def update_cell_by_header(
+    service,
+    sheet_name: str,
+    row_num: int,
+    header_map: Dict[str, int],
+    header_name: str,
+    value: str,
+) -> bool:
+    return common_sheet_source_mod.update_cell_by_header(
+        service,
+        SPREADSHEET_ID,
+        sheet_name,
+        row_num,
+        header_map,
+        header_name,
+        value,
+    )
+
+
+def read_upload_rows(service, sheet_name: str, specific_row: int = 0) -> List[Dict[str, str]]:
+    return common_sheet_source_mod.read_upload_rows(
+        service,
+        spreadsheet_id=SPREADSHEET_ID,
+        sheet_name=sheet_name,
+        row_start=ROW_START,
+        header_row=HEADER_ROW,
+        col_map=COL,
+        progress_status_header=PROGRESS_STATUS_HEADER,
+        status_completed=STATUS_COMPLETED,
+        status_upload_ready=STATUS_UPLOAD_READY,
+        status_thumbnails_done=STATUS_THUMBNAILS_DONE,
+        specific_row=specific_row,
+    )
+
+_infer_color_system = buyma_options_mod.infer_color_system
+_split_color_values = buyma_options_mod.split_color_values
+_expand_color_abbreviations = buyma_options_mod.expand_color_abbreviations
+_build_size_variants = buyma_options_mod.build_size_variants
+_normalize_size_token_for_match = buyma_options_mod.normalize_size_token_for_match
+_size_match = buyma_options_mod.size_match
+_is_free_size_text = buyma_options_mod.is_free_size_text
+
+_normalize_actual_size_for_upload = buyma_validate_mod.normalize_actual_size_for_upload
+_extract_actual_measure_map = buyma_validate_mod.extract_actual_measure_map
+_extract_actual_size_rows = buyma_validate_mod.extract_actual_size_rows
+_pick_measure_value_by_label = buyma_validate_mod.pick_measure_value_by_label
+
+detect_gender_raw = buyma_category_mod.detect_gender_raw
+convert_gender_for_buyma = buyma_category_mod.convert_gender_for_buyma
+detect_gender = buyma_category_mod.detect_gender
+_get_buyma_fashion_category_from_gender = buyma_category_mod.get_buyma_fashion_category_from_gender
+_infer_buyma_category = buyma_category_mod.infer_buyma_category
+_normalize_sheet_category_labels = buyma_category_mod.normalize_sheet_category_labels
+_normalize_gender_label_for_sheet = buyma_category_mod.normalize_gender_label_for_sheet
+_remap_sheet_categories_with_gender = buyma_category_mod.remap_sheet_categories_with_gender
+
+_normalize_buyma_title_text = buyma_mapper_mod.normalize_buyma_title_text
+_truncate_buyma_title_text = buyma_mapper_mod.truncate_buyma_title_text
+_buyma_char_units = buyma_mapper_mod.buyma_char_units
+_buyma_title_units = buyma_mapper_mod.buyma_title_units
+_slice_buyma_title_by_units = buyma_mapper_mod.slice_buyma_title_by_units
+_build_buyma_product_title = buyma_mapper_mod.build_buyma_product_title
+_build_buyma_title_retry_candidates = buyma_mapper_mod.build_buyma_title_retry_candidates
+
+resolve_image_files = buyma_images_mod.resolve_image_files
+
+
+def _save_buyma_credentials(email: str, password: str):
+    return buyma_login_mod.save_buyma_credentials(email, password)
+
+
+def _load_buyma_credentials() -> tuple:
+    return buyma_login_mod.load_buyma_credentials()
+
+
+def _prompt_buyma_credentials() -> tuple:
+    return buyma_login_mod.prompt_buyma_credentials()
+
+
+def setup_visible_chrome_driver():
+    return buyma_login_mod.setup_visible_chrome_driver()
+
+
+def wait_for_buyma_login(driver) -> bool:
+    return buyma_login_mod.wait_for_buyma_login(
+        driver,
+        safe_input_fn=_safe_input,
+        scroll_and_click_fn=_scroll_and_click,
+        wait_scale=WAIT_SCALE,
+    )
+
+
+def _find_buyma_button_by_keywords(driver, keywords: List[str], timeout: float = 0.0):
+    return buyma_submit_mod.find_buyma_button_by_keywords(
+        driver,
+        keywords,
+        timeout=timeout,
+        sleep_fn=_sleep,
+    )
+
+
+def _click_buyma_button(driver, button, success_message: str) -> bool:
+    return buyma_submit_mod.click_buyma_button(
+        driver,
+        button,
+        success_message,
+        click_fallback=_scroll_and_click,
+    )
+
+
+def _submit_buyma_listing(driver, row_num: int) -> bool:
+    return buyma_submit_mod.submit_buyma_listing(
+        driver,
+        row_num,
+        click_fallback=_scroll_and_click,
+        sleep_fn=_sleep,
+    )
+
+
+def _finalize_buyma_listing(driver, row_num: int) -> bool:
+    return buyma_submit_mod.finalize_buyma_listing(
+        driver,
+        row_num,
+        click_fallback=_scroll_and_click,
+        sleep_fn=_sleep,
+    )
+
+
+def _handle_success_after_fill(driver, row_num: int, upload_mode: str, interactive: bool = True) -> Tuple[bool, bool]:
+    return buyma_submit_mod.handle_success_after_fill(
+        driver,
+        row_num,
+        upload_mode,
+        interactive=interactive,
+        safe_input_fn=_safe_input,
+        sleep_fn=_sleep,
+        click_fallback=_scroll_and_click,
+    )
+
+
 def fill_buyma_form(driver, row_data: Dict[str, str]) -> str:
     """바이마 출품 시 상품 정보를 자동 입력한다.
     바이마는 React 기반 bmm-c-* 컴포넌트를 사용하며 name/id 속성이 없음."""
@@ -4054,4 +4220,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-
