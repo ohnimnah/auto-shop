@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from enum import Enum
-from typing import Dict, List, Tuple
+from typing import List, Tuple
 
 
 class StandardCategory(str, Enum):
@@ -37,7 +37,7 @@ OUTER_KEYWORDS = [
 ]
 PANTS_KEYWORDS = [
     "팬츠", "바지",
-    "슬랙스", "trousers",
+    "슬랙스", "trousers", "slacks",
     "데님", "청바지", "jeans", "denim",
     "쇼츠", "반바지", "shorts",
 ]
@@ -47,16 +47,6 @@ OUTER_COAT_KEYWORDS = ["coat", "코트"]
 PANTS_DENIM_KEYWORDS = ["denim", "jeans", "데님", "청바지"]
 PANTS_SLACKS_KEYWORDS = ["slacks", "trousers", "슬랙스"]
 PANTS_SHORTS_KEYWORDS = ["shorts", "쇼츠", "반바지"]
-
-STANDARD_TO_BUYMA_BASE: Dict[StandardCategory, str] = {
-    StandardCategory.TOP_HOODIE: "パーカー・フーディ",
-    StandardCategory.TOP_SWEAT: "スウェット・トレーナー",
-    StandardCategory.TOP_TSHIRT: "Tシャツ・カットソー",
-    StandardCategory.TOP_SHIRT: "シャツ",
-    StandardCategory.TOP_KNIT: "ニット・セーター",
-    StandardCategory.TOP_CARDIGAN: "カーディガン",
-    StandardCategory.HOME_PAJAMA: "ルームウェア・パジャマ",
-}
 
 
 def _normalize_text(value: object) -> str:
@@ -79,12 +69,14 @@ def build_combined_text(
     musinsa_small: str,
     product_name: str,
 ) -> str:
-    return _normalize_text(" ".join([
-        musinsa_large or "",
-        musinsa_middle or "",
-        musinsa_small or "",
-        product_name or "",
-    ]))
+    return _normalize_text(
+        " ".join([
+            musinsa_large or "",
+            musinsa_middle or "",
+            musinsa_small or "",
+            product_name or "",
+        ])
+    )
 
 
 def resolve_standard_category(
@@ -98,7 +90,7 @@ def resolve_standard_category(
     if not text:
         return StandardCategory.ETC, text
 
-    # Priority order:
+    # Priority:
     # HOME_PAJAMA > TOP_HOODIE > TOP_SWEAT > TOP_SHIRT > TOP_TSHIRT >
     # TOP_KNIT > TOP_CARDIGAN > OUTER > PANTS > ETC
     if _contains_any(text, HOME_PAJAMA_KEYWORDS):
@@ -122,28 +114,46 @@ def resolve_standard_category(
     return StandardCategory.ETC, text
 
 
-def map_standard_to_buyma_category(
+def map_standard_to_buyma_middle_and_subcategory(
     standard_category: StandardCategory,
     combined_text: str,
-) -> str:
-    if standard_category in STANDARD_TO_BUYMA_BASE:
-        return STANDARD_TO_BUYMA_BASE[standard_category]
-
+    *,
+    is_mens: bool = False,
+) -> Tuple[str, str]:
+    """Return (buyma_middle_category, buyma_sub_category)."""
     text = _normalize_text(combined_text)
+
+    if standard_category == StandardCategory.TOP_HOODIE:
+        return "トップス", "パーカー・フーディ"
+    if standard_category == StandardCategory.TOP_SWEAT:
+        return "トップス", "スウェット・トレーナー"
+    if standard_category == StandardCategory.TOP_TSHIRT:
+        return "トップス", "Tシャツ・カットソー"
+    if standard_category == StandardCategory.TOP_SHIRT:
+        return "トップス", "シャツ"
+    if standard_category == StandardCategory.TOP_KNIT:
+        return "トップス", "ニット・セーター"
+    if standard_category == StandardCategory.TOP_CARDIGAN:
+        return "トップス", "カーディガン"
+    if standard_category == StandardCategory.HOME_PAJAMA:
+        return "インナー・ルームウェア", "ルームウェア・パジャマ"
+
     if standard_category == StandardCategory.OUTER:
+        outer_mid = "アウター・ジャケット" if is_mens else "アウター"
         if _contains_any(text, OUTER_DOWN_KEYWORDS):
-            return "ダウンジャケット"
+            return outer_mid, "ダウンジャケット"
         if _contains_any(text, OUTER_COAT_KEYWORDS):
-            return "コート"
-        return "ジャケット"
+            return outer_mid, "コート"
+        return outer_mid, "ジャケット"
 
     if standard_category == StandardCategory.PANTS:
+        pants_mid = "パンツ・ボトムス" if is_mens else "ボトムス"
         if _contains_any(text, PANTS_DENIM_KEYWORDS):
-            return "デニム・ジーパン"
+            return pants_mid, "デニム・ジーパン"
         if _contains_any(text, PANTS_SLACKS_KEYWORDS):
-            return "スラックス"
+            return pants_mid, "スラックス"
         if _contains_any(text, PANTS_SHORTS_KEYWORDS):
-            return "ハーフ・ショートパンツ"
-        return "パンツ"
+            return pants_mid, "ハーフ・ショートパンツ"
+        return pants_mid, "パンツ"
 
-    return ""
+    return "", ""

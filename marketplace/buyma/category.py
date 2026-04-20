@@ -7,7 +7,7 @@ from selenium.webdriver.common.keys import Keys
 from typing import Callable, Dict, List, Tuple
 from marketplace.buyma.standard_category import (
     StandardCategory,
-    map_standard_to_buyma_category,
+    map_standard_to_buyma_middle_and_subcategory,
     resolve_standard_category,
 )
 
@@ -215,13 +215,18 @@ def build_buyma_category_plan(
         sheet_cat3,
         source_product_name,
     )
-    semantic_buyma_cat2 = map_standard_to_buyma_category(standard_category, combined_text)
-    semantic_used = standard_category != StandardCategory.ETC and bool(semantic_buyma_cat2)
+    is_mens_category = "メンズ" in (cat1 or "")
+    semantic_cat2, semantic_cat3 = map_standard_to_buyma_middle_and_subcategory(
+        standard_category,
+        combined_text,
+        is_mens=is_mens_category,
+    )
+    semantic_used = standard_category != StandardCategory.ETC and bool(semantic_cat2)
     semantic_fallback_used = False
 
     if semantic_used:
-        cat2 = semantic_buyma_cat2
-        cat3 = ""
+        cat2 = semantic_cat2
+        cat3 = semantic_cat3
         cat_source = f"{cat_source}+semantic"
     else:
         semantic_fallback_used = True
