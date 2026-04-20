@@ -3079,67 +3079,12 @@ def fill_buyma_form(driver, row_data: Dict[str, str]) -> str:
                 row_data,
                 category_corrector=correct_buyma_category,
             )
-            cat1 = category_plan["cat1"]
-            cat2 = category_plan["cat2"]
-            cat3 = category_plan["cat3"]
-            cat_source = category_plan["cat_source"]
-            if cat1 and cat2:
-                print(f"  카테고리({cat_source}): {cat1} > {cat2} > {cat3}")
-                # ?카테고리 ?택
-                selected_cat1 = _select_category_by_arrow(driver, 0, cat1)
-                if not selected_cat1:
-                    # 대카테고리는 표기 흔들림이 잦아서 부분 매칭을 추가 시도한다.
-                    selected_cat1 = _find_best_option_by_arrow(driver, 0, cat1, fallback_other=False)
-                if (not selected_cat1) and cat_source.startswith("시트"):
-                    # 시트값으로 실패하면 기존 자동추론으로 한 번 fallback
-                    f1 = category_plan["fallback_cat1"]
-                    f2 = category_plan["fallback_cat2"]
-                    f3 = category_plan["fallback_cat3"]
-                    if f1 and f2:
-                        print(f"  △ 시트 카테고리 미매칭, 자동추론 fallback: {f1} > {f2} > {f3}")
-                        cat1, cat2, cat3 = f1, f2, f3
-                        selected_cat1 = _select_category_by_arrow(driver, 0, cat1)
-                        if not selected_cat1:
-                            selected_cat1 = _find_best_option_by_arrow(driver, 0, cat1, fallback_other=False)
-
-                if selected_cat1:
-                    print(f"  대카테: {cat1}")
-                    # 중카테고리 선택
-                    if cat2 and _find_best_option_by_arrow(driver, 1, cat2):
-                        # 소카테고리 선택 확인
-                        sel_val = driver.execute_script("""
-                            var items = document.querySelectorAll('.sell-category__item');
-                            if (items.length < 2) return '';
-                            var v = items[1].querySelector('.Select-value-label');
-                            return v ? v.textContent.trim() : '';
-                        """)
-                        if 'その他' in sel_val and sel_val != cat2:
-                            print(f"  ✓ 중카테: {cat2} -> その他 (기타)")
-                        else:
-                            print(f"  ✓ 중카테: {sel_val or cat2}")
-                        # 소카테고리 선택
-                        if cat3:
-                            items_count = len(driver.find_elements(By.CSS_SELECTOR, '.sell-category__item'))
-                            if items_count >= 3:
-                                if _find_best_option_by_arrow(driver, 2, cat3):
-                                    sel_val3 = driver.execute_script("""
-                                        var items = document.querySelectorAll('.sell-category__item');
-                                        if (items.length < 3) return '';
-                                        var v = items[2].querySelector('.Select-value-label');
-                                        return v ? v.textContent.trim() : '';
-                                    """)
-                                    if 'その他' in (sel_val3 or '') and sel_val3 != cat3:
-                                        print(f"  ✓ 소카테: {cat3} -> その他 (기타)")
-                                    else:
-                                        print(f"  ✓ 소카테: {sel_val3 or cat3}")
-                                else:
-                                    print(f"  △ 소카테 '{cat3}' 미발견, その他도 없음")
-                    else:
-                        print(f"  △ 중카테 '{cat2}' 미발견, その他도 없음")
-                else:
-                    print(f"  △ 대카테 '{cat1}' 미발견, 자동 선택 필요")
-            else:
-                print(f"  ✗ 카테고리 추론 불가, 자동 선택 필요")
+            buyma_category_mod.apply_buyma_category_selection(
+                driver,
+                category_plan,
+                select_category_by_arrow=_select_category_by_arrow,
+                find_best_option_by_arrow=_find_best_option_by_arrow,
+            )
         except Exception as e:
             print(f"  ✗ 카테고리 선택 실패: {e}")
 

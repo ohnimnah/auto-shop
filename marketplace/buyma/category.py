@@ -1,5 +1,6 @@
 """BUYMA category and gender inference helpers."""
 
+from selenium.webdriver.common.by import By
 from typing import Callable, Dict, List, Tuple
 
 
@@ -221,3 +222,82 @@ def build_buyma_category_plan(
         "fallback_cat2": corrected_fallback_cat2,
         "fallback_cat3": fallback_cat3,
     }
+
+
+def apply_buyma_category_selection(
+    driver,
+    category_plan: Dict[str, str],
+    *,
+    select_category_by_arrow: Callable[[object, int, str], bool],
+    find_best_option_by_arrow: Callable[[object, int, str, bool], bool],
+) -> None:
+    """Apply BUYMA category plan to the browser UI."""
+    cat1 = category_plan["cat1"]
+    cat2 = category_plan["cat2"]
+    cat3 = category_plan["cat3"]
+    cat_source = category_plan["cat_source"]
+
+    if not cat1 or not cat2:
+        print("  ✗ 카테고리 추론 불가, 자동 선택 필요")
+        return
+
+    print(f"  카테고리({cat_source}): {cat1} > {cat2} > {cat3}")
+    selected_cat1 = select_category_by_arrow(driver, 0, cat1)
+    if not selected_cat1:
+        selected_cat1 = find_best_option_by_arrow(driver, 0, cat1, False)
+
+    if (not selected_cat1) and cat_source.startswith("시트"):
+        f1 = category_plan["fallback_cat1"]
+        f2 = category_plan["fallback_cat2"]
+        f3 = category_plan["fallback_cat3"]
+        if f1 and f2:
+            print(f"  △ 시트 카테고리 미매칭, 자동추론 fallback: {f1} > {f2} > {f3}")
+            cat1, cat2, cat3 = f1, f2, f3
+            selected_cat1 = select_category_by_arrow(driver, 0, cat1)
+            if not selected_cat1:
+                selected_cat1 = find_best_option_by_arrow(driver, 0, cat1, False)
+
+    if not selected_cat1:
+        print(f"  △ 대카테 '{cat1}' 미발견, 자동 선택 필요")
+        return
+
+    print(f"  대카테: {cat1}")
+    if not cat2 or not find_best_option_by_arrow(driver, 1, cat2):
+        print(f"  △ 중카테 '{cat2}' 미발견, その他도 없음")
+        return
+
+    sel_val = driver.execute_script(
+        """
+        var items = document.querySelectorAll('.sell-category__item');
+        if (items.length < 2) return '';
+        var v = items[1].querySelector('.Select-value-label');
+        return v ? v.textContent.trim() : '';
+        """
+    )
+    if "その他" in sel_val and sel_val != cat2:
+        print(f"  ✓ 중카테: {cat2} -> その他 (기타)")
+    else:
+        print(f"  ✓ 중카테: {sel_val or cat2}")
+
+    if not cat3:
+        return
+
+    items_count = len(driver.find_elements(By.CSS_SELECTOR, ".sell-category__item"))
+    if items_count < 3:
+        return
+
+    if find_best_option_by_arrow(driver, 2, cat3):
+        sel_val3 = driver.execute_script(
+            """
+            var items = document.querySelectorAll('.sell-category__item');
+            if (items.length < 3) return '';
+            var v = items[2].querySelector('.Select-value-label');
+            return v ? v.textContent.trim() : '';
+            """
+        )
+        if "その他" in (sel_val3 or "") and sel_val3 != cat3:
+            print(f"  ✓ 소카테: {cat3} -> その他 (기타)")
+        else:
+            print(f"  ✓ 소카테: {sel_val3 or cat3}")
+    else:
+        print(f"  △ 소카테 '{cat3}' 미발견, その他도 없음")
