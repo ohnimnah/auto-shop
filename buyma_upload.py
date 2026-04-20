@@ -86,14 +86,6 @@ def get_runtime_data_dir() -> str:
     return os.path.join(os.path.expanduser("~"), ".auto_shop")
 
 
-def _normalize_jp_match_text(text: str) -> str:
-    return buyma_options_mod.normalize_jp_match_text(text)
-
-
-def _is_shitei_nashi_text(text: str) -> bool:
-    return buyma_options_mod.is_shitei_nashi_text(text)
-
-
 def _load_sheet_runtime_config() -> None:
     """로컬에서 저장한 시트 설정파일을 읽어 기본값을 반영한다."""
     global SPREADSHEET_ID, SHEET_GIDS, SHEET_NAME, ROW_START
@@ -296,10 +288,6 @@ def _scroll_and_click(driver, element):
     return buyma_ui_mod.scroll_and_click(driver, element, sleep_fn=_sleep)
 
 
-def _infer_color_system(color_text: str) -> str:
-    return buyma_options_mod.infer_color_system(color_text)
-
-
 def _select_color_system(driver, color_system: str, row_index: int = 0) -> bool:
     return buyma_options_mod.select_color_system(
         driver,
@@ -308,14 +296,6 @@ def _select_color_system(driver, color_system: str, row_index: int = 0) -> bool:
         sleep_fn=_sleep,
         scroll_and_click=_scroll_and_click,
     )
-
-
-def _split_color_values(color_text: str) -> List[str]:
-    return buyma_options_mod.split_color_values(color_text)
-
-
-def _expand_color_abbreviations(color_text: str) -> str:
-    return buyma_options_mod.expand_color_abbreviations(color_text)
 
 
 def _try_add_color_row(driver) -> bool:
@@ -360,22 +340,6 @@ def _fill_color_supplement(driver, color_text_en: str) -> bool:
         color_text_en,
         scroll_and_click=_scroll_and_click,
     )
-
-
-def _build_size_variants(size_raw: str) -> List[str]:
-    return buyma_options_mod.build_size_variants(size_raw)
-
-
-def _normalize_size_token_for_match(s: str) -> str:
-    return buyma_options_mod.normalize_size_token_for_match(s)
-
-
-def _size_match(a: str, b: str) -> bool:
-    return buyma_options_mod.size_match(a, b)
-
-
-def _is_free_size_text(size_text: str) -> bool:
-    return buyma_options_mod.is_free_size_text(size_text)
 
 
 def _check_no_variation_option(driver, prefer_shitei_nashi: bool = False) -> bool:
@@ -448,10 +412,6 @@ def _select_option_in_select_control(driver, select_el, target_text: str) -> boo
     )
 
 
-def _infer_reference_jp_size(size_raw: str) -> str:
-    return buyma_options_mod.infer_reference_jp_size(size_raw)
-
-
 def _fill_size_table_rows(driver, panel, size_text: str) -> int:
     return buyma_options_mod.fill_size_table_rows(
         driver,
@@ -460,24 +420,8 @@ def _fill_size_table_rows(driver, panel, size_text: str) -> int:
         sleep_fn=_sleep,
         scroll_and_click=_scroll_and_click,
         select_option_in_select_control_fn=_select_option_in_select_control,
-        infer_reference_jp_size_fn=_infer_reference_jp_size,
+        infer_reference_jp_size_fn=buyma_options_mod.infer_reference_jp_size,
     )
-
-
-def _normalize_actual_size_for_upload(value: str) -> str:
-    return buyma_validate_mod.normalize_actual_size_for_upload(value)
-
-
-def _extract_actual_measure_map(actual_size_text: str) -> Dict[str, str]:
-    return buyma_validate_mod.extract_actual_measure_map(actual_size_text)
-
-
-def _extract_actual_size_rows(actual_size_text: str) -> Dict[str, Dict[str, str]]:
-    return buyma_validate_mod.extract_actual_size_rows(actual_size_text)
-
-
-def _pick_measure_value_by_label(label_text: str, measure_map: Dict[str, str]) -> str:
-    return buyma_validate_mod.pick_measure_value_by_label(label_text, measure_map)
 
 
 def _fill_size_edit_details(driver, actual_size_text: str) -> int:
@@ -485,9 +429,9 @@ def _fill_size_edit_details(driver, actual_size_text: str) -> int:
         driver,
         actual_size_text,
         scroll_and_click=_scroll_and_click,
-        extract_actual_size_rows_fn=_extract_actual_size_rows,
-        extract_actual_measure_map_fn=_extract_actual_measure_map,
-        pick_measure_value_by_label_fn=_pick_measure_value_by_label,
+        extract_actual_size_rows_fn=buyma_validate_mod.extract_actual_size_rows,
+        extract_actual_measure_map_fn=buyma_validate_mod.extract_actual_measure_map,
+        pick_measure_value_by_label_fn=buyma_validate_mod.pick_measure_value_by_label,
     )
 
 
@@ -623,9 +567,9 @@ _build_buyma_title_retry_candidates = buyma_mapper_mod.build_buyma_title_retry_c
 
 resolve_image_files = buyma_images_mod.resolve_image_files
 BUYMA_ROW_MAPPER = buyma_mapper_mod.BuymaRowMapper(
-    normalize_actual_size_for_upload=_normalize_actual_size_for_upload,
-    expand_color_abbreviations=_expand_color_abbreviations,
-    split_color_values=_split_color_values,
+    normalize_actual_size_for_upload=buyma_validate_mod.normalize_actual_size_for_upload,
+    expand_color_abbreviations=buyma_options_mod.expand_color_abbreviations,
+    split_color_values=buyma_options_mod.split_color_values,
     resolve_image_files=resolve_image_files,
 )
 
@@ -714,9 +658,9 @@ def _fill_buyma_form_via_modules(driver, row_data: Dict[str, str]) -> str:
         apply_buyma_option_selection=buyma_options_mod.apply_buyma_option_selection,
         apply_buyma_post_option_fields=buyma_uploader_mod.apply_buyma_post_option_fields,
         upload_product_images=buyma_images_mod.upload_product_images,
-        normalize_actual_size_for_upload=_normalize_actual_size_for_upload,
-        expand_color_abbreviations=_expand_color_abbreviations,
-        split_color_values=_split_color_values,
+        normalize_actual_size_for_upload=buyma_validate_mod.normalize_actual_size_for_upload,
+        expand_color_abbreviations=buyma_options_mod.expand_color_abbreviations,
+        split_color_values=buyma_options_mod.split_color_values,
         resolve_image_files=resolve_image_files,
         category_corrector=correct_buyma_category,
         select_category_by_arrow=_select_category_by_arrow,
