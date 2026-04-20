@@ -2856,6 +2856,12 @@ _build_buyma_product_title = buyma_mapper_mod.build_buyma_product_title
 _build_buyma_title_retry_candidates = buyma_mapper_mod.build_buyma_title_retry_candidates
 
 resolve_image_files = buyma_images_mod.resolve_image_files
+BUYMA_ROW_MAPPER = buyma_mapper_mod.BuymaRowMapper(
+    normalize_actual_size_for_upload=_normalize_actual_size_for_upload,
+    expand_color_abbreviations=_expand_color_abbreviations,
+    split_color_values=_split_color_values,
+    resolve_image_files=resolve_image_files,
+)
 
 
 def _save_buyma_credentials(email: str, password: str):
@@ -2937,7 +2943,7 @@ def fill_buyma_form(driver, row_data: Dict[str, str]) -> str:
     return buyma_uploader_mod.fill_buyma_form(
         driver,
         row_data,
-        build_buyma_form_payload=buyma_mapper_mod.build_buyma_form_payload,
+        build_buyma_form_payload=BUYMA_ROW_MAPPER.map_row,
         build_buyma_category_plan=buyma_category_mod.build_buyma_category_plan,
         apply_buyma_category_selection=buyma_category_mod.apply_buyma_category_selection,
         apply_buyma_option_selection=buyma_options_mod.apply_buyma_option_selection,
