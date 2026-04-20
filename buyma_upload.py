@@ -66,6 +66,7 @@ from marketplace.buyma import mapper as buyma_mapper_mod
 from marketplace.buyma import options as buyma_options_mod
 from marketplace.buyma import selectors as buyma_selectors
 from marketplace.buyma import submit as buyma_submit_mod
+from marketplace.buyma import ui as buyma_ui_mod
 from marketplace.buyma import uploader as buyma_uploader_mod
 from marketplace.buyma import validate as buyma_validate_mod
 
@@ -652,13 +653,7 @@ def resolve_image_files(image_paths_cell: str) -> List[str]:
 
 def _scroll_and_click(driver, element):
     """Scroll element into view and click safely."""
-    driver.execute_script("arguments[0].scrollIntoView({block: 'start'});", element)
-    driver.execute_script("window.scrollBy(0, -120);")
-    _sleep(0.3)
-    try:
-        element.click()
-    except Exception:
-        driver.execute_script("arguments[0].click();", element)
+    return buyma_ui_mod.scroll_and_click(driver, element, sleep_fn=_sleep)
 
 
 def _infer_color_system(color_text: str) -> str:
@@ -2517,11 +2512,7 @@ def _find_best_option_by_arrow(driver, item_index: int, target_keyword: str,
 
 def _dismiss_overlay(driver):
     """?라?버 ?업/?버?이 ?거"""
-    driver.execute_script("""
-        document.querySelectorAll('#driver-page-overlay, .driver-popover, [id*="driver-"]')
-            .forEach(function(el) { el.remove(); });
-    """)
-    _sleep(0.3)
+    return buyma_ui_mod.dismiss_overlay(driver, sleep_fn=_sleep)
 
 
 def _find_section_field(driver, section_title: str, field_css: str):
