@@ -87,12 +87,11 @@ def get_runtime_data_dir() -> str:
 
 
 def _normalize_jp_match_text(text: str) -> str:
-    return (text or "").strip().replace(" ", "").replace("\u3000", "")
+    return buyma_options_mod.normalize_jp_match_text(text)
 
 
 def _is_shitei_nashi_text(text: str) -> bool:
-    normalized = _normalize_jp_match_text(text)
-    return JP_SHITEI_NASHI in normalized or JP_SIZE_SHITEI_NASHI in normalized
+    return buyma_options_mod.is_shitei_nashi_text(text)
 
 
 def _load_sheet_runtime_config() -> None:
@@ -171,146 +170,6 @@ COL = {
     'Y': 24, 'Z': 25,
 }
 
-
-def get_credentials_path() -> str:
-    """자격증명 파일 경로 반환"""
-    cred = os.path.join(get_runtime_data_dir(), "credentials.json")
-    if os.path.exists(cred):
-        return cred
-    fallback = os.path.join(os.path.dirname(__file__), 'credentials.json')
-    if os.path.exists(fallback):
-        return fallback
-    raise FileNotFoundError("credentials.json 파일을 찾을 수 없습니다")
-
-
-def get_sheets_service():
-    """Create Google Sheets API service."""
-    creds = Credentials.from_service_account_file(
-        get_credentials_path(),
-        scopes=['https://www.googleapis.com/auth/spreadsheets'],
-    )
-    return build('sheets', 'v4', credentials=creds)
-
-
-def get_sheet_name(service) -> str:
-    """Find sheet name from configured GID."""
-    meta = service.spreadsheets().get(spreadsheetId=SPREADSHEET_ID).execute()
-    for s in meta.get('sheets', []):
-        if s['properties']['sheetId'] == SHEET_GIDS[0]:
-            return s['properties']['title']
-    return SHEET_NAME
-
-
-def read_upload_rows(service, sheet_name: str, specific_row: int = 0) -> List[Dict[str, str]]:
-    """Read upload target rows from sheet. Only rows with BUYMA price are included."""
-    header_map = get_sheet_header_map(service, sheet_name)
-    status_index = header_map.get(PROGRESS_STATUS_HEADER)
-    last_index = max(COL['Y'], status_index if status_index is not None else COL['Y'])
-    last_col_letter = column_index_to_letter(last_index)
-
-    try:
-        result = service.spreadsheets().values().get(
-            spreadsheetId=SPREADSHEET_ID,
-            range=f"'{sheet_name}'!A{ROW_START}:{last_col_letter}1000",
-        ).execute()
-    except Exception as e:
-        print(f"시트 읽기 실패: {e}")
-        return []
-
-    rows_data = []
-    for idx, row in enumerate(result.get('values', []), start=ROW_START):
-        if specific_row and idx != specific_row:
-            continue
-
-        def cell(col_letter: str) -> str:
-            i = COL[col_letter]
-            return row[i].strip() if i < len(row) and row[i] else ""
-
-        def cell_by_index(index: int | None) -> str:
-            if index is None:
-                return ""
-            return row[index].strip() if index < len(row) and row[index] else ""
-
-        # 최소 조건: URL + 상품명 + 바이마 판매가 있어야 출품 대상
-        url = cell('B')
-        product_name = cell('E')
-        buyma_price = cell('M')
-
-        if not url or not product_name or not buyma_price:
-            if specific_row and idx == specific_row:
-                missing = []
-                if not url:
-                    missing.append("URL(B열)")
-                if not product_name:
-                    missing.append("상품명(E열)")
-                if not buyma_price:
-                    missing.append("바이마판매가(M열)")
-                print(f"  {idx}행 제외: 필수값 누락 -> {', '.join(missing)}")
-            continue
-
-        progress_status = cell_by_index(status_index)
-        normalized_status = (progress_status or "").strip()
-        # 특정 행 테스트 모드에서는 상태 필터를 우회한다.
-        if not specific_row:
-            if normalized_status == STATUS_COMPLETED:
-                print(f"  {idx}행 건너뜀 (진행상태: {progress_status})")
-                continue
-
-            if normalized_status in {STATUS_UPLOADING, "UPLOADING"}:
-                continue
-
-            if status_index is not None and normalized_status not in {
-                STATUS_UPLOAD_READY,
-                STATUS_THUMBNAILS_DONE,
-                "THUMBNAILS_DONE",
-                "업로드진행대기",
-            }:
-                continue
-
-        v_cat = cell('V')
-        w_cat = cell('W')
-        x_cat = cell('X')
-        y_cat = cell('Y')
-
-        def _looks_price_like(text: str) -> bool:
-            t = (text or '').strip()
-            if not t:
-                return False
-            if any(sym in t for sym in ['₩', '¥', '$']):
-                return True
-            digits = sum(ch.isdigit() for ch in t)
-            return digits >= max(4, len(t) // 2)
-
-        # 최신 시트: W/X/Y(대/중/소), 구형 시트: V/W/X
-        if w_cat or x_cat or y_cat:
-            cat_large, cat_middle, cat_small = w_cat, x_cat, y_cat
-        else:
-            cat_large, cat_middle, cat_small = v_cat, w_cat, x_cat
-
-        rows_data.append({
-            'row_num': idx,
-            'url': url,
-            'brand': cell('C'),
-            'brand_en': cell('D'),
-            'product_name_kr': product_name,
-            'product_name_en': cell('F'),
-            'musinsa_sku': cell('G'),
-            'color_kr': cell('H'),
-            'color_en': cell('I'),
-            'size': cell('J'),
-            'actual_size': cell('K'),
-            'price_krw': cell('L'),
-            'buyma_price': buyma_price,
-            'image_paths': cell('N'),
-            'shipping_cost': cell('O'),
-            'musinsa_category_large': cat_large,
-            'musinsa_category_middle': cat_middle,
-            'musinsa_category_small': cat_small,
-            'progress_status': progress_status,
-        })
-
-
-    return rows_data
 
 def scan_form_structure(driver):
     """Scan and print BUYMA form structure (debug)."""
@@ -468,164 +327,23 @@ def _try_add_color_row(driver) -> bool:
 
 
 def _try_add_size_row(driver, scope=None) -> bool:
-    """사이즈 행 추가 버튼을 찾아 클릭한다."""
-    try:
-        root = scope or driver
-        before = len(root.find_elements(By.CSS_SELECTOR, ".Select"))
-        candidates = root.find_elements(
-            By.CSS_SELECTOR,
-            "button, a, [role='button'], [class*='add'], [class*='plus'], "
-            "[aria-label*='追加'], [title*='追加'], [data-testid*='add']"
-        )
-        for c in candidates:
-            txt = (c.text or '').strip()
-            cls = (c.get_attribute('class') or '')
-            aria = (c.get_attribute('aria-label') or '')
-            title = (c.get_attribute('title') or '')
-            if (
-                ('追加' in txt) or ('add' in cls.lower()) or ('plus' in cls.lower())
-                or ('追加' in aria) or ('追加' in title)
-            ):
-                _scroll_and_click(driver, c)
-                _sleep(0.4)
-
-
-        # 리스트 없는 사이즈버튼 fallback
-        icon_buttons = root.find_elements(By.CSS_SELECTOR, "button, [role='button']")
-        for b in icon_buttons:
-            txt = (b.text or '').strip()
-            if txt:
-                continue
-            cls = (b.get_attribute('class') or '').lower()
-            if any(k in cls for k in ['plus', 'add', 'icon']):
-                _scroll_and_click(driver, b)
-                _sleep(0.4)
-                after = len(root.find_elements(By.CSS_SELECTOR, ".Select"))
-                if after > before:
-                    return True
-    except Exception:
-        return False
-    return False
+    return buyma_options_mod.try_add_size_row(
+        driver,
+        scope=scope,
+        sleep_fn=_sleep,
+        scroll_and_click=_scroll_and_click,
+    )
 
 
 def _select_size_by_select_controls(driver, scope, size_text: str) -> int:
-    """사이즈 라벨 체크박스 대신 React Select 컨트롤에서 사이즈를 선택한다."""
-    if not size_text:
-        return 0
-    try:
-        t0 = time.time()
-        sizes = [s.strip() for s in size_text.split(',') if s.strip()]
-        if not sizes:
-            return 0
-
-        # 필요 옵션 개수만큼 Select 추가장 시도
-        for _ in range(10):
-            if time.time() - t0 > 8:
-                break
-            current_selects = scope.find_elements(By.CSS_SELECTOR, ".Select")
-            if len(current_selects) >= len(sizes):
-                break
-            if not _try_add_size_row(driver, scope=scope):
-                break
-
-        selected = 0
-        for idx, sz in enumerate(sizes):
-            if time.time() - t0 > 12:
-                break
-            selects = scope.find_elements(By.CSS_SELECTOR, ".Select")
-            if not selects:
-                break
-
-            if idx >= len(selects):
-                if not _try_add_size_row(driver, scope=scope):
-                    break
-                selects = scope.find_elements(By.CSS_SELECTOR, ".Select")
-                if idx >= len(selects):
-                    break
-
-            sel = selects[idx]
-            try:
-                control = sel.find_element(By.CSS_SELECTOR, ".Select-control")
-            except Exception:
-                continue
-
-            _scroll_and_click(driver, control)
-            _sleep(0.25)
-
-            variants = [v.lower().replace(' ', '') for v in _build_size_variants(sz)]
-            options = driver.find_elements(By.CSS_SELECTOR, ".Select-menu-outer .Select-option")
-            picked = False
-
-            if options:
-                for opt in options:
-                    txt = (opt.text or '').strip()
-                    if any(_size_match(v, txt) for v in variants):
-                        _scroll_and_click(driver, opt)
-                        selected += 1
-                        picked = True
-                        _sleep(0.2)
-                        break
-
-            if not picked:
-                # 쇼핑 파트너 옵션 강제입력(특정 ENTER로 매칭 안될 때)
-                try:
-                    sel_input = sel.find_element(By.CSS_SELECTOR, "input")
-                    sel_input.clear()
-                    # cm 표기 변환용 쇼핑 시도 (예: "215" → "21.5")
-                    only_num = re.sub(r"[^0-9]", "", sz)
-                    type_candidates = [sz]
-                    if only_num and 200 <= int(only_num) <= 350:
-                        cm_val = int(only_num) / 10.0
-                        type_candidates.append(f"{cm_val:.1f}")
-                        type_candidates.append(str(int(cm_val)) if cm_val == int(cm_val) else f"{cm_val}")
-                    for query in type_candidates:
-                        sel_input.clear()
-                        sel_input.send_keys(query)
-                        _sleep(0.4)
-                        filtered = driver.find_elements(By.CSS_SELECTOR, ".Select-menu-outer .Select-option")
-                        for opt in filtered:
-                            txt = (opt.text or '').strip()
-                            if any(_size_match(v, txt) for v in variants):
-                                _scroll_and_click(driver, opt)
-                                selected += 1
-                                picked = True
-                                break
-                        if picked:
-                            break
-                    if not picked:
-                        sel_input.send_keys(Keys.ESCAPE)
-                except Exception:
-                    pass
-
-            if not picked:
-                # ArrowDown으로 매칭 옵션 탐색 (특정 ENTER)
-                try:
-                    driver.execute_script("arguments[0].click()", control)
-                    _sleep(0.3)
-                    active = driver.switch_to.active_element
-                    for _ in range(50):
-                        if time.time() - t0 > 15:
-                            break
-                        focused = driver.execute_script(
-                            "var el=document.querySelector('.Select-menu-outer .Select-option.is-focused');"
-                            "return el?el.textContent.trim():'';"
-                        )
-                        fnorm = (focused or '').lower().replace(' ', '')
-                        if focused and any(_size_match(v, fnorm) for v in variants):
-                            active.send_keys(Keys.ENTER)
-                            selected += 1
-                            picked = True
-                            break
-                        active.send_keys(Keys.ARROW_DOWN)
-                        _sleep(0.05)
-                    if not picked:
-                        active.send_keys(Keys.ESCAPE)
-                except Exception:
-                    pass
-
-        return selected
-    except Exception:
-        return 0
+    return buyma_options_mod.select_size_by_select_controls(
+        driver,
+        scope,
+        size_text,
+        sleep_fn=_sleep,
+        scroll_and_click=_scroll_and_click,
+        try_add_size_row_fn=_try_add_size_row,
+    )
 
 
 def _fill_size_supplement(driver, size_text: str) -> bool:
@@ -661,302 +379,63 @@ def _is_free_size_text(size_text: str) -> bool:
 
 
 def _check_no_variation_option(driver, prefer_shitei_nashi: bool = False) -> bool:
-    """사이즈/색상 옵션이 없을 때 '변형없음/지정なし' 계열 옵션을 선택한다."""
-    if prefer_shitei_nashi:
-        keywords = [
-            '指定なし', 'サイズ指定なし', 'サイズなし',
-            '変動なし', '変形なし', 'バリエーションなし', 'バリエーション無し', '변형없음'
-        ]
-    else:
-        keywords = [
-            '変動なし', '変形なし', 'バリエーションなし', 'バリエーション無し', 'サイズなし',
-            'サイズ指定なし', '指定なし', '변형없음'
-        ]
-    try:
-        variation = driver.find_element(By.CSS_SELECTOR, ".sell-variation")
-        labels = variation.find_elements(By.CSS_SELECTOR, "label")
-        for kw in keywords:
-            for lb in labels:
-                txt = (lb.text or '').strip()
-                if not txt:
-                    continue
-                if kw in txt:
-                    _scroll_and_click(driver, lb)
-                    return True
-
-        # 사이즈 기반으로 클릭 가능한 요소를 탐색
-        nodes = variation.find_elements(By.XPATH, ".//*[normalize-space(text())!='']")
-        for kw in keywords:
-            for node in nodes:
-                txt = (node.text or '').strip()
-                if not txt:
-                    continue
-                if kw in txt:
-                    clicked = driver.execute_script(
-                        "var el=arguments[0];"
-                        "while(el){"
-                        "  if(el.tagName==='LABEL' || el.tagName==='BUTTON' || el.getAttribute('role')==='button' || el.onclick){"
-                        "    el.click(); return true;"
-                        "  }"
-                        "  el=el.parentElement;"
-                        "}"
-                        "arguments[0].click(); return true;",
-                        node
-                    )
-                    if clicked:
-                        return True
-
-        # 라벨 박스가 비어있는 경우 input 이름으로 fallback
-        inputs = variation.find_elements(By.CSS_SELECTOR, "input[type='checkbox'], input[type='radio']")
-        for ipt in inputs:
-            meta = ' '.join([
-                ipt.get_attribute('value') or '',
-                ipt.get_attribute('name') or '',
-                ipt.get_attribute('id') or ''
-            ])
-            if any(k in meta for k in ['none', 'unspecified', 'no_variation', 'variation_none']):
-                if not ipt.is_selected():
-                    os.makedirs(CHROME_PROFILE_DIR, exist_ok=True)
-                    return True
-
-        # React Select 모드 선택 fallback
-        selects = variation.find_elements(By.CSS_SELECTOR, ".Select")
-        targets = ['指定なし', 'サイズ指定なし', 'バリエーションなし', '在庫変動なし'] if prefer_shitei_nashi else ['バリエーションなし', '在庫変動なし', 'サイズ指定なし', '指定なし']
-        for sel in selects:
-            for target in targets:
-                if _select_option_in_select_control(driver, sel, target):
-                    return True
-    except Exception:
-        return False
-    return False
+    return buyma_options_mod.check_no_variation_option(
+        driver,
+        prefer_shitei_nashi=prefer_shitei_nashi,
+        scroll_and_click=_scroll_and_click,
+        select_option_in_select_control_fn=_select_option_in_select_control,
+    )
 
 
 def _force_select_shitei_nashi(driver) -> bool:
-    """프리사이즈에서 '指定なし' 정확 일치만 선택한다."""
-    try:
-        variation = driver.find_element(By.CSS_SELECTOR, ".sell-variation")
-
-        # 1) 라벨 텍스트 기반 클릭
-        labels = variation.find_elements(By.CSS_SELECTOR, "label")
-        for lb in labels:
-            if _is_shitei_nashi_text(lb.text or ''):
-                _scroll_and_click(driver, lb)
-                return True
-
-        # 2) 텍스트 노드 기반 클릭
-        nodes = variation.find_elements(By.XPATH, ".//*[normalize-space(text())!='']")
-        for node in nodes:
-            if not _is_shitei_nashi_text(node.text or ''):
-                continue
-            clicked = driver.execute_script(
-                "var el=arguments[0];"
-                "while(el){"
-                "  if(el.tagName==='LABEL' || el.tagName==='BUTTON' || el.getAttribute('role')==='button' || el.onclick){"
-                "    el.click(); return true;"
-                "  }"
-                "  el=el.parentElement;"
-                "}"
-                "arguments[0].click(); return true;",
-                node
-            )
-            if clicked:
-                return True
-
-        # 3) React Select에서 정확 옵션 선택
-        selects = variation.find_elements(By.CSS_SELECTOR, ".Select")
-        for sel in selects:
-            if _select_option_in_select_control(driver, sel, JP_SHITEI_NASHI):
-                return True
-            if _select_option_in_select_control(driver, sel, JP_SIZE_SHITEI_NASHI):
-                return True
-    except Exception:
-        return False
-    return False
+    return buyma_options_mod.force_select_shitei_nashi(
+        driver,
+        scroll_and_click=_scroll_and_click,
+        select_option_in_select_control_fn=_select_option_in_select_control,
+    )
 
 
 def _force_select_shitei_nashi_global(driver) -> bool:
-    """프리사이즈에서 모든 영역에서 '指定なし'를 찾아 선택한다."""
-    # 1) 기본 영역 우선
-    if _force_select_shitei_nashi(driver):
-        return True
-
-    # 2) 사이즈/일본사이즈 Select(일본사이즈 없을 때 선택 시도)
-    try:
-        selects = driver.find_elements(By.CSS_SELECTOR, ".sell-size-table .Select, .sell-variation .Select")
-        for sel in selects:
-            if _select_option_in_select_control(driver, sel, JP_SHITEI_NASHI):
-                return True
-            if _select_option_in_select_control(driver, sel, JP_SIZE_SHITEI_NASHI):
-                return True
-    except Exception:
-        pass
-
-    # 3) 영역 사이즈 정확 일치 클릭 시도
-    try:
-        nodes = driver.find_elements(By.XPATH, "//*[normalize-space(text())!='']")
-        for node in nodes:
-            if not _is_shitei_nashi_text(node.text or ''):
-                continue
-            clicked = driver.execute_script(
-                "var el=arguments[0];"
-                "while(el){"
-                "  if(el.tagName==='LABEL' || el.tagName==='BUTTON' || el.getAttribute('role')==='button' || el.onclick){"
-                "    el.click(); return true;"
-                "  }"
-                "  el=el.parentElement;"
-                "}"
-                "arguments[0].click(); return true;",
-                node
-            )
-            if clicked:
-                return True
-    except Exception:
-        pass
-
-    return False
+    return buyma_options_mod.force_select_shitei_nashi_global(
+        driver,
+        force_select_shitei_nashi_fn=_force_select_shitei_nashi,
+        select_option_in_select_control_fn=_select_option_in_select_control,
+    )
 
 
 def _force_reference_size_shitei_nashi(driver, panel=None) -> bool:
-    """사이즈 테이블의 일본사이즈 Select에서 '指定なし' 강제 선택한다."""
-    try:
-        root = panel if panel is not None else driver
-        # BUYMA 화면 구조 변경을 대비해 여러 셀렉터를 시도함
-        selects = root.find_elements(By.CSS_SELECTOR, ".sell-size-table .Select")
-        if not selects:
-            selects = root.find_elements(By.CSS_SELECTOR, ".sell-variation .sell-size-table .Select")
-        if not selects:
-            return False
-
-        changed = 0
-        for sel in selects:
-            try:
-                # 값 없을 때 skip
-                current = sel.find_elements(By.CSS_SELECTOR, ".Select-value-label")
-                if current and _is_shitei_nashi_text(current[0].text or ''):
-                    changed += 1
-                    continue
-
-                # 1? ?반 ?택 ?수
-                if _select_option_in_select_control(driver, sel, JP_SHITEI_NASHI):
-                    changed += 1
-                    continue
-                if _select_option_in_select_control(driver, sel, JP_SIZE_SHITEI_NASHI):
-                    changed += 1
-                    continue
-
-                # 2) 직접 쇼핑/Enter 선택
-                try:
-                    control = sel.find_element(By.CSS_SELECTOR, ".Select-control")
-                    _scroll_and_click(driver, control)
-                    _sleep(0.2)
-                    inp = sel.find_element(By.CSS_SELECTOR, ".Select-input input")
-                    inp.clear()
-                    inp.send_keys(JP_SHITEI_NASHI)
-                    _sleep(0.35)
-                    opts = driver.find_elements(By.CSS_SELECTOR, ".Select-menu-outer .Select-option")
-                    exact = None
-                    for o in opts:
-                        if _is_shitei_nashi_text(o.text or ''):
-                            exact = o
-                            break
-                    if exact is not None:
-                        _scroll_and_click(driver, exact)
-                        changed += 1
-                        continue
-                    inp.send_keys(Keys.ENTER)
-                    _sleep(0.2)
-                    current2 = sel.find_elements(By.CSS_SELECTOR, ".Select-value-label")
-                    if current2 and _is_shitei_nashi_text(current2[0].text or ''):
-                        changed += 1
-                        continue
-                except Exception:
-                    pass
-            except Exception:
-                continue
-        return changed > 0
-    except Exception:
-        return False
+    return buyma_options_mod.force_reference_size_shitei_nashi(
+        driver,
+        panel=panel,
+        sleep_fn=_sleep,
+        scroll_and_click=_scroll_and_click,
+        select_option_in_select_control_fn=_select_option_in_select_control,
+    )
 
 
 def _force_select_variation_none_sequence(driver, panel=None) -> bool:
-    """요청 순서 강제: サイズ 탭 내 Select(選択してください) -> バリエーションなし 선택."""
-    try:
-        root = panel if panel is not None else driver
-        selects = root.find_elements(By.CSS_SELECTOR, ".sell-variation .Select, .sell-size-table .Select")
-        if not selects:
-            selects = driver.find_elements(By.CSS_SELECTOR, ".sell-variation .Select, .sell-size-table .Select")
-        if not selects:
-            return False
-
-        targets = ["バリエーションなし", "バリエーション無し", "指定なし", "サイズ指定なし"]
-
-        # 1) placeholder/value가 "選択してください"인 Select 우선
-        prioritized = []
-        others = []
-        for sel in selects:
-            try:
-                txt = (sel.text or "").strip()
-                if "選択してください" in txt:
-                    prioritized.append(sel)
-                else:
-                    others.append(sel)
-            except Exception:
-                others.append(sel)
-
-        for sel in prioritized + others:
-            for t in targets:
-                if _select_option_in_select_control(driver, sel, t):
-                    return True
-        return False
-    except Exception:
-        return False
+    return buyma_options_mod.force_select_variation_none_sequence(
+        driver,
+        panel=panel,
+        select_option_in_select_control_fn=_select_option_in_select_control,
+    )
 
 
 def _enable_size_selection_ui(driver) -> bool:
-    """사이즈 선택 UI가 접혀 있을 때 '사이즈 지정' 계열 토글을 클릭해 펼친다."""
-    keywords = ['サイズを指定', 'サイズあり', 'サイズを選択', 'サイズを入力', 'バリエーションあり']
-    try:
-        variation = driver.find_element(By.CSS_SELECTOR, ".sell-variation")
-        nodes = variation.find_elements(By.XPATH, ".//*[normalize-space(text())!='']")
-        for node in nodes:
-            txt = (node.text or '').strip()
-            if not txt:
-                continue
-            if any(k in txt for k in keywords):
-                try:
-                    _scroll_and_click(driver, node)
-                except Exception:
-                    driver.execute_script("arguments[0].click();", node)
-                _sleep(0.6)
-                return True
-    except Exception:
-        return False
-    return False
+    return buyma_options_mod.enable_size_selection_ui(
+        driver,
+        sleep_fn=_sleep,
+        scroll_and_click=_scroll_and_click,
+    )
 
 
 def _fill_size_text_inputs(driver, size_text: str) -> int:
-    """체크박스 없는 경우 사이즈 입력칸에 값을 입력한다."""
-    if not size_text:
-        return 0
-    sizes = [s.strip() for s in size_text.split(',') if s.strip()]
-    if not sizes:
-        return 0
-    try:
-        inputs = driver.find_elements(By.CSS_SELECTOR, ".sell-variation input.bmm-c-text-field, .sell-variation input[type='text']")
-        visible_inputs = [i for i in inputs if i.is_displayed() and i.is_enabled()]
-        if not visible_inputs:
-            return 0
-        count = 0
-        for idx, sz in enumerate(sizes):
-            target = visible_inputs[min(idx, len(visible_inputs) - 1)]
-            _scroll_and_click(driver, target)
-            target.clear()
-            target.send_keys(sz)
-            count += 1
-            _sleep(0.15)
-        return count
-    except Exception:
-        return 0
+    return buyma_options_mod.fill_size_text_inputs(
+        driver,
+        size_text,
+        sleep_fn=_sleep,
+        scroll_and_click=_scroll_and_click,
+    )
 
 
 def _select_option_in_select_control(driver, select_el, target_text: str) -> bool:
@@ -974,70 +453,15 @@ def _infer_reference_jp_size(size_raw: str) -> str:
 
 
 def _fill_size_table_rows(driver, panel, size_text: str) -> int:
-    """판매자용 사이즈(sell-size-table)에서 사이즈명을 지정 위치에 입력한다."""
-    if not size_text:
-        return 0
-    try:
-        sizes = [s.strip() for s in size_text.split(',') if s.strip()]
-        if not sizes:
-            return 0
-
-        # 상단 모드 Select를 'バリエーションあり'로 설정
-        mode_selects = panel.find_elements(By.CSS_SELECTOR, ".bmm-l-grid-no-bottom .Select")
-        if mode_selects:
-            _select_option_in_select_control(driver, mode_selects[0], 'バリエーションあり')
-            _sleep(0.4)
-
-        table = panel.find_elements(By.CSS_SELECTOR, ".sell-size-table")
-        if not table:
-            return 0
-
-        # 필요 옵션만 추가 (고정 12개 제한으로 일부 사이즈 누락되는 문제 방지)
-        max_add_attempts = max(len(sizes) * 2, 24)
-        for _ in range(max_add_attempts):
-            rows = panel.find_elements(By.CSS_SELECTOR, ".sell-size-table tbody tr")
-            if len(rows) >= len(sizes):
-                break
-            add_links = panel.find_elements(By.XPATH, ".//div[contains(@class,'bmm-c-form-table__foot')]//a")
-            clicked = False
-            for a in add_links:
-                txt = (a.text or '').strip()
-                if '新しいサイズを追加' in txt or 'サイズ' in txt:
-                    _scroll_and_click(driver, a)
-                    _sleep(0.35)
-                    clicked = True
-                    break
-            if not clicked:
-                break
-
-        rows = panel.find_elements(By.CSS_SELECTOR, ".sell-size-table tbody tr")
-        filled = 0
-        for idx, sz in enumerate(sizes):
-            if idx >= len(rows):
-                break
-            try:
-                name_input = rows[idx].find_element(By.CSS_SELECTOR, "td:nth-child(2) input.bmm-c-text-field")
-                _scroll_and_click(driver, name_input)
-                name_input.clear()
-                name_input.send_keys(sz)
-
-                # 다른 영역(일본사이즈)에서 선택
-                try:
-                    ref_select = rows[idx].find_element(By.CSS_SELECTOR, "td:nth-child(3) .Select")
-                    ref_target = _infer_reference_jp_size(sz)
-                    if ref_target:
-                        _select_option_in_select_control(driver, ref_select, ref_target)
-                except Exception:
-                    pass
-
-                filled += 1
-                _sleep(0.15)
-            except Exception:
-                continue
-
-        return filled
-    except Exception:
-        return 0
+    return buyma_options_mod.fill_size_table_rows(
+        driver,
+        panel,
+        size_text,
+        sleep_fn=_sleep,
+        scroll_and_click=_scroll_and_click,
+        select_option_in_select_control_fn=_select_option_in_select_control,
+        infer_reference_jp_size_fn=_infer_reference_jp_size,
+    )
 
 
 def _normalize_actual_size_for_upload(value: str) -> str:
@@ -1052,293 +476,19 @@ def _extract_actual_size_rows(actual_size_text: str) -> Dict[str, Dict[str, str]
     return buyma_validate_mod.extract_actual_size_rows(actual_size_text)
 
 
-MEASURE_ALIASES: Dict[str, List[str]] = {
-    "총장": ["총장", "着丈", "総丈", "全長", "length"],
-    "어깨너비": ["어깨너비", "肩幅", "shoulder"],
-    "가슴단면": ["가슴단면", "가슴", "身幅", "胸囲", "バスト", "chest"],
-    "소매길이": ["소매길이", "袖丈", "裄丈", "sleeve"],
-    "허리단면": ["허리단면", "허리", "ウエスト", "胴囲", "waist"],
-    "엉덩이단면": ["엉덩이단면", "엉덩이", "ヒップ", "hip"],
-    "허벅지단면": ["허벅지단면", "허벅지", "ワタリ", "もも", "thigh"],
-    "밑위": ["밑위", "股上", "rise"],
-    "밑단단면": ["밑단단면", "밑단", "裾幅", "hem"],
-    "발길이": ["발길이", "足長", "アウトソール"],
-    "발볼": ["발볼", "足幅", "ワイズ", "幅"],
-    "굽높이": ["굽높이", "힐", "ヒール高", "heel"],
-}
-
-
 def _pick_measure_value_by_label(label_text: str, measure_map: Dict[str, str]) -> str:
     return buyma_validate_mod.pick_measure_value_by_label(label_text, measure_map)
 
 
 def _fill_size_edit_details(driver, actual_size_text: str) -> int:
-    all_rows = _extract_actual_size_rows(actual_size_text)
-    fallback_pairs = _extract_actual_measure_map(actual_size_text)
-    if not all_rows and not fallback_pairs:
-        print("  [actual-size] skip: no parsed measurement rows")
-        return 0
-
-    try:
-        debug_dir = os.path.join(os.path.dirname(__file__), "_debug")
-        try:
-            os.makedirs(debug_dir, exist_ok=True)
-        except Exception:
-            debug_dir = os.path.dirname(__file__)
-
-        def _dump_edit_debug(tag: str) -> None:
-            try:
-                ts = datetime.now().strftime("%Y%m%d_%H%M%S_%f")
-                html_path = os.path.join(debug_dir, f"edit_debug_{tag}_{ts}.html")
-                png_path = os.path.join(debug_dir, f"edit_debug_{tag}_{ts}.png")
-                with open(html_path, "w", encoding="utf-8") as f:
-                    f.write(driver.page_source or "")
-                try:
-                    driver.save_screenshot(png_path)
-                except Exception:
-                    pass
-                print(f"  [actual-size] debug dump saved: {html_path}")
-            except Exception:
-                pass
-
-        def _pick_best_dialog(dialogs):
-            if not dialogs:
-                return None
-            best = None
-            best_score = -1
-            for d in dialogs:
-                try:
-                    txt = (d.text or "").strip()
-                    score = 0
-                    if any(k in txt for k in ["着丈", "ウエスト", "股上", "ヒップ", "サイズ", "cm"]):
-                        score += 5
-                    inputs = d.find_elements(By.CSS_SELECTOR, "input[type='text'], input[type='number'], input[type='tel'], textarea")
-                    editable = [i for i in inputs if i.get_attribute("disabled") is None]
-                    score += len(editable)
-                    if score > best_score:
-                        best = d
-                        best_score = score
-                except Exception:
-                    continue
-            return best or dialogs[-1]
-
-        # size table area only (avoid unrelated 編集 buttons in other sections)
-        edit_buttons = driver.find_elements(
-            By.XPATH,
-            "//div[contains(@class,'sell-size-table')]//*[self::button or self::a][contains(normalize-space(.), '編集')]",
-        )
-        if not edit_buttons:
-            edit_buttons = driver.find_elements(
-                By.XPATH,
-                "//div[contains(@class,'sell-variation')]//*[self::button or self::a][contains(normalize-space(.), '編集')]",
-            )
-        print(f"  [actual-size] edit buttons found: total={len(edit_buttons)}")
-        filled_count = 0
-        main_handle = driver.current_window_handle
-        ordered_size_keys = list(all_rows.keys())
-        for btn_idx, btn in enumerate(edit_buttons):
-            try:
-                if not btn.is_displayed():
-                    continue
-
-                # try to detect current size row text (e.g. 00/01/02)
-                current_size_key = ""
-                try:
-                    row_node = driver.execute_script(
-                        "let e=arguments[0]; while(e && e.tagName!=='TR'){e=e.parentElement;} return e;", btn
-                    )
-                    row_text = (row_node.text if row_node else "") or ""
-                    for sname in all_rows.keys():
-                        if sname and sname in row_text:
-                            current_size_key = sname
-                            break
-                except Exception:
-                    current_size_key = ""
-
-                if not current_size_key and btn_idx < len(ordered_size_keys):
-                    current_size_key = ordered_size_keys[btn_idx]
-                selected_pairs = all_rows.get(current_size_key) or (next(iter(all_rows.values())) if all_rows else fallback_pairs)
-                print(f"  [actual-size] open edit: size_key='{current_size_key or 'N/A'}' pairs={len(selected_pairs or {})}")
-                before_handles = set(driver.window_handles)
-                before_modal_count = len(driver.find_elements(By.CSS_SELECTOR, "[role='dialog'], .ReactModal__Content, .bmm-c-modal"))
-                before_url = driver.current_url
-                _scroll_and_click(driver, btn)
-                _sleep(0.25)
-
-                dialog = driver
-                popup_handle = None
-                for _ in range(10):
-                    now_handles = set(driver.window_handles)
-                    new_handles = [h for h in now_handles if h not in before_handles]
-                    if new_handles:
-                        popup_handle = new_handles[0]
-                        break
-                    _sleep(0.15)
-                if popup_handle:
-                    driver.switch_to.window(popup_handle)
-                    _sleep(0.5)
-                    print("  [actual-size] popup window detected")
-                    dialog = driver
-                else:
-                    dialogs = driver.find_elements(By.CSS_SELECTOR, "[role='dialog'], .ReactModal__Content, .bmm-c-modal")
-                    dialog = _pick_best_dialog(dialogs) if dialogs else driver
-                    # fallback: if nothing opened, force JS click on edit trigger hierarchy
-                    if len(dialogs) <= before_modal_count and driver.current_url == before_url:
-                        try:
-                            js_opened = driver.execute_script(
-                                "var el=arguments[0];"
-                                "if(!el) return false;"
-                                "el.click();"
-                                "var p=el.parentElement;"
-                                "for(var i=0;i<4 && p;i++){"
-                                " if(p.tagName==='BUTTON' || p.tagName==='A' || p.getAttribute('role')==='button'){ p.click(); }"
-                                " p=p.parentElement;"
-                                "}"
-                                "return true;",
-                                btn
-                            )
-                            if js_opened:
-                                _sleep(0.35)
-                                dialogs = driver.find_elements(By.CSS_SELECTOR, "[role='dialog'], .ReactModal__Content, .bmm-c-modal")
-                                dialog = _pick_best_dialog(dialogs) if dialogs else driver
-                                print(f"  [actual-size] js-click fallback dialogs: {len(dialogs)}")
-                        except Exception:
-                            pass
-                visible_inputs = []
-                for _ in range(10):
-                    visible_inputs = [
-                        i for i in dialog.find_elements(By.CSS_SELECTOR, "input[type='text'], input[type='number'], input[type='tel'], textarea")
-                        if i.get_attribute("disabled") is None
-                    ]
-                    if visible_inputs:
-                        break
-                    _sleep(0.2)
-
-                active_frame = None
-                if not visible_inputs:
-                    # Some edit popups are rendered inside an iframe. Try switching and probing.
-                    try:
-                        driver.switch_to.default_content()
-                        top_frames = driver.find_elements(By.CSS_SELECTOR, "iframe")
-                        for fi, frame in enumerate(top_frames):
-                            try:
-                                driver.switch_to.default_content()
-                                driver.switch_to.frame(frame)
-                                probe_inputs = [
-                                    i for i in driver.find_elements(By.CSS_SELECTOR, "input[type='text'], input[type='number'], input[type='tel'], textarea")
-                                    if i.get_attribute("disabled") is None
-                                ]
-                                if probe_inputs:
-                                    visible_inputs = probe_inputs
-                                    active_frame = fi
-                                    print(f"  [actual-size] iframe inputs detected: frame={fi} count={len(probe_inputs)}")
-                                    break
-                            except Exception:
-                                continue
-                        if active_frame is None and popup_handle is None:
-                            driver.switch_to.default_content()
-                    except Exception:
-                        pass
-                print(f"  [actual-size] dialog inputs: {len(visible_inputs)}")
-                row_scope = driver if active_frame is not None else dialog
-                rows = row_scope.find_elements(By.CSS_SELECTOR, "tr, .bmm-c-field, .bmm-c-form-table__table tbody tr")
-                local_filled = 0
-                used_inputs = set()
-                for row in rows:
-                    try:
-                        label = (row.text or "").strip()
-                        if not label:
-                            continue
-                        picked_value = _pick_measure_value_by_label(label, selected_pairs)
-                        inputs = row.find_elements(By.CSS_SELECTOR, "input[type='text'], input[type='number'], textarea")
-                        if not inputs:
-                            continue
-                        target = next((i for i in inputs if i.get_attribute("disabled") is None), None)
-                        if not target:
-                            continue
-                        if not picked_value:
-                            continue
-                        target_id = target.get_attribute("id") or target.get_attribute("name") or str(id(target))
-                        if target_id in used_inputs:
-                            continue
-                        _scroll_and_click(driver, target)
-                        target.send_keys(Keys.CONTROL, "a")
-                        target.send_keys(Keys.BACKSPACE)
-                        target.send_keys(picked_value)
-                        used_inputs.add(target_id)
-                        local_filled += 1
-                    except Exception:
-                        continue
-
-                # fallback: no label-matched field found, fill visible inputs in order
-                if local_filled == 0 and selected_pairs:
-                    try:
-                        values_in_order = list(selected_pairs.values())
-                        if not visible_inputs:
-                            visible_inputs = [
-                                i for i in row_scope.find_elements(By.CSS_SELECTOR, "input[type='text'], input[type='number'], textarea")
-                                if i.get_attribute("disabled") is None
-                            ]
-                        for idx, inp in enumerate(visible_inputs):
-                            if idx >= len(values_in_order):
-                                break
-                            _scroll_and_click(driver, inp)
-                            inp.send_keys(Keys.CONTROL, "a")
-                            inp.send_keys(Keys.BACKSPACE)
-                            inp.send_keys(values_in_order[idx])
-                            local_filled += 1
-                    except Exception:
-                        pass
-
-                if local_filled > 0:
-                    filled_count += local_filled
-                    print(f"  [actual-size] filled fields: {local_filled}")
-                    save_scope = driver if active_frame is not None else dialog
-                    save_buttons = save_scope.find_elements(
-                        By.XPATH,
-                        ".//button[contains(normalize-space(.), '保存')]"
-                        " | .//button[contains(normalize-space(.), '完了')]"
-                        " | .//button[contains(normalize-space(.), '決定')]"
-                        " | .//button[contains(normalize-space(.), 'OK')]",
-                    )
-                    print(f"  [actual-size] save buttons: {len(save_buttons)}")
-                    if save_buttons:
-                        _scroll_and_click(driver, save_buttons[0])
-                        _sleep(0.2)
-                else:
-                    print("  [actual-size] no fields filled in this dialog")
-                    _dump_edit_debug(f"nofield_{btn_idx}")
-
-                if active_frame is not None and popup_handle is None:
-                    try:
-                        driver.switch_to.default_content()
-                    except Exception:
-                        pass
-
-                if popup_handle:
-                    try:
-                        driver.close()
-                    except Exception:
-                        pass
-                    try:
-                        if main_handle in driver.window_handles:
-                            driver.switch_to.window(main_handle)
-                    except Exception:
-                        pass
-            except Exception:
-                try:
-                    if main_handle in driver.window_handles and driver.current_window_handle != main_handle:
-                        driver.switch_to.window(main_handle)
-                except Exception:
-                    pass
-                continue
-
-        if filled_count == 0:
-            print("  [actual-size] result: 0 fields filled")
-        return filled_count
-    except Exception:
-        print("  [actual-size] failed: unexpected error")
-        return 0
+    return buyma_options_mod.fill_size_edit_details(
+        driver,
+        actual_size_text,
+        scroll_and_click=_scroll_and_click,
+        extract_actual_size_rows_fn=_extract_actual_size_rows,
+        extract_actual_measure_map_fn=_extract_actual_measure_map,
+        pick_measure_value_by_label_fn=_pick_measure_value_by_label,
+    )
 
 
 # ---- 카테고리 추론 매핑 ----

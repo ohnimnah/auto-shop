@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+import os
 import re
+from datetime import datetime
 from typing import Dict, List
 
 from selenium.webdriver.common.keys import Keys
@@ -480,6 +482,799 @@ def infer_reference_jp_size(size_raw: str) -> str:
         except Exception:
             return text
     return text
+
+
+def normalize_jp_match_text(text: str) -> str:
+    return (text or "").strip().replace(" ", "").replace("\u3000", "")
+
+
+def is_shitei_nashi_text(text: str) -> bool:
+    normalized = normalize_jp_match_text(text)
+    return JP_SHITEI_NASHI in normalized or JP_SIZE_SHITEI_NASHI in normalized
+
+
+def try_add_size_row(driver, scope=None, *, sleep_fn, scroll_and_click) -> bool:
+    """Click the BUYMA add-size-row action if present."""
+    try:
+        root = scope or driver
+        before = len(root.find_elements(By.CSS_SELECTOR, ".Select"))
+        candidates = root.find_elements(
+            By.CSS_SELECTOR,
+            "button, a, [role='button'], [class*='add'], [class*='plus'], "
+            "[aria-label*='追加'], [title*='追加'], [data-testid*='add']"
+        )
+        for candidate in candidates:
+            txt = (candidate.text or "").strip()
+            cls = (candidate.get_attribute("class") or "")
+            aria = (candidate.get_attribute("aria-label") or "")
+            title = (candidate.get_attribute("title") or "")
+            if (
+                ("追加" in txt) or ("add" in cls.lower()) or ("plus" in cls.lower())
+                or ("追加" in aria) or ("追加" in title)
+            ):
+                scroll_and_click(driver, candidate)
+                sleep_fn(0.4)
+
+        icon_buttons = root.find_elements(By.CSS_SELECTOR, "button, [role='button']")
+        for button in icon_buttons:
+            txt = (button.text or "").strip()
+            if txt:
+                continue
+            cls = (button.get_attribute("class") or "").lower()
+            if any(keyword in cls for keyword in ["plus", "add", "icon"]):
+                scroll_and_click(driver, button)
+                sleep_fn(0.4)
+                after = len(root.find_elements(By.CSS_SELECTOR, ".Select"))
+                if after > before:
+                    return True
+    except Exception:
+        return False
+    return False
+
+
+def select_size_by_select_controls(
+    driver,
+    scope,
+    size_text: str,
+    *,
+    sleep_fn,
+    scroll_and_click,
+    try_add_size_row_fn,
+) -> int:
+    """Select size values through React Select controls."""
+    if not size_text:
+        return 0
+    try:
+        t0 = datetime.now().timestamp()
+        sizes = [s.strip() for s in size_text.split(",") if s.strip()]
+        if not sizes:
+            return 0
+
+        for _ in range(10):
+            if datetime.now().timestamp() - t0 > 8:
+                break
+            current_selects = scope.find_elements(By.CSS_SELECTOR, ".Select")
+            if len(current_selects) >= len(sizes):
+                break
+            if not try_add_size_row_fn(driver, scope=scope):
+                break
+
+        selected = 0
+        for idx, sz in enumerate(sizes):
+            if datetime.now().timestamp() - t0 > 12:
+                break
+            selects = scope.find_elements(By.CSS_SELECTOR, ".Select")
+            if not selects:
+                break
+
+            if idx >= len(selects):
+                if not try_add_size_row_fn(driver, scope=scope):
+                    break
+                selects = scope.find_elements(By.CSS_SELECTOR, ".Select")
+                if idx >= len(selects):
+                    break
+
+            sel = selects[idx]
+            try:
+                control = sel.find_element(By.CSS_SELECTOR, ".Select-control")
+            except Exception:
+                continue
+
+            scroll_and_click(driver, control)
+            sleep_fn(0.25)
+
+            variants = [v.lower().replace(" ", "") for v in build_size_variants(sz)]
+            options = driver.find_elements(By.CSS_SELECTOR, ".Select-menu-outer .Select-option")
+            picked = False
+
+            if options:
+                for opt in options:
+                    txt = (opt.text or "").strip()
+                    if any(size_match(v, txt) for v in variants):
+                        scroll_and_click(driver, opt)
+                        selected += 1
+                        picked = True
+                        sleep_fn(0.2)
+                        break
+
+            if not picked:
+                try:
+                    sel_input = sel.find_element(By.CSS_SELECTOR, "input")
+                    sel_input.clear()
+                    only_num = re.sub(r"[^0-9]", "", sz)
+                    type_candidates = [sz]
+                    if only_num and 200 <= int(only_num) <= 350:
+                        cm_val = int(only_num) / 10.0
+                        type_candidates.append(f"{cm_val:.1f}")
+                        type_candidates.append(str(int(cm_val)) if cm_val == int(cm_val) else f"{cm_val}")
+                    for query in type_candidates:
+                        sel_input.clear()
+                        sel_input.send_keys(query)
+                        sleep_fn(0.4)
+                        filtered = driver.find_elements(By.CSS_SELECTOR, ".Select-menu-outer .Select-option")
+                        for opt in filtered:
+                            txt = (opt.text or "").strip()
+                            if any(size_match(v, txt) for v in variants):
+                                scroll_and_click(driver, opt)
+                                selected += 1
+                                picked = True
+                                break
+                        if picked:
+                            break
+                    if not picked:
+                        sel_input.send_keys(Keys.ESCAPE)
+                except Exception:
+                    pass
+
+            if not picked:
+                try:
+                    driver.execute_script("arguments[0].click()", control)
+                    sleep_fn(0.3)
+                    active = driver.switch_to.active_element
+                    for _ in range(50):
+                        if datetime.now().timestamp() - t0 > 15:
+                            break
+                        focused = driver.execute_script(
+                            "var el=document.querySelector('.Select-menu-outer .Select-option.is-focused');"
+                            "return el?el.textContent.trim():'';"
+                        )
+                        fnorm = (focused or "").lower().replace(" ", "")
+                        if focused and any(size_match(v, fnorm) for v in variants):
+                            active.send_keys(Keys.ENTER)
+                            selected += 1
+                            picked = True
+                            break
+                        active.send_keys(Keys.ARROW_DOWN)
+                        sleep_fn(0.05)
+                    if not picked:
+                        active.send_keys(Keys.ESCAPE)
+                except Exception:
+                    pass
+        return selected
+    except Exception:
+        return 0
+
+
+def check_no_variation_option(
+    driver,
+    prefer_shitei_nashi: bool = False,
+    *,
+    scroll_and_click,
+    select_option_in_select_control_fn,
+) -> bool:
+    """Select variation-none / shitei-nashi style options when no variation exists."""
+    if prefer_shitei_nashi:
+        keywords = [
+            "指定なし", "サイズ指定なし", "サイズなし",
+            "変動なし", "変形なし", "バリエーションなし", "バリエーション無し", "변형없음"
+        ]
+    else:
+        keywords = [
+            "変動なし", "変形なし", "バリエーションなし", "バリエーション無し", "サイズなし",
+            "サイズ指定なし", "指定なし", "변형없음"
+        ]
+    try:
+        variation = driver.find_element(By.CSS_SELECTOR, ".sell-variation")
+        labels = variation.find_elements(By.CSS_SELECTOR, "label")
+        for keyword in keywords:
+            for label in labels:
+                txt = (label.text or "").strip()
+                if txt and keyword in txt:
+                    scroll_and_click(driver, label)
+                    return True
+
+        nodes = variation.find_elements(By.XPATH, ".//*[normalize-space(text())!='']")
+        for keyword in keywords:
+            for node in nodes:
+                txt = (node.text or "").strip()
+                if not txt or keyword not in txt:
+                    continue
+                clicked = driver.execute_script(
+                    "var el=arguments[0];"
+                    "while(el){"
+                    "  if(el.tagName==='LABEL' || el.tagName==='BUTTON' || el.getAttribute('role')==='button' || el.onclick){"
+                    "    el.click(); return true;"
+                    "  }"
+                    "  el=el.parentElement;"
+                    "}"
+                    "arguments[0].click(); return true;",
+                    node
+                )
+                if clicked:
+                    return True
+
+        inputs = variation.find_elements(By.CSS_SELECTOR, "input[type='checkbox'], input[type='radio']")
+        for ipt in inputs:
+            meta = " ".join([
+                ipt.get_attribute("value") or "",
+                ipt.get_attribute("name") or "",
+                ipt.get_attribute("id") or "",
+            ])
+            if any(keyword in meta for keyword in ["none", "unspecified", "no_variation", "variation_none"]):
+                return True
+
+        selects = variation.find_elements(By.CSS_SELECTOR, ".Select")
+        targets = (
+            ["指定なし", "サイズ指定なし", "バリエーションなし", "在庫変動なし"]
+            if prefer_shitei_nashi
+            else ["バリエーションなし", "在庫変動なし", "サイズ指定なし", "指定なし"]
+        )
+        for sel in selects:
+            for target in targets:
+                if select_option_in_select_control_fn(driver, sel, target):
+                    return True
+    except Exception:
+        return False
+    return False
+
+
+def force_select_shitei_nashi(driver, *, scroll_and_click, select_option_in_select_control_fn) -> bool:
+    """Force select 指定なし / サイズ指定なし."""
+    try:
+        variation = driver.find_element(By.CSS_SELECTOR, ".sell-variation")
+
+        labels = variation.find_elements(By.CSS_SELECTOR, "label")
+        for label in labels:
+            if is_shitei_nashi_text(label.text or ""):
+                scroll_and_click(driver, label)
+                return True
+
+        nodes = variation.find_elements(By.XPATH, ".//*[normalize-space(text())!='']")
+        for node in nodes:
+            if not is_shitei_nashi_text(node.text or ""):
+                continue
+            clicked = driver.execute_script(
+                "var el=arguments[0];"
+                "while(el){"
+                "  if(el.tagName==='LABEL' || el.tagName==='BUTTON' || el.getAttribute('role')==='button' || el.onclick){"
+                "    el.click(); return true;"
+                "  }"
+                "  el=el.parentElement;"
+                "}"
+                "arguments[0].click(); return true;",
+                node
+            )
+            if clicked:
+                return True
+
+        selects = variation.find_elements(By.CSS_SELECTOR, ".Select")
+        for sel in selects:
+            if select_option_in_select_control_fn(driver, sel, JP_SHITEI_NASHI):
+                return True
+            if select_option_in_select_control_fn(driver, sel, JP_SIZE_SHITEI_NASHI):
+                return True
+    except Exception:
+        return False
+    return False
+
+
+def force_select_shitei_nashi_global(driver, *, force_select_shitei_nashi_fn, select_option_in_select_control_fn) -> bool:
+    if force_select_shitei_nashi_fn(driver):
+        return True
+
+    try:
+        selects = driver.find_elements(By.CSS_SELECTOR, ".sell-size-table .Select, .sell-variation .Select")
+        for sel in selects:
+            if select_option_in_select_control_fn(driver, sel, JP_SHITEI_NASHI):
+                return True
+            if select_option_in_select_control_fn(driver, sel, JP_SIZE_SHITEI_NASHI):
+                return True
+    except Exception:
+        pass
+
+    try:
+        nodes = driver.find_elements(By.XPATH, "//*[normalize-space(text())!='']")
+        for node in nodes:
+            if not is_shitei_nashi_text(node.text or ""):
+                continue
+            clicked = driver.execute_script(
+                "var el=arguments[0];"
+                "while(el){"
+                "  if(el.tagName==='LABEL' || el.tagName==='BUTTON' || el.getAttribute('role')==='button' || el.onclick){"
+                "    el.click(); return true;"
+                "  }"
+                "  el=el.parentElement;"
+                "}"
+                "arguments[0].click(); return true;",
+                node
+            )
+            if clicked:
+                return True
+    except Exception:
+        pass
+    return False
+
+
+def force_reference_size_shitei_nashi(driver, panel=None, *, sleep_fn, scroll_and_click, select_option_in_select_control_fn) -> bool:
+    """Force JP reference size selects to 指定なし."""
+    try:
+        root = panel if panel is not None else driver
+        selects = root.find_elements(By.CSS_SELECTOR, ".sell-size-table .Select")
+        if not selects:
+            selects = root.find_elements(By.CSS_SELECTOR, ".sell-variation .sell-size-table .Select")
+        if not selects:
+            return False
+
+        changed = 0
+        for sel in selects:
+            try:
+                current = sel.find_elements(By.CSS_SELECTOR, ".Select-value-label")
+                if current and is_shitei_nashi_text(current[0].text or ""):
+                    changed += 1
+                    continue
+
+                if select_option_in_select_control_fn(driver, sel, JP_SHITEI_NASHI):
+                    changed += 1
+                    continue
+                if select_option_in_select_control_fn(driver, sel, JP_SIZE_SHITEI_NASHI):
+                    changed += 1
+                    continue
+
+                try:
+                    control = sel.find_element(By.CSS_SELECTOR, ".Select-control")
+                    scroll_and_click(driver, control)
+                    sleep_fn(0.2)
+                    inp = sel.find_element(By.CSS_SELECTOR, ".Select-input input")
+                    inp.clear()
+                    inp.send_keys(JP_SHITEI_NASHI)
+                    sleep_fn(0.35)
+                    opts = driver.find_elements(By.CSS_SELECTOR, ".Select-menu-outer .Select-option")
+                    exact = None
+                    for opt in opts:
+                        if is_shitei_nashi_text(opt.text or ""):
+                            exact = opt
+                            break
+                    if exact is not None:
+                        scroll_and_click(driver, exact)
+                        changed += 1
+                        continue
+                    inp.send_keys(Keys.ENTER)
+                    sleep_fn(0.2)
+                    current2 = sel.find_elements(By.CSS_SELECTOR, ".Select-value-label")
+                    if current2 and is_shitei_nashi_text(current2[0].text or ""):
+                        changed += 1
+                        continue
+                except Exception:
+                    pass
+            except Exception:
+                continue
+        return changed > 0
+    except Exception:
+        return False
+
+
+def force_select_variation_none_sequence(driver, panel=None, *, select_option_in_select_control_fn) -> bool:
+    """Select バリエーションなし / 指定なし in size selects."""
+    try:
+        root = panel if panel is not None else driver
+        selects = root.find_elements(By.CSS_SELECTOR, ".sell-variation .Select, .sell-size-table .Select")
+        if not selects:
+            selects = driver.find_elements(By.CSS_SELECTOR, ".sell-variation .Select, .sell-size-table .Select")
+        if not selects:
+            return False
+
+        targets = ["バリエーションなし", "バリエーション無し", "指定なし", "サイズ指定なし"]
+        prioritized = []
+        others = []
+        for sel in selects:
+            try:
+                txt = (sel.text or "").strip()
+                if "選択してください" in txt:
+                    prioritized.append(sel)
+                else:
+                    others.append(sel)
+            except Exception:
+                others.append(sel)
+
+        for sel in prioritized + others:
+            for target in targets:
+                if select_option_in_select_control_fn(driver, sel, target):
+                    return True
+        return False
+    except Exception:
+        return False
+
+
+def enable_size_selection_ui(driver, *, sleep_fn, scroll_and_click) -> bool:
+    """Expand hidden size selection UI."""
+    keywords = ["サイズを指定", "サイズあり", "サイズを選択", "サイズを入力", "バリエーションあり"]
+    try:
+        variation = driver.find_element(By.CSS_SELECTOR, ".sell-variation")
+        nodes = variation.find_elements(By.XPATH, ".//*[normalize-space(text())!='']")
+        for node in nodes:
+            txt = (node.text or "").strip()
+            if txt and any(keyword in txt for keyword in keywords):
+                try:
+                    scroll_and_click(driver, node)
+                except Exception:
+                    driver.execute_script("arguments[0].click();", node)
+                sleep_fn(0.6)
+                return True
+    except Exception:
+        return False
+    return False
+
+
+def fill_size_text_inputs(driver, size_text: str, *, sleep_fn, scroll_and_click) -> int:
+    """Fill visible size text inputs directly."""
+    if not size_text:
+        return 0
+    sizes = [s.strip() for s in size_text.split(",") if s.strip()]
+    if not sizes:
+        return 0
+    try:
+        inputs = driver.find_elements(By.CSS_SELECTOR, ".sell-variation input.bmm-c-text-field, .sell-variation input[type='text']")
+        visible_inputs = [i for i in inputs if i.is_displayed() and i.is_enabled()]
+        if not visible_inputs:
+            return 0
+        count = 0
+        for idx, sz in enumerate(sizes):
+            target = visible_inputs[min(idx, len(visible_inputs) - 1)]
+            scroll_and_click(driver, target)
+            target.clear()
+            target.send_keys(sz)
+            count += 1
+            sleep_fn(0.15)
+        return count
+    except Exception:
+        return 0
+
+
+def fill_size_table_rows(
+    driver,
+    panel,
+    size_text: str,
+    *,
+    sleep_fn,
+    scroll_and_click,
+    select_option_in_select_control_fn,
+    infer_reference_jp_size_fn,
+) -> int:
+    """Fill BUYMA sell-size-table rows with size names and JP reference sizes."""
+    if not size_text:
+        return 0
+    try:
+        sizes = [s.strip() for s in size_text.split(",") if s.strip()]
+        if not sizes:
+            return 0
+
+        mode_selects = panel.find_elements(By.CSS_SELECTOR, ".bmm-l-grid-no-bottom .Select")
+        if mode_selects:
+            select_option_in_select_control_fn(driver, mode_selects[0], "バリエーションあり")
+            sleep_fn(0.4)
+
+        table = panel.find_elements(By.CSS_SELECTOR, ".sell-size-table")
+        if not table:
+            return 0
+
+        max_add_attempts = max(len(sizes) * 2, 24)
+        for _ in range(max_add_attempts):
+            rows = panel.find_elements(By.CSS_SELECTOR, ".sell-size-table tbody tr")
+            if len(rows) >= len(sizes):
+                break
+            add_links = panel.find_elements(By.XPATH, ".//div[contains(@class,'bmm-c-form-table__foot')]//a")
+            clicked = False
+            for link in add_links:
+                txt = (link.text or "").strip()
+                if "新しいサイズを追加" in txt or "サイズ" in txt:
+                    scroll_and_click(driver, link)
+                    sleep_fn(0.35)
+                    clicked = True
+                    break
+            if not clicked:
+                break
+
+        rows = panel.find_elements(By.CSS_SELECTOR, ".sell-size-table tbody tr")
+        filled = 0
+        for idx, sz in enumerate(sizes):
+            if idx >= len(rows):
+                break
+            try:
+                name_input = rows[idx].find_element(By.CSS_SELECTOR, "td:nth-child(2) input.bmm-c-text-field")
+                scroll_and_click(driver, name_input)
+                name_input.clear()
+                name_input.send_keys(sz)
+
+                try:
+                    ref_select = rows[idx].find_element(By.CSS_SELECTOR, "td:nth-child(3) .Select")
+                    ref_target = infer_reference_jp_size_fn(sz)
+                    if ref_target:
+                        select_option_in_select_control_fn(driver, ref_select, ref_target)
+                except Exception:
+                    pass
+
+                filled += 1
+                sleep_fn(0.15)
+            except Exception:
+                continue
+        return filled
+    except Exception:
+        return 0
+
+
+def fill_size_edit_details(
+    driver,
+    actual_size_text: str,
+    *,
+    scroll_and_click,
+    extract_actual_size_rows_fn,
+    extract_actual_measure_map_fn,
+    pick_measure_value_by_label_fn,
+) -> int:
+    """Fill BUYMA size edit dialogs with parsed actual-size measurements."""
+    all_rows = extract_actual_size_rows_fn(actual_size_text)
+    fallback_pairs = extract_actual_measure_map_fn(actual_size_text)
+    if not all_rows and not fallback_pairs:
+        print("  [actual-size] skip: no parsed measurement rows")
+        return 0
+
+    try:
+        debug_dir = os.path.join(os.path.dirname(__file__), "_debug")
+        try:
+            os.makedirs(debug_dir, exist_ok=True)
+        except Exception:
+            debug_dir = os.path.dirname(__file__)
+
+        def _dump_edit_debug(tag: str) -> None:
+            try:
+                ts = datetime.now().strftime("%Y%m%d_%H%M%S_%f")
+                html_path = os.path.join(debug_dir, f"edit_debug_{tag}_{ts}.html")
+                png_path = os.path.join(debug_dir, f"edit_debug_{tag}_{ts}.png")
+                with open(html_path, "w", encoding="utf-8") as f:
+                    f.write(driver.page_source or "")
+                try:
+                    driver.save_screenshot(png_path)
+                except Exception:
+                    pass
+                print(f"  [actual-size] debug dump saved: {html_path}")
+            except Exception:
+                pass
+
+        def _pick_best_dialog(dialogs):
+            if not dialogs:
+                return None
+            best = None
+            best_score = -1
+            for dialog in dialogs:
+                try:
+                    txt = (dialog.text or "").strip()
+                    score = 0
+                    if any(k in txt for k in ["着丈", "ウエスト", "股上", "ヒップ", "サイズ", "cm"]):
+                        score += 5
+                    inputs = dialog.find_elements(By.CSS_SELECTOR, "input[type='text'], input[type='number'], input[type='tel'], textarea")
+                    editable = [i for i in inputs if i.get_attribute("disabled") is None]
+                    score += len(editable)
+                    if score > best_score:
+                        best = dialog
+                        best_score = score
+                except Exception:
+                    continue
+            return best or dialogs[-1]
+
+        edit_buttons = driver.find_elements(
+            By.XPATH,
+            "//div[contains(@class,'sell-size-table')]//*[self::button or self::a][contains(normalize-space(.), '編集')]",
+        )
+        if not edit_buttons:
+            edit_buttons = driver.find_elements(
+                By.XPATH,
+                "//div[contains(@class,'sell-variation')]//*[self::button or self::a][contains(normalize-space(.), '編集')]",
+            )
+        print(f"  [actual-size] edit buttons found: total={len(edit_buttons)}")
+        filled_count = 0
+        main_handle = driver.current_window_handle
+        ordered_size_keys = list(all_rows.keys())
+        for btn_idx, btn in enumerate(edit_buttons):
+            try:
+                if not btn.is_displayed():
+                    continue
+
+                current_size_key = ""
+                try:
+                    row_node = driver.execute_script(
+                        "let e=arguments[0]; while(e && e.tagName!=='TR'){e=e.parentElement;} return e;", btn
+                    )
+                    row_text = (row_node.text if row_node else "") or ""
+                    for sname in all_rows.keys():
+                        if sname and sname in row_text:
+                            current_size_key = sname
+                            break
+                except Exception:
+                    current_size_key = ""
+
+                if not current_size_key and btn_idx < len(ordered_size_keys):
+                    current_size_key = ordered_size_keys[btn_idx]
+                selected_pairs = all_rows.get(current_size_key) or (next(iter(all_rows.values())) if all_rows else fallback_pairs)
+                print(f"  [actual-size] open edit: size_key='{current_size_key or 'N/A'}' pairs={len(selected_pairs or {})}")
+                before_handles = set(driver.window_handles)
+                before_modal_count = len(driver.find_elements(By.CSS_SELECTOR, "[role='dialog'], .ReactModal__Content, .bmm-c-modal"))
+                before_url = driver.current_url
+                scroll_and_click(driver, btn)
+
+                dialog = driver
+                popup_handle = None
+                for _ in range(10):
+                    now_handles = set(driver.window_handles)
+                    new_handles = [h for h in now_handles if h not in before_handles]
+                    if new_handles:
+                        popup_handle = new_handles[0]
+                        break
+                if popup_handle:
+                    driver.switch_to.window(popup_handle)
+                    print("  [actual-size] popup window detected")
+                    dialog = driver
+                else:
+                    dialogs = driver.find_elements(By.CSS_SELECTOR, "[role='dialog'], .ReactModal__Content, .bmm-c-modal")
+                    dialog = _pick_best_dialog(dialogs) if dialogs else driver
+                    if len(dialogs) <= before_modal_count and driver.current_url == before_url:
+                        try:
+                            js_opened = driver.execute_script(
+                                "var el=arguments[0];"
+                                "if(!el) return false;"
+                                "el.click();"
+                                "var p=el.parentElement;"
+                                "for(var i=0;i<4 && p;i++){"
+                                " if(p.tagName==='BUTTON' || p.tagName==='A' || p.getAttribute('role')==='button'){ p.click(); }"
+                                " p=p.parentElement;"
+                                "}"
+                                "return true;",
+                                btn
+                            )
+                            if js_opened:
+                                dialogs = driver.find_elements(By.CSS_SELECTOR, "[role='dialog'], .ReactModal__Content, .bmm-c-modal")
+                                dialog = _pick_best_dialog(dialogs) if dialogs else driver
+                                print(f"  [actual-size] js-click fallback dialogs: {len(dialogs)}")
+                        except Exception:
+                            pass
+                visible_inputs = []
+                for _ in range(10):
+                    visible_inputs = [
+                        i for i in dialog.find_elements(By.CSS_SELECTOR, "input[type='text'], input[type='number'], input[type='tel'], textarea")
+                        if i.get_attribute("disabled") is None
+                    ]
+                    if visible_inputs:
+                        break
+
+                active_frame = None
+                if not visible_inputs:
+                    try:
+                        driver.switch_to.default_content()
+                        top_frames = driver.find_elements(By.CSS_SELECTOR, "iframe")
+                        for fi, frame in enumerate(top_frames):
+                            try:
+                                driver.switch_to.default_content()
+                                driver.switch_to.frame(frame)
+                                probe_inputs = [
+                                    i for i in driver.find_elements(By.CSS_SELECTOR, "input[type='text'], input[type='number'], input[type='tel'], textarea")
+                                    if i.get_attribute("disabled") is None
+                                ]
+                                if probe_inputs:
+                                    visible_inputs = probe_inputs
+                                    active_frame = fi
+                                    print(f"  [actual-size] iframe inputs detected: frame={fi} count={len(probe_inputs)}")
+                                    break
+                            except Exception:
+                                continue
+                        if active_frame is None and popup_handle is None:
+                            driver.switch_to.default_content()
+                    except Exception:
+                        pass
+                print(f"  [actual-size] dialog inputs: {len(visible_inputs)}")
+                row_scope = driver if active_frame is not None else dialog
+                rows = row_scope.find_elements(By.CSS_SELECTOR, "tr, .bmm-c-field, .bmm-c-form-table__table tbody tr")
+                local_filled = 0
+                used_inputs = set()
+                for row in rows:
+                    try:
+                        label = (row.text or "").strip()
+                        if not label:
+                            continue
+                        picked_value = pick_measure_value_by_label_fn(label, selected_pairs)
+                        inputs = row.find_elements(By.CSS_SELECTOR, "input[type='text'], input[type='number'], textarea")
+                        if not inputs:
+                            continue
+                        target = next((i for i in inputs if i.get_attribute("disabled") is None), None)
+                        if not target or not picked_value:
+                            continue
+                        target_id = target.get_attribute("id") or target.get_attribute("name") or str(id(target))
+                        if target_id in used_inputs:
+                            continue
+                        scroll_and_click(driver, target)
+                        target.send_keys(Keys.CONTROL, "a")
+                        target.send_keys(Keys.BACKSPACE)
+                        target.send_keys(picked_value)
+                        used_inputs.add(target_id)
+                        local_filled += 1
+                    except Exception:
+                        continue
+
+                if local_filled == 0 and selected_pairs:
+                    try:
+                        values_in_order = list(selected_pairs.values())
+                        if not visible_inputs:
+                            visible_inputs = [
+                                i for i in row_scope.find_elements(By.CSS_SELECTOR, "input[type='text'], input[type='number'], textarea")
+                                if i.get_attribute("disabled") is None
+                            ]
+                        for idx, inp in enumerate(visible_inputs):
+                            if idx >= len(values_in_order):
+                                break
+                            scroll_and_click(driver, inp)
+                            inp.send_keys(Keys.CONTROL, "a")
+                            inp.send_keys(Keys.BACKSPACE)
+                            inp.send_keys(values_in_order[idx])
+                            local_filled += 1
+                    except Exception:
+                        pass
+
+                if local_filled > 0:
+                    filled_count += local_filled
+                    print(f"  [actual-size] filled fields: {local_filled}")
+                    save_scope = driver if active_frame is not None else dialog
+                    save_buttons = save_scope.find_elements(
+                        By.XPATH,
+                        ".//button[contains(normalize-space(.), '保存')]"
+                        " | .//button[contains(normalize-space(.), '完了')]"
+                        " | .//button[contains(normalize-space(.), '決定')]"
+                        " | .//button[contains(normalize-space(.), 'OK')]",
+                    )
+                    print(f"  [actual-size] save buttons: {len(save_buttons)}")
+                    if save_buttons:
+                        scroll_and_click(driver, save_buttons[0])
+                else:
+                    print("  [actual-size] no fields filled in this dialog")
+                    _dump_edit_debug(f"nofield_{btn_idx}")
+
+                if active_frame is not None and popup_handle is None:
+                    try:
+                        driver.switch_to.default_content()
+                    except Exception:
+                        pass
+
+                if popup_handle:
+                    try:
+                        driver.close()
+                    except Exception:
+                        pass
+                    try:
+                        if main_handle in driver.window_handles:
+                            driver.switch_to.window(main_handle)
+                    except Exception:
+                        pass
+            except Exception:
+                try:
+                    if main_handle in driver.window_handles and driver.current_window_handle != main_handle:
+                        driver.switch_to.window(main_handle)
+                except Exception:
+                    pass
+                continue
+
+        if filled_count == 0:
+            print("  [actual-size] result: 0 fields filled")
+        return filled_count
+    except Exception:
+        print("  [actual-size] failed: unexpected error")
+        return 0
 
 
 def apply_buyma_option_selection(
