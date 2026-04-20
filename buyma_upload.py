@@ -2568,50 +2568,7 @@ def _safe_input(prompt: str) -> str:
 
 
 def _detect_title_input_issue(name_input, intended_title: str) -> str:
-    """상품명 입력값이 길이 제한 등으로 정상 반영되지 않았는지 확인한다."""
-    try:
-        actual_value = (name_input.get_attribute('value') or '').strip()
-        maxlength_raw = (name_input.get_attribute('maxlength') or '').strip()
-        validation_message = (name_input.get_attribute('validationMessage') or '').strip()
-
-        maxlength = int(maxlength_raw) if maxlength_raw.isdigit() else 0
-        effective_limit = maxlength if maxlength > 0 else 60  # BUYMA rule fallback
-        intended_units = _buyma_title_units(intended_title)
-        actual_units = _buyma_title_units(actual_value)
-        if intended_units > effective_limit:
-            return f"상품명 길이 초과: {intended_units}유닛 / 제한 {effective_limit}유닛"
-
-        # UI note fallback: "あと-8文字(半角)" like over-limit hint
-        try:
-            note_text = ""
-            container = name_input.find_element(By.XPATH, "./ancestor::div[contains(@class,'bmm-c-field')][1]")
-            note_nodes = container.find_elements(By.CSS_SELECTOR, ".bmm-c-field__note")
-            for n in note_nodes:
-                t = (n.text or "").strip()
-                if "あと" in t and "文字" in t:
-                    note_text = t
-                    break
-            if note_text:
-                m = re.search(r"あと\s*([+-]?\d+)\s*文字", note_text)
-                if m:
-                    remaining = int(m.group(1))
-                    if remaining < 0:
-                        return f"상품명 길이 초과(UI): 남은 글자 {remaining}"
-        except Exception:
-            pass
-
-        if actual_value != intended_title:
-            if validation_message:
-                return f"상품명 입력 제한: {validation_message}"
-            if actual_units < intended_units:
-                return f"상품명 입력값이 잘렸습니다: 입력 {intended_units}유닛 / 반영 {actual_units}유닛"
-            return "상품명 입력값이 요청값과 다릅니다"
-
-        if validation_message:
-            return f"상품명 검증 메시지: {validation_message}"
-    except Exception:
-        return ""
-    return ""
+    return buyma_uploader_mod.detect_title_input_issue(name_input, intended_title)
 
 
 def _normalize_buyma_title_text(text: str) -> str:
@@ -2707,19 +2664,12 @@ def _build_buyma_product_title(brand_en: str, name_en: str, color_en: str, max_l
 
 
 def _set_text_input_value(driver, input_el, text: str) -> None:
-    """텍스트 입력칸 값을 최대한 안정적으로 덮어쓴다."""
-    target = text or ""
-    _scroll_and_click(driver, input_el)
-    try:
-        input_el.clear()
-    except Exception:
-        pass
-    try:
-        input_el.send_keys(Keys.CONTROL, "a")
-        input_el.send_keys(Keys.BACKSPACE)
-    except Exception:
-        pass
-    input_el.send_keys(target)
+    return buyma_uploader_mod.set_text_input_value(
+        driver,
+        input_el,
+        text,
+        scroll_and_click=_scroll_and_click,
+    )
 
 
 def _build_buyma_title_retry_candidates(brand_en: str, name_en: str, color_en: str, max_length: int) -> List[str]:

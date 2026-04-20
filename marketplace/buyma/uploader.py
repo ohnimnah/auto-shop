@@ -8,8 +8,10 @@ entrypoint so behavior stays stable while orchestration moves out of
 from __future__ import annotations
 
 from datetime import datetime, timedelta
+import re
 from typing import Callable, Dict, List
 
+from marketplace.buyma.mapper import buyma_title_units
 from marketplace.common.interfaces import MarketplaceRow, MarketplaceUploader
 from selenium.webdriver.common.by import By
 from selenium.webdriver.common.keys import Keys
@@ -210,6 +212,68 @@ def apply_buyma_core_fields(
             print(f"  ✗ 브랜드 입력 실패: {exc}")
 
     return "success"
+
+
+def detect_title_input_issue(name_input, intended_title: str) -> str:
+    """Check whether BUYMA title input applied the intended value cleanly."""
+    try:
+        actual_value = (name_input.get_attribute("value") or "").strip()
+        maxlength_raw = (name_input.get_attribute("maxlength") or "").strip()
+        validation_message = (name_input.get_attribute("validationMessage") or "").strip()
+
+        maxlength = int(maxlength_raw) if maxlength_raw.isdigit() else 0
+        effective_limit = maxlength if maxlength > 0 else 60
+        intended_units = buyma_title_units(intended_title)
+        actual_units = buyma_title_units(actual_value)
+        if intended_units > effective_limit:
+            return f"상품명 길이 초과: {intended_units}유닛 / 제한 {effective_limit}유닛"
+
+        try:
+            note_text = ""
+            container = name_input.find_element(By.XPATH, "./ancestor::div[contains(@class,'bmm-c-field')][1]")
+            note_nodes = container.find_elements(By.CSS_SELECTOR, ".bmm-c-field__note")
+            for node in note_nodes:
+                text = (node.text or "").strip()
+                if "あと" in text and "文字" in text:
+                    note_text = text
+                    break
+            if note_text:
+                match = re.search(r"あと\s*([+-]?\d+)\s*文字", note_text)
+                if match:
+                    remaining = int(match.group(1))
+                    if remaining < 0:
+                        return f"상품명 길이 초과(UI): 남은 글자 {remaining}"
+        except Exception:
+            pass
+
+        if actual_value != intended_title:
+            if validation_message:
+                return f"상품명 입력 제한: {validation_message}"
+            if actual_units < intended_units:
+                return f"상품명 입력값이 잘렸습니다: 입력 {intended_units}유닛 / 반영 {actual_units}유닛"
+            return "상품명 입력값이 요청값과 다릅니다"
+
+        if validation_message:
+            return f"상품명 검증 메시지: {validation_message}"
+    except Exception:
+        return ""
+    return ""
+
+
+def set_text_input_value(driver, input_el, text: str, *, scroll_and_click) -> None:
+    """Overwrite a text input as robustly as possible."""
+    target = text or ""
+    scroll_and_click(driver, input_el)
+    try:
+        input_el.clear()
+    except Exception:
+        pass
+    try:
+        input_el.send_keys(Keys.CONTROL, "a")
+        input_el.send_keys(Keys.BACKSPACE)
+    except Exception:
+        pass
+    input_el.send_keys(target)
 
 
 def apply_buyma_post_option_fields(
