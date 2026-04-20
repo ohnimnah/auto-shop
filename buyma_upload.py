@@ -438,37 +438,7 @@ def _scroll_and_click(driver, element):
 
 
 def _infer_color_system(color_text: str) -> str:
-    """Map color text to BUYMA color system labels."""
-    c = (color_text or '').strip().lower()
-    if not c or c == 'none':
-        return '色指定なし'
-    if any(k in c for k in ['black', '블랙', '검정']):
-        return 'ブラック系'
-    if any(k in c for k in ['white', 'ivory', '오프화이트', '아이보리', '흰']):
-        return 'ホワイト系'
-    if any(k in c for k in ['gray', 'grey', '그레이', '회색']):
-        return 'グレー系'
-    if any(k in c for k in ['beige', 'camel', '베이지', '카멜']):
-        return 'ベージュ系'
-    if any(k in c for k in ['brown', '브라운', '갈색']):
-        return 'ブラウン系'
-    if any(k in c for k in ['pink', '핑크']):
-        return 'ピンク系'
-    if any(k in c for k in ['red', '레드', '빨강']):
-        return 'レッド系'
-    if any(k in c for k in ['orange', '오렌지']):
-        return 'オレンジ系'
-    if any(k in c for k in ['yellow', '옐로우', '노랑']):
-        return 'イエロー系'
-    if any(k in c for k in ['green', 'khaki', 'olive', '그린', '카키', '올리브']):
-        return 'グリーン系'
-    if any(k in c for k in ['blue', 'navy', '블루', '네이비']):
-        return 'ブルー系'
-    if any(k in c for k in ['purple', 'violet', '퍼플', '보라']):
-        return 'パープル系'
-    if any(k in c for k in ['gold', '실버', 'silver', 'metal', '메탈']):
-        return 'シルバー・ゴールド系'
-    return 'マルチカラー'
+    return buyma_options_mod.infer_color_system(color_text)
 
 
 def _select_color_system(driver, color_system: str, row_index: int = 0) -> bool:
@@ -519,16 +489,7 @@ def _select_color_system(driver, color_system: str, row_index: int = 0) -> bool:
 
 
 def _split_color_values(color_text: str) -> List[str]:
-    """색상 문자열을 구분자로 분리한다."""
-    if not color_text:
-        return []
-    parts = re.split(r'[,/|]|\s+and\s+|\s*&\s*', color_text)
-    out = []
-    for p in parts:
-        v = p.strip()
-        if v:
-            out.append(v)
-    return out
+    return buyma_options_mod.split_color_values(color_text)
 
 
 COLOR_ABBR_MAP: Dict[str, str] = {
@@ -558,24 +519,7 @@ COLOR_ABBR_MAP: Dict[str, str] = {
 
 
 def _expand_color_abbreviations(color_text: str) -> str:
-    """약어 색상코드(bk, cg 등)를 BUYMA 입력용 색상명으로 확장한다."""
-    normalized_text = (color_text or "").strip()
-    dot_parts = [p.strip() for p in normalized_text.split(".") if p.strip()]
-    if len(dot_parts) >= 2 and all(re.fullmatch(r"[A-Za-z]{1,3}", p) for p in dot_parts):
-        values = dot_parts
-    else:
-        values = _split_color_values(normalized_text)
-    if not values:
-        return color_text
-
-    expanded: List[str] = []
-    for raw in values:
-        key = re.sub(r'[^a-z0-9]', '', raw.strip().lower())
-        mapped = COLOR_ABBR_MAP.get(key)
-        value = mapped if mapped else raw.strip()
-        if value and value not in expanded:
-            expanded.append(value)
-    return ", ".join(expanded)
+    return buyma_options_mod.expand_color_abbreviations(color_text)
 
 
 def _try_add_color_row(driver) -> bool:
@@ -808,135 +752,19 @@ def _fill_color_supplement(driver, color_text_en: str) -> bool:
 
 
 def _build_size_variants(size_raw: str) -> List[str]:
-    """시트 사이즈를 BUYMA 라벨 비교용 후보로 확장한다."""
-    sz = (size_raw or '').strip()
-    if not sz:
-        return []
-
-    variants = [sz]
-    szu = sz.upper().replace(' ', '')
-
-    # 복합 표기(예: 220/M3W5, US7/250)도 분해해서 후보로 추가
-    parts = [p.strip() for p in re.split(r'[/|]', sz) if p.strip()]
-    for p in parts:
-        if p not in variants:
-            variants.append(p)
-
-    # F/FREE/OS 계열(프리사이즈)
-    if szu in {'F', 'FREE', 'FREESIZE', 'OS', 'ONESIZE', 'O/S'}:
-        variants.extend([
-            'F', 'FREE', 'FREE SIZE', 'ONE SIZE', 'ONESIZE', 'OS', 'O/S',
-            'フリー', 'フリーサイズ', 'ワンサイズ', 'サイズ指定なし', '指定なし'
-        ])
-
-
-    # 신발 숫자 표기 확장 (예: 240, 24.0, 24cm, JP24)
-    numeric_seeds = []
-    for token in [sz] + parts:
-        only_num = re.sub(r"[^0-9.]", "", token)
-        if not only_num:
-            continue
-        try:
-            if '.' in only_num:
-                val = float(only_num)
-                # 20~35는 cm로 간주, 200~350은 mm로 간주
-                if 20 <= val <= 35:
-                    numeric_seeds.append(int(round(val * 10)))
-                elif 200 <= val <= 350:
-                    numeric_seeds.append(int(round(val)))
-            else:
-                iv = int(only_num)
-                if 200 <= iv <= 350:
-                    numeric_seeds.append(iv)
-                elif 20 <= iv <= 35:
-                    numeric_seeds.append(iv * 10)
-        except Exception:
-            continue
-
-    for numeric in numeric_seeds:
-        cm = numeric / 10.0
-        cm_str = f"{cm:.1f}".rstrip('0').rstrip('.')
-        variants.extend([
-            str(numeric),
-            f"{cm:.1f}",
-            cm_str,
-            f"{cm_str}cm",
-            f"{numeric}mm",
-            f"JP{cm_str}",
-            f"KR{cm_str}",
-        ])
-
-    # 중복 제거(순서 유지)
-    seen = set()
-    out = []
-    for v in variants:
-        k = v.lower()
-        if k not in seen:
-            seen.add(k)
-            out.append(v)
-    return out
+    return buyma_options_mod.build_size_variants(size_raw)
 
 
 def _normalize_size_token_for_match(s: str) -> str:
-    """Normalize size tokens for matching."""
-    t = (s or '').lower().strip()
-    if not t:
-        return ''
-    t = t.replace('?', ' ')
-    t = t.replace('ｃｍ', 'cm').replace('㎝', 'cm').replace('センチ', 'cm')
-    t = t.replace('サイズ', '').replace('size', '')
-    t = t.replace('cm', '').replace('mm', '')
-    t = t.replace('jp', '').replace('kr', '').replace('us', '').replace('uk', '').replace('eu', '').replace('it', '')
-    t = re.sub(r"[\s\-_/\(\)\[\]\{\}:;,+]", '', t)
-    # 23.5 == 235 형태 비교를 위해 점 제거
-    t = t.replace('.', '')
-    return t
+    return buyma_options_mod.normalize_size_token_for_match(s)
 
 
 def _size_match(a: str, b: str) -> bool:
-    """사이즈 표기 a와 b가 실질적으로 같은지 판별한다."""
-    na = _normalize_size_token_for_match(a)
-    nb = _normalize_size_token_for_match(b)
-    if not na or not nb:
-        return False
-    if na == nb:
-        return True
-
-    fixed_tokens = {'xxs', 'xs', 's', 'm', 'l', 'xl', 'xxl', 'xxxl'}
-    if na in fixed_tokens or nb in fixed_tokens:
-        return na == nb
-
-    return (na in nb) or (nb in na)
+    return buyma_options_mod.size_match(a, b)
 
 
 def _is_free_size_text(size_text: str) -> bool:
-    """프리사이즈 계열 표기인지 판별한다. (예: free size, one size, f)"""
-    raw = (size_text or '').strip()
-    if not raw:
-        return False
-
-    tokens = [t.strip() for t in re.split(r'[,/|]+', raw) if t.strip()]
-    if not tokens:
-        return False
-
-    normalized_tokens = []
-    for t in tokens:
-        n = t.lower().strip()
-        n = n.replace('?', ' ')
-        n = re.sub(r'\s+', '', n)
-        n = n.replace('-', '').replace('_', '').replace('.', '')
-        normalized_tokens.append(n)
-
-    free_aliases = {
-        'f', 'free', 'freesize', 'onesize', 'os', 'o/s'.replace('/', ''),
-        'none', 'n/a', 'na', 'no', 'nosize', 'nosizes', 'notapplicable',
-        '지정없음', '사이즈없음', '없음', '해당없음',
-        'サイズ指定なし', '指定なし', 'サイズなし', 'なし',
-        '프리', '프리사이즈',
-        'フリー', 'フリーサイズ', 'ワンサイズ'
-    }
-
-    return all(t in free_aliases for t in normalized_tokens)
+    return buyma_options_mod.is_free_size_text(size_text)
 
 
 def _check_no_variation_option(driver, prefer_shitei_nashi: bool = False) -> bool:
@@ -1485,53 +1313,15 @@ def _fill_size_table_rows(driver, panel, size_text: str) -> int:
 
 
 def _normalize_actual_size_for_upload(value: str) -> str:
-    text = (value or "").strip()
-    if not text:
-        return ""
-    lowered = text.lower()
-    if lowered in {"none", "n/a", "na"}:
-        return ""
-    if text in {"못찾음", "없음", "-"}:
-        return ""
-    return text
+    return buyma_validate_mod.normalize_actual_size_for_upload(value)
 
 
 def _extract_actual_measure_map(actual_size_text: str) -> Dict[str, str]:
-    if not actual_size_text:
-        return {}
-
-    pairs: Dict[str, str] = {}
-    normalized = actual_size_text.replace("\n", " ").replace("\r", " ")
-    for key, val in re.findall(r"([가-힣A-Za-z ]{1,20})\s*[:：]?\s*(-?\d+(?:\.\d+)?)", normalized):
-        k = key.strip()
-        v = val.strip()
-        if k and v and k not in pairs:
-            pairs[k] = v
-    return pairs
+    return buyma_validate_mod.extract_actual_measure_map(actual_size_text)
 
 
 def _extract_actual_size_rows(actual_size_text: str) -> Dict[str, Dict[str, str]]:
-    """'00: 총장 103, 허리단면 35.5 | 01: ...' 형태를 사이즈별 측정 맵으로 파싱."""
-    rows: Dict[str, Dict[str, str]] = {}
-    text = (actual_size_text or "").strip()
-    if not text:
-        return rows
-
-    for chunk in [c.strip() for c in text.split("|") if c.strip()]:
-        m = re.match(r"^([^:]+)\s*:\s*(.+)$", chunk)
-        if not m:
-            continue
-        size_name = m.group(1).strip()
-        body = m.group(2).strip()
-        measure_map: Dict[str, str] = {}
-        for part in [p.strip() for p in body.split(",") if p.strip()]:
-            mm = re.match(r"^(.+?)\s+(-?\d+(?:\.\d+)?)$", part)
-            if not mm:
-                continue
-            measure_map[mm.group(1).strip()] = mm.group(2).strip()
-        if measure_map:
-            rows[size_name] = measure_map
-    return rows
+    return buyma_validate_mod.extract_actual_size_rows(actual_size_text)
 
 
 MEASURE_ALIASES: Dict[str, List[str]] = {
@@ -1551,28 +1341,7 @@ MEASURE_ALIASES: Dict[str, List[str]] = {
 
 
 def _pick_measure_value_by_label(label_text: str, measure_map: Dict[str, str]) -> str:
-    if not measure_map:
-        return ""
-    lt = (label_text or "").strip().lower()
-    if not lt:
-        return ""
-
-    # direct key hit
-    for key, value in measure_map.items():
-        if key and key.lower() in lt:
-            return value
-
-    # alias hit (KR/JP mixed)
-    for base_key, aliases in MEASURE_ALIASES.items():
-        if not any(alias.lower() in lt for alias in aliases):
-            continue
-        if base_key in measure_map:
-            return measure_map[base_key]
-        # fallback: alias itself present as key in map
-        for alias in aliases:
-            if alias in measure_map:
-                return measure_map[alias]
-    return ""
+    return buyma_validate_mod.pick_measure_value_by_label(label_text, measure_map)
 
 
 def _fill_size_edit_details(driver, actual_size_text: str) -> int:
@@ -2270,19 +2039,6 @@ def read_upload_rows(service, sheet_name: str, specific_row: int = 0) -> List[Di
         status_thumbnails_done=STATUS_THUMBNAILS_DONE,
         specific_row=specific_row,
     )
-
-_infer_color_system = buyma_options_mod.infer_color_system
-_split_color_values = buyma_options_mod.split_color_values
-_expand_color_abbreviations = buyma_options_mod.expand_color_abbreviations
-_build_size_variants = buyma_options_mod.build_size_variants
-_normalize_size_token_for_match = buyma_options_mod.normalize_size_token_for_match
-_size_match = buyma_options_mod.size_match
-_is_free_size_text = buyma_options_mod.is_free_size_text
-
-_normalize_actual_size_for_upload = buyma_validate_mod.normalize_actual_size_for_upload
-_extract_actual_measure_map = buyma_validate_mod.extract_actual_measure_map
-_extract_actual_size_rows = buyma_validate_mod.extract_actual_size_rows
-_pick_measure_value_by_label = buyma_validate_mod.pick_measure_value_by_label
 
 detect_gender_raw = buyma_category_mod.detect_gender_raw
 convert_gender_for_buyma = buyma_category_mod.convert_gender_for_buyma
