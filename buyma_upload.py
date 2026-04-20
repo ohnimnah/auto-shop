@@ -3050,97 +3050,44 @@ def _handle_success_after_fill(driver, row_num: int, upload_mode: str, interacti
 def fill_buyma_form(driver, row_data: Dict[str, str]) -> str:
     """바이마 출품 시 상품 정보를 자동 입력한다.
     바이마는 React 기반 bmm-c-* 컴포넌트를 사용하며 name/id 속성이 없음."""
-    try:
-        payload = buyma_mapper_mod.build_buyma_form_payload(
-            row_data,
-            normalize_actual_size_for_upload=_normalize_actual_size_for_upload,
-            expand_color_abbreviations=_expand_color_abbreviations,
-            split_color_values=_split_color_values,
-            resolve_image_files=resolve_image_files,
-        )
-        driver.get(BUYMA_SELL_URL)
-        WebDriverWait(driver, 15).until(
-            EC.presence_of_element_located((By.CSS_SELECTOR, ".bmm-c-heading__ttl"))
-        )
-        _sleep(3)
-
-        row_num = row_data['row_num']
-        print(f"\n--- [{row_num}번째 바이마 출품 자동입력 시작 ---")
-        print(f"  상품명: {payload['product_name_kr']}")
-        print(f"  브랜드: {payload['brand']}")
-        print(f"  바이마 판매가: {row_data['buyma_price']}")
-
-        # ---- 오버레이 제거 ----
-        _dismiss_overlay(driver)
-
-        # ---- ?テ?リ ?동 ?택 ----
-        try:
-            category_plan = buyma_category_mod.build_buyma_category_plan(
-                row_data,
-                category_corrector=correct_buyma_category,
-            )
-            buyma_category_mod.apply_buyma_category_selection(
-                driver,
-                category_plan,
-                select_category_by_arrow=_select_category_by_arrow,
-                find_best_option_by_arrow=_find_best_option_by_arrow,
-            )
-        except Exception as e:
-            print(f"  ✗ 카테고리 선택 실패: {e}")
-
-        core_fill_result = buyma_uploader_mod.apply_buyma_core_fields(
-            driver,
-            payload=payload,
-            comment_template=BUYMA_COMMENT_TEMPLATE,
-            sleep_fn=_sleep,
-            scroll_and_click=_scroll_and_click,
-            set_text_input_value=_set_text_input_value,
-            detect_title_input_issue=_detect_title_input_issue,
-            build_buyma_title_retry_candidates=_build_buyma_title_retry_candidates,
-        )
-        if core_fill_result != "success":
-            return core_fill_result
-
-        buyma_options_mod.apply_buyma_option_selection(
-            driver,
-            buyma_sell_url=BUYMA_SELL_URL,
-            color=payload['color'],
-            color_values=payload['color_values'],
-            size_text=payload['size_text'],
-            actual_size_text=payload['actual_size_text'],
-            sleep_fn=_sleep,
-            scroll_and_click=_scroll_and_click,
-            select_color_system=_select_color_system,
-            try_add_color_row=_try_add_color_row,
-            fill_color_supplement=_fill_color_supplement,
-            select_size_by_select_controls=_select_size_by_select_controls,
-            fill_size_table_rows=_fill_size_table_rows,
-            force_select_variation_none_sequence=_force_select_variation_none_sequence,
-            force_select_shitei_nashi_global=_force_select_shitei_nashi_global,
-            check_no_variation_option=_check_no_variation_option,
-            force_reference_size_shitei_nashi=_force_reference_size_shitei_nashi,
-            fill_size_edit_details=_fill_size_edit_details,
-            enable_size_selection_ui=_enable_size_selection_ui,
-            fill_size_text_inputs=_fill_size_text_inputs,
-            fill_size_supplement=_fill_size_supplement,
-        )
-        buyma_uploader_mod.apply_buyma_post_option_fields(
-            driver,
-            payload=payload,
-            comment_template=BUYMA_COMMENT_TEMPLATE,
-            sleep_fn=_sleep,
-            scroll_and_click=_scroll_and_click,
-        )
-
-        # ---- 이미지 업로드 ----
-        image_files = payload['image_files']
-        buyma_images_mod.upload_product_images(driver, image_files, sleep_fn=_sleep)
-
-        return "success"
-
-    except Exception as e:
-        print(f"  ✗ 이미지 업로드 오류: {e}")
-        return "error"
+    return buyma_uploader_mod.fill_buyma_form(
+        driver,
+        row_data,
+        build_buyma_form_payload=buyma_mapper_mod.build_buyma_form_payload,
+        build_buyma_category_plan=buyma_category_mod.build_buyma_category_plan,
+        apply_buyma_category_selection=buyma_category_mod.apply_buyma_category_selection,
+        apply_buyma_option_selection=buyma_options_mod.apply_buyma_option_selection,
+        apply_buyma_post_option_fields=buyma_uploader_mod.apply_buyma_post_option_fields,
+        upload_product_images=buyma_images_mod.upload_product_images,
+        normalize_actual_size_for_upload=_normalize_actual_size_for_upload,
+        expand_color_abbreviations=_expand_color_abbreviations,
+        split_color_values=_split_color_values,
+        resolve_image_files=resolve_image_files,
+        category_corrector=correct_buyma_category,
+        select_category_by_arrow=_select_category_by_arrow,
+        find_best_option_by_arrow=_find_best_option_by_arrow,
+        buyma_sell_url=BUYMA_SELL_URL,
+        dismiss_overlay=_dismiss_overlay,
+        sleep_fn=_sleep,
+        comment_template=BUYMA_COMMENT_TEMPLATE,
+        scroll_and_click=_scroll_and_click,
+        set_text_input_value=_set_text_input_value,
+        detect_title_input_issue=_detect_title_input_issue,
+        build_buyma_title_retry_candidates=_build_buyma_title_retry_candidates,
+        select_color_system=_select_color_system,
+        try_add_color_row=_try_add_color_row,
+        fill_color_supplement=_fill_color_supplement,
+        select_size_by_select_controls=_select_size_by_select_controls,
+        fill_size_table_rows=_fill_size_table_rows,
+        force_select_variation_none_sequence=_force_select_variation_none_sequence,
+        force_select_shitei_nashi_global=_force_select_shitei_nashi_global,
+        check_no_variation_option=_check_no_variation_option,
+        force_reference_size_shitei_nashi=_force_reference_size_shitei_nashi,
+        fill_size_edit_details=_fill_size_edit_details,
+        enable_size_selection_ui=_enable_size_selection_ui,
+        fill_size_text_inputs=_fill_size_text_inputs,
+        fill_size_supplement=_fill_size_supplement,
+    )
 
 
 def upload_products(specific_row: int = 0, upload_mode: str = 'auto', max_items: int = 0, interactive: bool = True):

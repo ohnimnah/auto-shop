@@ -12,6 +12,8 @@ from typing import Callable, Dict, List
 
 from selenium.webdriver.common.by import By
 from selenium.webdriver.common.keys import Keys
+from selenium.webdriver.support import expected_conditions as EC
+from selenium.webdriver.support.ui import WebDriverWait
 
 
 def upload_products(
@@ -674,3 +676,130 @@ def apply_buyma_post_option_fields(
             print(f"  ✓ 도시 선택: ソウル({city_count}개)")
     except Exception as exc:
         print(f"  ✗ 도시 선택 실패, 자동 선택 필요: {exc}")
+
+
+def fill_buyma_form(
+    driver,
+    row_data: Dict[str, str],
+    *,
+    build_buyma_form_payload,
+    build_buyma_category_plan,
+    apply_buyma_category_selection,
+    apply_buyma_option_selection,
+    apply_buyma_post_option_fields,
+    upload_product_images,
+    normalize_actual_size_for_upload,
+    expand_color_abbreviations,
+    split_color_values,
+    resolve_image_files,
+    category_corrector,
+    select_category_by_arrow,
+    find_best_option_by_arrow,
+    buyma_sell_url: str,
+    dismiss_overlay,
+    sleep_fn,
+    comment_template: str,
+    scroll_and_click,
+    set_text_input_value,
+    detect_title_input_issue,
+    build_buyma_title_retry_candidates,
+    select_color_system,
+    try_add_color_row,
+    fill_color_supplement,
+    select_size_by_select_controls,
+    fill_size_table_rows,
+    force_select_variation_none_sequence,
+    force_select_shitei_nashi_global,
+    check_no_variation_option,
+    force_reference_size_shitei_nashi,
+    fill_size_edit_details,
+    enable_size_selection_ui,
+    fill_size_text_inputs,
+    fill_size_supplement,
+) -> str:
+    """Marketplace BUYMA form fill orchestration."""
+    try:
+        payload = build_buyma_form_payload(
+            row_data,
+            normalize_actual_size_for_upload=normalize_actual_size_for_upload,
+            expand_color_abbreviations=expand_color_abbreviations,
+            split_color_values=split_color_values,
+            resolve_image_files=resolve_image_files,
+        )
+        driver.get(buyma_sell_url)
+        WebDriverWait(driver, 15).until(
+            EC.presence_of_element_located((By.CSS_SELECTOR, ".bmm-c-heading__ttl"))
+        )
+        sleep_fn(3)
+
+        row_num = row_data["row_num"]
+        print(f"\n--- [{row_num}번째 바이마 출품 자동입력 시작 ---")
+        print(f"  상품명: {payload['product_name_kr']}")
+        print(f"  브랜드: {payload['brand']}")
+        print(f"  바이마 판매가: {row_data['buyma_price']}")
+
+        dismiss_overlay(driver)
+
+        try:
+            category_plan = build_buyma_category_plan(
+                row_data,
+                category_corrector=category_corrector,
+            )
+            apply_buyma_category_selection(
+                driver,
+                category_plan,
+                select_category_by_arrow=select_category_by_arrow,
+                find_best_option_by_arrow=find_best_option_by_arrow,
+            )
+        except Exception as exc:
+            print(f"  ✗ 카테고리 선택 실패: {exc}")
+
+        core_fill_result = apply_buyma_core_fields(
+            driver,
+            payload=payload,
+            comment_template=comment_template,
+            sleep_fn=sleep_fn,
+            scroll_and_click=scroll_and_click,
+            set_text_input_value=set_text_input_value,
+            detect_title_input_issue=detect_title_input_issue,
+            build_buyma_title_retry_candidates=build_buyma_title_retry_candidates,
+        )
+        if core_fill_result != "success":
+            return core_fill_result
+
+        apply_buyma_option_selection(
+            driver,
+            buyma_sell_url=buyma_sell_url,
+            color=payload["color"],
+            color_values=payload["color_values"],
+            size_text=payload["size_text"],
+            actual_size_text=payload["actual_size_text"],
+            sleep_fn=sleep_fn,
+            scroll_and_click=scroll_and_click,
+            select_color_system=select_color_system,
+            try_add_color_row=try_add_color_row,
+            fill_color_supplement=fill_color_supplement,
+            select_size_by_select_controls=select_size_by_select_controls,
+            fill_size_table_rows=fill_size_table_rows,
+            force_select_variation_none_sequence=force_select_variation_none_sequence,
+            force_select_shitei_nashi_global=force_select_shitei_nashi_global,
+            check_no_variation_option=check_no_variation_option,
+            force_reference_size_shitei_nashi=force_reference_size_shitei_nashi,
+            fill_size_edit_details=fill_size_edit_details,
+            enable_size_selection_ui=enable_size_selection_ui,
+            fill_size_text_inputs=fill_size_text_inputs,
+            fill_size_supplement=fill_size_supplement,
+        )
+        apply_buyma_post_option_fields(
+            driver,
+            payload=payload,
+            comment_template=comment_template,
+            sleep_fn=sleep_fn,
+            scroll_and_click=scroll_and_click,
+        )
+
+        upload_product_images(driver, payload["image_files"], sleep_fn=sleep_fn)
+        return "success"
+    except Exception as exc:
+        print(f"  ✗ 이미지 업로드 오류: {exc}")
+        return "error"
