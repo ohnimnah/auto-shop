@@ -2,7 +2,7 @@
 
 import re
 import unicodedata
-from typing import List
+from typing import Callable, Dict, List
 
 
 def normalize_buyma_title_text(text: str) -> str:
@@ -128,3 +128,51 @@ def build_buyma_title_retry_candidates(brand_en: str, name_en: str, color_en: st
             seen.add(candidate)
             unique.append(candidate)
     return unique
+
+
+def build_buyma_form_payload(
+    row_data: Dict[str, str],
+    *,
+    normalize_actual_size_for_upload: Callable[[str], str],
+    expand_color_abbreviations: Callable[[str], str],
+    split_color_values: Callable[[str], List[str]],
+    resolve_image_files: Callable[[str], List[str]],
+) -> Dict[str, object]:
+    """Build a browser-agnostic BUYMA form payload from a source row."""
+    brand = (row_data.get("brand_en") or row_data.get("brand") or "").strip()
+    name_en = (row_data.get("product_name_en") or row_data.get("product_name_kr") or "").strip()
+
+    color_en_raw = (row_data.get("color_en") or "").strip()
+    color_raw = (row_data.get("color_en") or row_data.get("color_kr") or "").strip()
+    color_en = expand_color_abbreviations(color_en_raw)
+    color = expand_color_abbreviations(color_raw)
+    if color_en.lower() == "none":
+        color_en = ""
+    if color.lower() == "none":
+        color = ""
+
+    color_values = split_color_values(color_en or color)
+    if not color_values and color:
+        color_values = [color]
+
+    raw_buyma_price = re.sub(r"[^\d]", "", row_data.get("buyma_price", ""))
+    buyma_price_value = int(raw_buyma_price) if raw_buyma_price else 0
+    adjusted_price = max(0, buyma_price_value - 10) if raw_buyma_price else 0
+
+    return {
+        "row_num": row_data.get("row_num"),
+        "brand": brand,
+        "product_name_kr": row_data.get("product_name_kr", ""),
+        "name_en": name_en,
+        "color": color,
+        "color_en": color_en,
+        "color_values": color_values,
+        "size_text": row_data.get("size", "") or "",
+        "actual_size_text": normalize_actual_size_for_upload(row_data.get("actual_size", "")),
+        "image_files": resolve_image_files(row_data.get("image_paths", "")),
+        "buyma_price_digits": raw_buyma_price,
+        "adjusted_price": adjusted_price,
+        "sheet_category_large": (row_data.get("musinsa_category_large") or "").strip(),
+        "sheet_category_middle": (row_data.get("musinsa_category_middle") or "").strip(),
+        "sheet_category_small": (row_data.get("musinsa_category_small") or "").strip(),
+    }

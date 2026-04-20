@@ -1,6 +1,6 @@
 """BUYMA category and gender inference helpers."""
 
-from typing import List, Tuple
+from typing import Callable, Dict, List, Tuple
 
 
 FEMALE_KEYWORDS = [
@@ -173,3 +173,51 @@ def remap_sheet_categories_with_gender(cat1: str, cat2: str, cat3: str) -> Tuple
     new_mid = rest[0] if len(rest) > 0 else ""
     new_small = rest[1] if len(rest) > 1 else ""
     return gender, new_mid, new_small
+
+
+def build_buyma_category_plan(
+    row_data: Dict[str, str],
+    *,
+    category_corrector: Callable[[str, str, str], str],
+) -> Dict[str, str]:
+    """Build category selection plan from source row without browser access."""
+    sheet_cat1 = (row_data.get("musinsa_category_large") or "").strip()
+    sheet_cat2 = (row_data.get("musinsa_category_middle") or "").strip()
+    sheet_cat3 = (row_data.get("musinsa_category_small") or "").strip()
+    sheet_cat1, sheet_cat2, sheet_cat3 = remap_sheet_categories_with_gender(sheet_cat1, sheet_cat2, sheet_cat3)
+
+    product_name_kr = row_data.get("product_name_kr", "")
+    product_name_en = row_data.get("product_name_en", "")
+    brand = row_data.get("brand", "")
+
+    if sheet_cat1 and sheet_cat2:
+        cat1, cat2, cat3 = normalize_sheet_category_labels(sheet_cat1, sheet_cat2, sheet_cat3)
+        cat_source = "시트(W/X/Y)"
+    else:
+        cat1, cat2, cat3 = infer_buyma_category(product_name_kr, product_name_en, brand)
+        cat_source = "자동추론"
+
+    musinsa_category_text = " / ".join([sheet_cat1, sheet_cat2, sheet_cat3]).strip(" /")
+    source_product_name = product_name_kr or product_name_en or ""
+    corrected_cat2 = category_corrector(cat2, source_product_name, musinsa_category_text)
+    fallback_cat1, fallback_cat2, fallback_cat3 = infer_buyma_category(product_name_kr, product_name_en, brand)
+    corrected_fallback_cat2 = category_corrector(
+        fallback_cat2,
+        source_product_name,
+        musinsa_category_text,
+    )
+
+    return {
+        "sheet_cat1": sheet_cat1,
+        "sheet_cat2": sheet_cat2,
+        "sheet_cat3": sheet_cat3,
+        "cat1": cat1,
+        "cat2": corrected_cat2,
+        "cat3": cat3,
+        "cat_source": cat_source,
+        "musinsa_category_text": musinsa_category_text,
+        "source_product_name": source_product_name,
+        "fallback_cat1": fallback_cat1,
+        "fallback_cat2": corrected_fallback_cat2,
+        "fallback_cat3": fallback_cat3,
+    }

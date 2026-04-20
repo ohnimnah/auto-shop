@@ -3051,6 +3051,13 @@ def fill_buyma_form(driver, row_data: Dict[str, str]) -> str:
     """바이마 출품 시 상품 정보를 자동 입력한다.
     바이마는 React 기반 bmm-c-* 컴포넌트를 사용하며 name/id 속성이 없음."""
     try:
+        payload = buyma_mapper_mod.build_buyma_form_payload(
+            row_data,
+            normalize_actual_size_for_upload=_normalize_actual_size_for_upload,
+            expand_color_abbreviations=_expand_color_abbreviations,
+            split_color_values=_split_color_values,
+            resolve_image_files=resolve_image_files,
+        )
         driver.get(BUYMA_SELL_URL)
         WebDriverWait(driver, 15).until(
             EC.presence_of_element_located((By.CSS_SELECTOR, ".bmm-c-heading__ttl"))
@@ -3059,8 +3066,8 @@ def fill_buyma_form(driver, row_data: Dict[str, str]) -> str:
 
         row_num = row_data['row_num']
         print(f"\n--- [{row_num}번째 바이마 출품 자동입력 시작 ---")
-        print(f"  상품명: {row_data['product_name_kr']}")
-        print(f"  브랜드: {row_data['brand']}")
+        print(f"  상품명: {payload['product_name_kr']}")
+        print(f"  브랜드: {payload['brand']}")
         print(f"  바이마 판매가: {row_data['buyma_price']}")
 
         # ---- 오버레이 제거 ----
@@ -3068,30 +3075,14 @@ def fill_buyma_form(driver, row_data: Dict[str, str]) -> str:
 
         # ---- ?テ?リ ?동 ?택 ----
         try:
-            sheet_cat1 = (row_data.get('musinsa_category_large') or '').strip()
-            sheet_cat2 = (row_data.get('musinsa_category_middle') or '').strip()
-            sheet_cat3 = (row_data.get('musinsa_category_small') or '').strip()
-            sheet_cat1, sheet_cat2, sheet_cat3 = _remap_sheet_categories_with_gender(
-                sheet_cat1, sheet_cat2, sheet_cat3
+            category_plan = buyma_category_mod.build_buyma_category_plan(
+                row_data,
+                category_corrector=correct_buyma_category,
             )
-
-            if sheet_cat1 and sheet_cat2:
-                cat1, cat2, cat3 = _normalize_sheet_category_labels(sheet_cat1, sheet_cat2, sheet_cat3)
-                cat_source = "시트(W/X/Y)"
-            else:
-                cat1, cat2, cat3 = _infer_buyma_category(
-                    row_data.get('product_name_kr', ''),
-                    row_data.get('product_name_en', ''),
-                    row_data.get('brand', '')
-                )
-                cat_source = "자동추론"
-            # Existing mapping 결과(cat2)에 대해서만 보정 레이어를 적용한다.
-            musinsa_category_text = " / ".join([sheet_cat1, sheet_cat2, sheet_cat3]).strip(" /")
-            source_product_name = row_data.get('product_name_kr') or row_data.get('product_name_en') or ''
-            corrected_cat2 = correct_buyma_category(cat2, source_product_name, musinsa_category_text)
-            if corrected_cat2 != cat2:
-                print(f"  카테고리 보정: {cat2} -> {corrected_cat2}")
-                cat2 = corrected_cat2
+            cat1 = category_plan["cat1"]
+            cat2 = category_plan["cat2"]
+            cat3 = category_plan["cat3"]
+            cat_source = category_plan["cat_source"]
             if cat1 and cat2:
                 print(f"  카테고리({cat_source}): {cat1} > {cat2} > {cat3}")
                 # ?카테고리 ?택
@@ -3101,18 +3092,12 @@ def fill_buyma_form(driver, row_data: Dict[str, str]) -> str:
                     selected_cat1 = _find_best_option_by_arrow(driver, 0, cat1, fallback_other=False)
                 if (not selected_cat1) and cat_source.startswith("시트"):
                     # 시트값으로 실패하면 기존 자동추론으로 한 번 fallback
-                    f1, f2, f3 = _infer_buyma_category(
-                        row_data.get('product_name_kr', ''),
-                        row_data.get('product_name_en', ''),
-                        row_data.get('brand', '')
-                    )
+                    f1 = category_plan["fallback_cat1"]
+                    f2 = category_plan["fallback_cat2"]
+                    f3 = category_plan["fallback_cat3"]
                     if f1 and f2:
                         print(f"  △ 시트 카테고리 미매칭, 자동추론 fallback: {f1} > {f2} > {f3}")
                         cat1, cat2, cat3 = f1, f2, f3
-                        corrected_cat2 = correct_buyma_category(cat2, source_product_name, musinsa_category_text)
-                        if corrected_cat2 != cat2:
-                            print(f"  카테고리 보정(fallback): {cat2} -> {corrected_cat2}")
-                            cat2 = corrected_cat2
                         selected_cat1 = _select_category_by_arrow(driver, 0, cat1)
                         if not selected_cat1:
                             selected_cat1 = _find_best_option_by_arrow(driver, 0, cat1, fallback_other=False)
@@ -3159,12 +3144,9 @@ def fill_buyma_form(driver, row_data: Dict[str, str]) -> str:
             print(f"  ✗ 카테고리 선택 실패: {e}")
 
         # ---- 상품명 입력: "[Brand] ProductNameEN ColorEN" ----
-        brand_en = row_data.get('brand_en', '') or row_data.get('brand', '')
-        name_en = row_data.get('product_name_en') or row_data['product_name_kr']
-        color_en = row_data.get('color_en') or row_data.get('color_kr', '')
-        color_en = _expand_color_abbreviations(color_en)
-        if color_en.lower() == 'none':
-            color_en = ''
+        brand_en = payload['brand']
+        name_en = payload['name_en']
+        color_en = payload['color_en']
         try:
             # 첫번째 bmm-c-field 하위 text input에 상품명 입력
             name_fields = driver.find_elements(By.CSS_SELECTOR,
@@ -3200,7 +3182,7 @@ def fill_buyma_form(driver, row_data: Dict[str, str]) -> str:
             return "manual_review"
 
         # ---- 브랜드 입력 (영어) ----
-        brand = row_data.get('brand_en', '') or row_data.get('brand', '')
+        brand = payload['brand']
         if brand:
             try:
                 brand_input = driver.find_element(By.CSS_SELECTOR,
@@ -3219,12 +3201,10 @@ def fill_buyma_form(driver, row_data: Dict[str, str]) -> str:
                 print(f"  ✗ 브랜드 입력 실패: {e}")
 
         # ---- 색상: React Select에서 색상 선택 + 텍스트 입력 ----
-        color = row_data.get('color_en') or row_data.get('color_kr', '')
-        color = _expand_color_abbreviations(color)
-        color_en_input = _expand_color_abbreviations((row_data.get('color_en') or '').strip())
+        color = payload['color']
+        color_values = payload['color_values']
         if color and color.lower() != 'none':
             try:
-                color_values = _split_color_values(color_en_input or color)
                 if not color_values:
                     color_values = [color]
                 color_for_system = color_values[0]
@@ -3314,8 +3294,8 @@ def fill_buyma_form(driver, row_data: Dict[str, str]) -> str:
 
         # ---- 사이즈 컨테이너 클릭 및 체크박스 선택 ----
         # 주의: 카테고리 미선택 시 사이즈목록이 표시되지 않음
-        size_text = row_data.get('size', '')
-        actual_size_text = _normalize_actual_size_for_upload(row_data.get('actual_size', ''))
+        size_text = payload['size_text']
+        actual_size_text = payload['actual_size_text']
         try:
             is_free_size = _is_free_size_text(size_text)
 
@@ -3725,10 +3705,10 @@ def fill_buyma_form(driver, row_data: Dict[str, str]) -> str:
             print(f"  ✗ 배송방법 선택 실패: {e}")
 
         # ---- 가격 입력: half-size-char 필드 (M열 값) ----
-        buyma_price = re.sub(r'[^\d]', '', row_data.get('buyma_price', ''))
+        buyma_price = payload['buyma_price_digits']
         if buyma_price:
             try:
-                adjusted_price = max(0, int(buyma_price) - 10)
+                adjusted_price = payload['adjusted_price']
                 filled_count = 0
 
                 # '商品価格' 라벨에 연결된 입력 필드만 입력 (수량 필드 오염 방지)
@@ -4073,7 +4053,7 @@ def fill_buyma_form(driver, row_data: Dict[str, str]) -> str:
             print(f"  ✗ 도시 선택 실패, 자동 선택 필요: {e}")
 
         # ---- 이미지 업로드 ----
-        image_files = resolve_image_files(row_data.get('image_paths', ''))
+        image_files = payload['image_files']
         if image_files:
             try:
                 file_inputs = driver.find_elements(By.CSS_SELECTOR, "input[type='file']")
