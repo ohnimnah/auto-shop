@@ -784,13 +784,20 @@ def fill_buyma_form(
 ) -> str:
     """Marketplace BUYMA form fill orchestration."""
     try:
-        payload = build_buyma_form_payload(
-            row_data,
-            normalize_actual_size_for_upload=normalize_actual_size_for_upload,
-            expand_color_abbreviations=expand_color_abbreviations,
-            split_color_values=split_color_values,
-            resolve_image_files=resolve_image_files,
-        )
+        try:
+            payload = build_buyma_form_payload(
+                row_data,
+                normalize_actual_size_for_upload=normalize_actual_size_for_upload,
+                expand_color_abbreviations=expand_color_abbreviations,
+                split_color_values=split_color_values,
+                resolve_image_files=resolve_image_files,
+            )
+        except TypeError as exc:
+            # Compatibility: mapper method style (map_row(row_data)) does not accept
+            # keyword helper injections.
+            if "unexpected keyword argument" not in str(exc):
+                raise
+            payload = build_buyma_form_payload(row_data)
         driver.get(buyma_sell_url)
         WebDriverWait(driver, 15).until(
             EC.presence_of_element_located((By.CSS_SELECTOR, ".bmm-c-heading__ttl"))
