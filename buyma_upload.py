@@ -2131,81 +2131,14 @@ def _remap_sheet_categories_with_gender(cat1: str, cat2: str, cat3: str) -> Tupl
     return gender, new_mid, new_small
 
 
-def _get_category_select_el(driver, item_index: int):
-    """item_index에 해당하는 React-Select 요소를 반환한다."""
-    if item_index == 0:
-        return driver.find_element(By.CSS_SELECTOR, '.sell-category-select')
-    items = driver.find_elements(By.CSS_SELECTOR, '.sell-category__item')
-    if len(items) <= item_index:
-        return None
-    return items[item_index].find_element(By.CSS_SELECTOR, '.Select')
-
-
 def _select_category_by_typing(driver, item_index: int, target_label: str) -> bool:
-    """커리 선택 후 입력값으로 필터링한 첫 번째 옵션을 클릭한다.
-    React-Select의 타이핑 필터 방식이 ArrowDown 방식보다 훨씬 빠르고 안정이다."""
-    sel_el = _get_category_select_el(driver, item_index)
-    if sel_el is None:
-        return False
-
-    ctrl = sel_el.find_element(By.CSS_SELECTOR, '.Select-control')
-    driver.execute_script("arguments[0].scrollIntoView({block: 'center'})", ctrl)
-    _sleep(0.3)
-    driver.execute_script("arguments[0].click()", ctrl)
-    _sleep(0.6)
-
-    combo = sel_el.find_element(By.CSS_SELECTOR, '.Select-input > input, .Select-input')
-    combo.send_keys(target_label)
-    _sleep(0.8)
-
-    # 필터링된 옵션에서 정확일치는 먼저, 포함하면 그 다음 클릭
-    try:
-        options = driver.find_elements(By.CSS_SELECTOR, '.Select-menu-outer .Select-option')
-        exact = next((o for o in options if o.text.strip() == target_label), None)
-        partial = next((o for o in options if target_label in o.text), None)
-        chosen = exact or partial
-        if chosen:
-            _scroll_and_click(driver, chosen)
-            _sleep(1.5)
-            return True
-    except Exception:
-        pass
-
-    # 필터 패스: 입력 일치 매우 적으면 ArrowDown 보조주기 (80개 제한)
-    try:
-        for _ in range(len(target_label)):
-            combo.send_keys(Keys.BACK_SPACE)
-        _sleep(0.2)
-    except Exception:
-        pass
-
-    driver.execute_script("arguments[0].click()", ctrl)
-    _sleep(0.6)
-    combo = sel_el.find_element(By.CSS_SELECTOR, '.Select-input > input, .Select-input')
-    seen = []
-    for _ in range(80):
-        combo.send_keys(Keys.ARROW_DOWN)
-        _sleep(0.12)
-        focused = driver.execute_script("""
-            var items = document.querySelectorAll('.sell-category__item');
-            var sel = arguments[0] === 0
-                ? document.querySelector('.sell-category-select')
-                : items[arguments[0]].querySelector('.Select');
-            var f = sel ? sel.querySelector('.Select-option.is-focused') : null;
-            return f ? (f.getAttribute('aria-label') || f.textContent.trim() || '') : '';
-        """, item_index)
-        if focused == target_label:
-            combo.send_keys(Keys.ENTER)
-            _sleep(1.5)
-            return True
-        if focused:
-            if focused in seen and len(seen) > 2 and focused == seen[0]:
-                break
-            if focused not in seen:
-                seen.append(focused)
-    combo.send_keys(Keys.ESCAPE)
-    _sleep(0.3)
-    return False
+    return buyma_category_mod.select_category_by_typing(
+        driver,
+        item_index,
+        target_label,
+        sleep_fn=_sleep,
+        scroll_and_click=_scroll_and_click,
+    )
 
 
 # ArrowDown 대체 수단: 타이핑 방식 fallback으로 사용, 잘 안될 때 대체
@@ -2214,81 +2147,14 @@ _select_category_by_arrow = _select_category_by_typing
 
 def _find_best_option_by_arrow(driver, item_index: int, target_keyword: str,
                                fallback_other: bool = True) -> bool:
-    """sell-category__item의 Select에서 키워드 포함하는 옵션을 선택한다.
-    React-Select 타이핑 필터 먼저 시도하고, 실패 시 ArrowDown 여러 회, 그래도 실패 시 'その他' fallback."""
-    sel_el = _get_category_select_el(driver, item_index)
-    if sel_el is None:
-        return False
-
-    ctrl = sel_el.find_element(By.CSS_SELECTOR, '.Select-control')
-    driver.execute_script("arguments[0].scrollIntoView({block: 'center'})", ctrl)
-    _sleep(0.3)
-    driver.execute_script("arguments[0].click()", ctrl)
-    _sleep(0.6)
-
-    combo = sel_el.find_element(By.CSS_SELECTOR, '.Select-input > input, .Select-input')
-    combo.send_keys(target_keyword)
-    _sleep(0.8)
-
-    try:
-        options = driver.find_elements(By.CSS_SELECTOR, '.Select-menu-outer .Select-option')
-        # 정확 일치 먼저, 포함 매칭
-        exact = next((o for o in options if o.text.strip() == target_keyword), None)
-        partial = next((o for o in options if target_keyword in o.text), None)
-        chosen = exact or partial
-        if chosen:
-            _scroll_and_click(driver, chosen)
-            _sleep(1.5)
-            return True
-        # 필터 결과 없으면 'その他' fallback
-        if fallback_other:
-            other = next((o for o in options if 'その他' in o.text), None)
-            if other:
-                _scroll_and_click(driver, other)
-                _sleep(1.5)
-                return True
-    except Exception:
-        pass
-
-    # 카테고리 입력 값 지울 때 ArrowDown 방식 회피
-    try:
-        for _ in range(len(target_keyword)):
-            combo.send_keys(Keys.BACK_SPACE)
-        _sleep(0.2)
-    except Exception:
-        pass
-
-    driver.execute_script("arguments[0].click()", ctrl)
-    _sleep(0.6)
-    combo = sel_el.find_element(By.CSS_SELECTOR, '.Select-input > input, .Select-input')
-    seen = []
-    for _ in range(80):
-        combo.send_keys(Keys.ARROW_DOWN)
-        _sleep(0.12)
-        focused = driver.execute_script("""
-            var items = document.querySelectorAll('.sell-category__item');
-            var sel = arguments[0] === 0
-                ? document.querySelector('.sell-category-select')
-                : items[arguments[0]].querySelector('.Select');
-            var f = sel ? sel.querySelector('.Select-option.is-focused') : null;
-            return f ? (f.getAttribute('aria-label') || f.textContent.trim() || '') : '';
-        """, item_index)
-        if focused and target_keyword in focused:
-            combo.send_keys(Keys.ENTER)
-            _sleep(1.5)
-            return True
-        if focused:
-            if focused in seen and len(seen) > 2 and focused == seen[0]:
-                break
-            if focused not in seen:
-                seen.append(focused)
-    combo.send_keys(Keys.ESCAPE)
-    _sleep(0.3)
-
-    if fallback_other and seen:
-        return _find_best_option_by_arrow(driver, item_index, 'その他',
-                                          fallback_other=False)
-    return False
+    return buyma_category_mod.find_best_option_by_arrow(
+        driver,
+        item_index,
+        target_keyword,
+        fallback_other=fallback_other,
+        sleep_fn=_sleep,
+        scroll_and_click=_scroll_and_click,
+    )
 
 
 def _dismiss_overlay(driver):

@@ -1,6 +1,9 @@
 """BUYMA category and gender inference helpers."""
 
+from __future__ import annotations
+
 from selenium.webdriver.common.by import By
+from selenium.webdriver.common.keys import Keys
 from typing import Callable, Dict, List, Tuple
 
 
@@ -301,3 +304,171 @@ def apply_buyma_category_selection(
             print(f"  ✓ 소카테: {sel_val3 or cat3}")
     else:
         print(f"  △ 소카테 '{cat3}' 미발견, その他도 없음")
+
+
+def get_category_select_el(driver, item_index: int):
+    """Return the React-Select element for a category level."""
+    if item_index == 0:
+        return driver.find_element(By.CSS_SELECTOR, ".sell-category-select")
+    items = driver.find_elements(By.CSS_SELECTOR, ".sell-category__item")
+    if len(items) <= item_index:
+        return None
+    return items[item_index].find_element(By.CSS_SELECTOR, ".Select")
+
+
+def select_category_by_typing(driver, item_index: int, target_label: str, *, sleep_fn, scroll_and_click) -> bool:
+    """Type-filter a BUYMA category React-Select and choose the best match."""
+    sel_el = get_category_select_el(driver, item_index)
+    if sel_el is None:
+        return False
+
+    ctrl = sel_el.find_element(By.CSS_SELECTOR, ".Select-control")
+    driver.execute_script("arguments[0].scrollIntoView({block: 'center'})", ctrl)
+    sleep_fn(0.3)
+    driver.execute_script("arguments[0].click()", ctrl)
+    sleep_fn(0.6)
+
+    combo = sel_el.find_element(By.CSS_SELECTOR, ".Select-input > input, .Select-input")
+    combo.send_keys(target_label)
+    sleep_fn(0.8)
+
+    try:
+        options = driver.find_elements(By.CSS_SELECTOR, ".Select-menu-outer .Select-option")
+        exact = next((o for o in options if o.text.strip() == target_label), None)
+        partial = next((o for o in options if target_label in o.text), None)
+        chosen = exact or partial
+        if chosen:
+            scroll_and_click(driver, chosen)
+            sleep_fn(1.5)
+            return True
+    except Exception:
+        pass
+
+    try:
+        for _ in range(len(target_label)):
+            combo.send_keys(Keys.BACK_SPACE)
+        sleep_fn(0.2)
+    except Exception:
+        pass
+
+    driver.execute_script("arguments[0].click()", ctrl)
+    sleep_fn(0.6)
+    combo = sel_el.find_element(By.CSS_SELECTOR, ".Select-input > input, .Select-input")
+    seen = []
+    for _ in range(80):
+        combo.send_keys(Keys.ARROW_DOWN)
+        sleep_fn(0.12)
+        focused = driver.execute_script(
+            """
+            var items = document.querySelectorAll('.sell-category__item');
+            var sel = arguments[0] === 0
+                ? document.querySelector('.sell-category-select')
+                : items[arguments[0]].querySelector('.Select');
+            var f = sel ? sel.querySelector('.Select-option.is-focused') : null;
+            return f ? (f.getAttribute('aria-label') || f.textContent.trim() || '') : '';
+            """,
+            item_index,
+        )
+        if focused == target_label:
+            combo.send_keys(Keys.ENTER)
+            sleep_fn(1.5)
+            return True
+        if focused:
+            if focused in seen and len(seen) > 2 and focused == seen[0]:
+                break
+            if focused not in seen:
+                seen.append(focused)
+    combo.send_keys(Keys.ESCAPE)
+    sleep_fn(0.3)
+    return False
+
+
+def find_best_option_by_arrow(
+    driver,
+    item_index: int,
+    target_keyword: str,
+    fallback_other: bool = True,
+    *,
+    sleep_fn,
+    scroll_and_click,
+) -> bool:
+    """Pick the best matching option from a category React-Select."""
+    sel_el = get_category_select_el(driver, item_index)
+    if sel_el is None:
+        return False
+
+    ctrl = sel_el.find_element(By.CSS_SELECTOR, ".Select-control")
+    driver.execute_script("arguments[0].scrollIntoView({block: 'center'})", ctrl)
+    sleep_fn(0.3)
+    driver.execute_script("arguments[0].click()", ctrl)
+    sleep_fn(0.6)
+
+    combo = sel_el.find_element(By.CSS_SELECTOR, ".Select-input > input, .Select-input")
+    combo.send_keys(target_keyword)
+    sleep_fn(0.8)
+
+    try:
+        options = driver.find_elements(By.CSS_SELECTOR, ".Select-menu-outer .Select-option")
+        exact = next((o for o in options if o.text.strip() == target_keyword), None)
+        partial = next((o for o in options if target_keyword in o.text), None)
+        chosen = exact or partial
+        if chosen:
+            scroll_and_click(driver, chosen)
+            sleep_fn(1.5)
+            return True
+        if fallback_other:
+            other = next((o for o in options if "その他" in o.text), None)
+            if other:
+                scroll_and_click(driver, other)
+                sleep_fn(1.5)
+                return True
+    except Exception:
+        pass
+
+    try:
+        for _ in range(len(target_keyword)):
+            combo.send_keys(Keys.BACK_SPACE)
+        sleep_fn(0.2)
+    except Exception:
+        pass
+
+    driver.execute_script("arguments[0].click()", ctrl)
+    sleep_fn(0.6)
+    combo = sel_el.find_element(By.CSS_SELECTOR, ".Select-input > input, .Select-input")
+    seen = []
+    for _ in range(80):
+        combo.send_keys(Keys.ARROW_DOWN)
+        sleep_fn(0.12)
+        focused = driver.execute_script(
+            """
+            var items = document.querySelectorAll('.sell-category__item');
+            var sel = arguments[0] === 0
+                ? document.querySelector('.sell-category-select')
+                : items[arguments[0]].querySelector('.Select');
+            var f = sel ? sel.querySelector('.Select-option.is-focused') : null;
+            return f ? (f.getAttribute('aria-label') || f.textContent.trim() || '') : '';
+            """,
+            item_index,
+        )
+        if focused and target_keyword in focused:
+            combo.send_keys(Keys.ENTER)
+            sleep_fn(1.5)
+            return True
+        if focused:
+            if focused in seen and len(seen) > 2 and focused == seen[0]:
+                break
+            if focused not in seen:
+                seen.append(focused)
+    combo.send_keys(Keys.ESCAPE)
+    sleep_fn(0.3)
+
+    if fallback_other and seen:
+        return find_best_option_by_arrow(
+            driver,
+            item_index,
+            "その他",
+            False,
+            sleep_fn=sleep_fn,
+            scroll_and_click=scroll_and_click,
+        )
+    return False
