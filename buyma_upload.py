@@ -17,7 +17,6 @@ import json
 import os
 import re
 import sys
-import tempfile
 import unicodedata
 
 # Windows cp949 환경에서 유니코드 출력 오류 방지
@@ -43,17 +42,8 @@ if WAIT_SCALE <= 0:
 def _sleep(seconds: float) -> None:
     _RAW_SLEEP(max(0.0, seconds * WAIT_SCALE))
 
-from selenium import webdriver
 from selenium.webdriver.common.by import By
-from selenium.webdriver.common.action_chains import ActionChains
 from selenium.webdriver.common.keys import Keys
-from selenium.webdriver.support.ui import WebDriverWait
-from selenium.webdriver.support import expected_conditions as EC
-from selenium.webdriver.chrome.options import Options as ChromeOptions
-from selenium.webdriver.chrome.service import Service
-from selenium.common.exceptions import SessionNotCreatedException
-from selenium.webdriver.support.ui import Select
-from webdriver_manager.chrome import ChromeDriverManager
 from google.oauth2.service_account import Credentials
 from googleapiclient.discovery import build
 from category_correction import correct_buyma_category
@@ -144,11 +134,7 @@ def _load_sheet_runtime_config() -> None:
 _load_sheet_runtime_config()
 
 BUYMA_SELL_URL = buyma_selectors.BUYMA_SELL_URL
-BUYMA_LOGIN_URL = buyma_selectors.BUYMA_LOGIN_URL
-BUYMA_LOGOUT_URL = buyma_selectors.BUYMA_LOGOUT_URL
 
-# 바이마 로그인 정보 저장경로 (로컬)
-BUYMA_CRED_PATH = os.path.join(get_runtime_data_dir(), "buyma_credentials.json")
 # Chrome 프로필 경로 (세션/쿠키 유지)
 CHROME_PROFILE_DIR = os.path.join(get_runtime_data_dir(), "chrome_profile")
 
