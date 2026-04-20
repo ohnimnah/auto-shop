@@ -4054,22 +4054,7 @@ def fill_buyma_form(driver, row_data: Dict[str, str]) -> str:
 
         # ---- 이미지 업로드 ----
         image_files = payload['image_files']
-        if image_files:
-            try:
-                file_inputs = driver.find_elements(By.CSS_SELECTOR, "input[type='file']")
-                if file_inputs:
-                    # 첫 번째 file input에 모든 이미지 경로를 줄바꿈으로 전달
-                    file_input = file_inputs[0]
-                    file_paths_str = "\n".join(image_files)
-                    file_input.send_keys(file_paths_str)
-                    print(f"  ✓ 이미지 업로드: {len(image_files)}장")
-                    _sleep(2)
-                else:
-                    print(f"  ✗ 파일 업로드 필드를 찾을 수 없습니다")
-            except Exception as e:
-                print(f"  ✗ 이미지 업로드 실패: {e}")
-        else:
-            print(f"  △ 업로드할 이미지가 없습니다")
+        buyma_images_mod.upload_product_images(driver, image_files, sleep_fn=_sleep)
 
         return "success"
 

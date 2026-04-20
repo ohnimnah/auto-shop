@@ -1,9 +1,11 @@
-"""BUYMA image path resolution helpers."""
+"""BUYMA image helpers."""
 
 import glob
 import os
 from pathlib import Path
 from typing import List
+
+from selenium.webdriver.common.by import By
 
 from marketplace.common.runtime import get_runtime_data_dir
 
@@ -68,3 +70,25 @@ def resolve_image_files(image_paths_cell: str) -> List[str]:
         files = prepend + [file_path for file_path in files if file_path not in existing]
 
     return files
+
+
+def upload_product_images(driver, image_files: List[str], *, sleep_fn) -> bool:
+    """Upload product images through the first visible file input."""
+    if not image_files:
+        print("  △ 업로드할 이미지가 없습니다")
+        return False
+
+    try:
+        file_inputs = driver.find_elements(By.CSS_SELECTOR, "input[type='file']")
+        if not file_inputs:
+            print("  ✗ 파일 업로드 필드를 찾을 수 없습니다")
+            return False
+
+        file_input = file_inputs[0]
+        file_input.send_keys("\n".join(image_files))
+        print(f"  ✓ 이미지 업로드: {len(image_files)}장")
+        sleep_fn(2)
+        return True
+    except Exception as exc:
+        print(f"  ✗ 이미지 업로드 실패: {exc}")
+        return False
