@@ -10,6 +10,7 @@ from __future__ import annotations
 from datetime import datetime, timedelta
 from typing import Callable, Dict, List
 
+from marketplace.common.interfaces import MarketplaceRow, MarketplaceUploader
 from selenium.webdriver.common.by import By
 from selenium.webdriver.common.keys import Keys
 from selenium.webdriver.support import expected_conditions as EC
@@ -680,7 +681,7 @@ def apply_buyma_post_option_fields(
 
 def fill_buyma_form(
     driver,
-    row_data: Dict[str, str],
+    row_data: MarketplaceRow,
     *,
     build_buyma_form_payload,
     build_buyma_category_plan,
@@ -803,3 +804,29 @@ def fill_buyma_form(
     except Exception as exc:
         print(f"  ✗ 이미지 업로드 오류: {exc}")
         return "error"
+
+
+class BuymaUploaderAdapter(MarketplaceUploader):
+    """Marketplace uploader adapter over existing BUYMA orchestration."""
+
+    def __init__(self, *, fill_form_fn, upload_rows_fn) -> None:
+        self._fill_form_fn = fill_form_fn
+        self._upload_rows_fn = upload_rows_fn
+
+    def fill_form(self, driver, row_data: MarketplaceRow) -> str:
+        return self._fill_form_fn(driver, row_data)
+
+    def upload_rows(
+        self,
+        *,
+        specific_row: int = 0,
+        upload_mode: str = "auto",
+        max_items: int = 0,
+        interactive: bool = True,
+    ) -> None:
+        self._upload_rows_fn(
+            specific_row=specific_row,
+            upload_mode=upload_mode,
+            max_items=max_items,
+            interactive=interactive,
+        )

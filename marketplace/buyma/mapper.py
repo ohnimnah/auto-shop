@@ -4,6 +4,8 @@ import re
 import unicodedata
 from typing import Callable, Dict, List
 
+from marketplace.common.interfaces import MarketplacePayload, MarketplaceRow, MarketplaceRowMapper
+
 
 def normalize_buyma_title_text(text: str) -> str:
     return re.sub(r"\s+", " ", (text or "").strip())
@@ -131,13 +133,13 @@ def build_buyma_title_retry_candidates(brand_en: str, name_en: str, color_en: st
 
 
 def build_buyma_form_payload(
-    row_data: Dict[str, str],
+    row_data: MarketplaceRow,
     *,
     normalize_actual_size_for_upload: Callable[[str], str],
     expand_color_abbreviations: Callable[[str], str],
     split_color_values: Callable[[str], List[str]],
     resolve_image_files: Callable[[str], List[str]],
-) -> Dict[str, object]:
+) -> MarketplacePayload:
     """Build a browser-agnostic BUYMA form payload from a source row."""
     brand = (row_data.get("brand_en") or row_data.get("brand") or "").strip()
     name_en = (row_data.get("product_name_en") or row_data.get("product_name_kr") or "").strip()
@@ -176,3 +178,29 @@ def build_buyma_form_payload(
         "sheet_category_middle": (row_data.get("musinsa_category_middle") or "").strip(),
         "sheet_category_small": (row_data.get("musinsa_category_small") or "").strip(),
     }
+
+
+class BuymaRowMapper(MarketplaceRowMapper):
+    """Thin adapter around the existing BUYMA payload builder."""
+
+    def __init__(
+        self,
+        *,
+        normalize_actual_size_for_upload: Callable[[str], str],
+        expand_color_abbreviations: Callable[[str], str],
+        split_color_values: Callable[[str], List[str]],
+        resolve_image_files: Callable[[str], List[str]],
+    ) -> None:
+        self._normalize_actual_size_for_upload = normalize_actual_size_for_upload
+        self._expand_color_abbreviations = expand_color_abbreviations
+        self._split_color_values = split_color_values
+        self._resolve_image_files = resolve_image_files
+
+    def map_row(self, row_data: MarketplaceRow) -> MarketplacePayload:
+        return build_buyma_form_payload(
+            row_data,
+            normalize_actual_size_for_upload=self._normalize_actual_size_for_upload,
+            expand_color_abbreviations=self._expand_color_abbreviations,
+            split_color_values=self._split_color_values,
+            resolve_image_files=self._resolve_image_files,
+        )
