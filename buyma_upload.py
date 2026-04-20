@@ -17,7 +17,6 @@ import json
 import os
 import re
 import sys
-import unicodedata
 
 # Windows cp949 환경에서 유니코드 출력 오류 방지
 if sys.stdout.encoding and sys.stdout.encoding.lower().replace("-", "") in ("cp949", "euckr"):
@@ -25,8 +24,6 @@ if sys.stdout.encoding and sys.stdout.encoding.lower().replace("-", "") in ("cp9
     sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding="utf-8", errors="replace")
     sys.stderr = io.TextIOWrapper(sys.stderr.buffer, encoding="utf-8", errors="replace")
 import time
-from datetime import datetime, timedelta
-from pathlib import Path
 from typing import Dict, List, Tuple
 
 # 전체 대기시간 스케일링: 환경변수 AUTO_SHOP_WAIT_SCALE (기본 0.6)
@@ -572,18 +569,6 @@ BUYMA_ROW_MAPPER = buyma_mapper_mod.BuymaRowMapper(
     split_color_values=buyma_options_mod.split_color_values,
     resolve_image_files=resolve_image_files,
 )
-
-
-def _save_buyma_credentials(email: str, password: str):
-    return buyma_login_mod.save_buyma_credentials(email, password)
-
-
-def _load_buyma_credentials() -> tuple:
-    return buyma_login_mod.load_buyma_credentials()
-
-
-def _prompt_buyma_credentials() -> tuple:
-    return buyma_login_mod.prompt_buyma_credentials()
 
 
 def setup_visible_chrome_driver():
