@@ -492,31 +492,6 @@ def _fill_size_edit_details(driver, actual_size_text: str) -> int:
 
 
 # ---- 카테고리 추론 매핑 ----
-FEMALE_KEYWORDS = [
-    'women', 'womens', "women's",
-    '여성', '여자',
-    'レディース',
-    'skirt', '치마',
-    'dress', '원피스',
-    'blouse', '블라우스',
-    'heel', '힐',
-    'crop', '크롭',
-    'mini', '미니'
-]
-
-MALE_KEYWORDS = [
-    'men', 'mens', "men's",
-    '남성', '남자',
-    'メンズ'
-]
-
-BUYMA_GENDER_CATEGORY_MAP = {
-    'F': 'レディースファッション',
-    'M': 'メンズファッション',
-    'U': 'メンズファッション',
-}
-
-
 def _select_category_by_typing(driver, item_index: int, target_label: str) -> bool:
     return buyma_category_mod.select_category_by_typing(
         driver,
@@ -561,30 +536,6 @@ def _detect_title_input_issue(name_input, intended_title: str) -> str:
     return buyma_uploader_mod.detect_title_input_issue(name_input, intended_title)
 
 
-def _normalize_buyma_title_text(text: str) -> str:
-    return buyma_mapper_mod.normalize_buyma_title_text(text)
-
-
-def _truncate_buyma_title_text(text: str, limit: int) -> str:
-    return buyma_mapper_mod.truncate_buyma_title_text(text, limit)
-
-
-def _buyma_char_units(ch: str) -> int:
-    return buyma_mapper_mod.buyma_char_units(ch)
-
-
-def _buyma_title_units(text: str) -> int:
-    return buyma_mapper_mod.buyma_title_units(text)
-
-
-def _slice_buyma_title_by_units(text: str, limit_units: int) -> str:
-    return buyma_mapper_mod.slice_buyma_title_by_units(text, limit_units)
-
-
-def _build_buyma_product_title(brand_en: str, name_en: str, color_en: str, max_length: int = 0) -> str:
-    return buyma_mapper_mod.build_buyma_product_title(brand_en, name_en, color_en, max_length)
-
-
 def _set_text_input_value(driver, input_el, text: str) -> None:
     return buyma_uploader_mod.set_text_input_value(
         driver,
@@ -592,10 +543,6 @@ def _set_text_input_value(driver, input_el, text: str) -> None:
         text,
         scroll_and_click=_scroll_and_click,
     )
-
-
-def _build_buyma_title_retry_candidates(brand_en: str, name_en: str, color_en: str, max_length: int) -> List[str]:
-    return buyma_mapper_mod.build_buyma_title_retry_candidates(brand_en, name_en, color_en, max_length)
 
 
 # Phase 1 marketplace refactor:
