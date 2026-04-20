@@ -348,6 +348,29 @@ def _collect_products_from_single_page(
     for href in _capture_product_hrefs():
         collected_hrefs.add(href)
 
+    # Recovery pass: after speed tuning, some infinite-scroll pages occasionally
+    # leave the very last batch unloaded. If we can see expected total and are
+    # still short, do a short conservative recovery scroll.
+    if expected_total > 0 and len(collected_hrefs) < expected_total:
+        prev_size = len(collected_hrefs)
+        stable_rounds = 0
+        for _ in range(16):
+            driver.execute_script("window.scrollTo(0, document.body.scrollHeight);")
+            driver.execute_script("window.dispatchEvent(new Event('scroll'));")
+            time.sleep(0.9)
+            for href in _capture_product_hrefs():
+                collected_hrefs.add(href)
+            cur_size = len(collected_hrefs)
+            if cur_size <= prev_size:
+                stable_rounds += 1
+            else:
+                stable_rounds = 0
+            prev_size = cur_size
+            if len(collected_hrefs) >= expected_total:
+                break
+            if stable_rounds >= 4:
+                break
+
     soup = BeautifulSoup(driver.page_source, "html.parser")
     products: List[Tuple[str, str]] = []
     seen = set()
@@ -465,7 +488,9 @@ def _collect_products_from_listing_page(
     # 3-b) query key sweep for hidden pagination styles (page/pageNo/pageNum/p...)
     if expected_total > 0 and len(seen_ids) < expected_total:
         page_keys = ("page", "pageNo", "pageNum", "p", "pg")
-        max_needed_page = min(max_pages, max(2, (expected_total + 59) // 60 + 1))
+        # Avoid assuming fixed page-size(60). Musinsa listing pages can vary
+        # (e.g. 12/30/60) and that can miss late pages.
+        max_needed_page = min(max_pages, max(2, (expected_total + 9) // 10 + 2))
         for key in page_keys:
             before_key_count = len(seen_ids)
             for page_num in range(2, max_needed_page + 1):
