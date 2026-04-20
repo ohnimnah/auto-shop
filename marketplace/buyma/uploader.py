@@ -9,6 +9,9 @@ from __future__ import annotations
 
 from typing import Callable, Dict, List
 
+from selenium.webdriver.common.by import By
+from selenium.webdriver.common.keys import Keys
+
 
 def upload_products(
     *,
@@ -138,3 +141,68 @@ def upload_products(
                 safe_input("\n브라우저를 모두 닫으면 Enter를 눌러주세요...")
             driver.quit()
             print("브라우저가 종료되었습니다.")
+
+
+def apply_buyma_core_fields(
+    driver,
+    *,
+    payload: Dict[str, object],
+    comment_template: str,
+    sleep_fn,
+    scroll_and_click,
+    set_text_input_value,
+    detect_title_input_issue,
+    build_buyma_title_retry_candidates,
+) -> str:
+    """Fill core BUYMA fields except category/options/images."""
+    brand_en = payload["brand"]
+    name_en = payload["name_en"]
+    color_en = payload["color_en"]
+
+    try:
+        name_fields = driver.find_elements(By.CSS_SELECTOR, ".bmm-c-field__input > input.bmm-c-text-field")
+        if name_fields:
+            maxlength_raw = (name_fields[0].get_attribute("maxlength") or "").strip()
+            title_limit = int(maxlength_raw) if maxlength_raw.isdigit() else 60
+            title_candidates = build_buyma_title_retry_candidates(brand_en, name_en, color_en, title_limit)
+            title_ok = False
+            last_issue = ""
+            final_title = ""
+            for idx, candidate in enumerate(title_candidates, start=1):
+                set_text_input_value(driver, name_fields[0], candidate)
+                sleep_fn(0.1)
+                issue = detect_title_input_issue(name_fields[0], candidate)
+                if not issue:
+                    title_ok = True
+                    final_title = candidate
+                    break
+                last_issue = issue
+                print(f"  △ 상품명 재시도 {idx}/{len(title_candidates)} 실패: {issue} -> '{candidate}'")
+
+            if title_ok:
+                print(f"  ✓ 상품명 입력: {final_title}")
+            else:
+                print(f"  ! 상품명 수동 확인 필요: {last_issue or '알 수 없는 제목 입력 오류'}")
+                return "manual_review"
+        else:
+            print("  △ 상품명 입력란을 찾을 수 없습니다")
+    except Exception as exc:
+        print(f"  ✗ 상품명 입력 실패: {exc}")
+        return "manual_review"
+
+    brand = payload["brand"]
+    if brand:
+        try:
+            brand_input = driver.find_element(By.CSS_SELECTOR, "input[placeholder*='ブランド名を入力']")
+            scroll_and_click(driver, brand_input)
+            brand_input.clear()
+            brand_input.send_keys(brand)
+            sleep_fn(1.2)
+            brand_input.send_keys(Keys.ARROW_DOWN)
+            sleep_fn(0.2)
+            brand_input.send_keys(Keys.ENTER)
+            print(f"  ✓ 브랜드 입력/선택: {brand}")
+        except Exception as exc:
+            print(f"  ✗ 브랜드 입력 실패: {exc}")
+
+    return "success"

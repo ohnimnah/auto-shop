@@ -3088,62 +3088,18 @@ def fill_buyma_form(driver, row_data: Dict[str, str]) -> str:
         except Exception as e:
             print(f"  ✗ 카테고리 선택 실패: {e}")
 
-        # ---- 상품명 입력: "[Brand] ProductNameEN ColorEN" ----
-        brand_en = payload['brand']
-        name_en = payload['name_en']
-        color_en = payload['color_en']
-        try:
-            # 첫번째 bmm-c-field 하위 text input에 상품명 입력
-            name_fields = driver.find_elements(By.CSS_SELECTOR,
-                ".bmm-c-field__input > input.bmm-c-text-field"
-            )
-            if name_fields:
-                maxlength_raw = (name_fields[0].get_attribute('maxlength') or '').strip()
-                title_limit = int(maxlength_raw) if maxlength_raw.isdigit() else 60
-                title_candidates = _build_buyma_title_retry_candidates(brand_en, name_en, color_en, title_limit)
-                title_ok = False
-                last_issue = ""
-                final_title = ""
-                for idx, candidate in enumerate(title_candidates, start=1):
-                    _set_text_input_value(driver, name_fields[0], candidate)
-                    _sleep(0.1)
-                    issue = _detect_title_input_issue(name_fields[0], candidate)
-                    if not issue:
-                        title_ok = True
-                        final_title = candidate
-                        break
-                    last_issue = issue
-                    print(f"  △ 상품명 재시도 {idx}/{len(title_candidates)} 실패: {issue} -> '{candidate}'")
-
-                if title_ok:
-                    print(f"  ✓ 상품명 입력: {final_title}")
-                else:
-                    print(f"  ! 상품명 수동 확인 필요: {last_issue or '알 수 없는 제목 입력 오류'}")
-                    return "manual_review"
-            else:
-                print(f"  △ 상품명 입력란을 찾을 수 없습니다")
-        except Exception as e:
-            print(f"  ✗ 상품명 입력 실패: {e}")
-            return "manual_review"
-
-        # ---- 브랜드 입력 (영어) ----
-        brand = payload['brand']
-        if brand:
-            try:
-                brand_input = driver.find_element(By.CSS_SELECTOR,
-                    "input[placeholder*='ブランド名を入力']"
-                )
-                _scroll_and_click(driver, brand_input)
-                brand_input.clear()
-                brand_input.send_keys(brand)
-                _sleep(1.2)
-                # 추천 목록이 전역 ul과 섞이는 경우가 있어 입력창 기준 키보드 선택을 우선 사용
-                brand_input.send_keys(Keys.ARROW_DOWN)
-                _sleep(0.2)
-                brand_input.send_keys(Keys.ENTER)
-                print(f"  ✓ 브랜드 입력/선택: {brand}")
-            except Exception as e:
-                print(f"  ✗ 브랜드 입력 실패: {e}")
+        core_fill_result = buyma_uploader_mod.apply_buyma_core_fields(
+            driver,
+            payload=payload,
+            comment_template=BUYMA_COMMENT_TEMPLATE,
+            sleep_fn=_sleep,
+            scroll_and_click=_scroll_and_click,
+            set_text_input_value=_set_text_input_value,
+            detect_title_input_issue=_detect_title_input_issue,
+            build_buyma_title_retry_candidates=_build_buyma_title_retry_candidates,
+        )
+        if core_fill_result != "success":
+            return core_fill_result
 
         buyma_options_mod.apply_buyma_option_selection(
             driver,
