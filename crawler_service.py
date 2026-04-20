@@ -215,6 +215,7 @@ def extract_color_from_name(raw_name: str) -> str:
         return ""
 
     cleaned = re.sub(r"\s*/\s*[A-Z0-9-]+$", "", raw_name).strip()
+    cleaned = re.sub(r"_[A-Z0-9-]{4,}$", "", cleaned).strip()
     _, color_part = split_name_and_color(cleaned)
     if color_part and not is_color_count_placeholder(color_part):
         return color_part
@@ -230,7 +231,11 @@ def extract_color_from_name(raw_name: str) -> str:
         candidate = paren_match.group(1).strip()
         if (
             not is_color_count_placeholder(candidate)
-            and (any(token in candidate for token in ["/", ",", "-", ":"]) or has_hangul(candidate))
+            and (
+                any(token in candidate for token in ["/", ",", "-", ":"])
+                or has_hangul(candidate)
+                or re.fullmatch(r"[A-Z][A-Z0-9\s/-]{1,30}", candidate.upper()) is not None
+            )
         ):
             return candidate
 
@@ -1323,7 +1328,11 @@ def scrape_musinsa_product(
         color_from_name = normalize_korean_color(extract_color_from_name(raw_product_name))
         color_from_api = extract_color_from_api(goods_options)
         size_text, color_from_size = extract_sizes_from_api(goods_no, goods_sale_type, opt_kind_cd)
-        actual_size_text = extract_actual_size_text(goods_no) or "못찾음"
+        actual_size_text = extract_actual_size_text(goods_no)
+        if not actual_size_text:
+            actual_size_text = extract_actual_size_table_text(soup, opt_kind_cd)
+        if not actual_size_text:
+            actual_size_text = "못찾음"
 
         if color_from_size:
             color_kr = color_from_size
