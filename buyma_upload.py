@@ -2515,40 +2515,6 @@ def _dismiss_overlay(driver):
     return buyma_ui_mod.dismiss_overlay(driver, sleep_fn=_sleep)
 
 
-def _find_section_field(driver, section_title: str, field_css: str):
-    """Find a field under a BUYMA form section title."""
-    sections = driver.find_elements(By.CSS_SELECTOR, "p.bmm-c-summary__ttl")
-    for sec in sections:
-        if section_title in sec.text:
-            # 옵션 컨테이너에서 코드 탐색
-            parent = sec
-            for _ in range(5):
-                parent = parent.find_element(By.XPATH, '..')
-                fields = parent.find_elements(By.CSS_SELECTOR, field_css)
-                if fields:
-                    return fields[0]
-    return None
-
-
-def _click_react_select_option(driver, select_container, keyword: str) -> bool:
-    """React Select 컴포넌트에서 옵션을 클릭한다"""
-    try:
-        # Select 컨트롤 클릭하여 복잡한 표기
-        control = select_container.find_element(By.CSS_SELECTOR, ".Select-control, [class*='Select-control']")
-        control.click()
-        _sleep(0.5)
-        # 옵션 목록에서 키워드 매칭
-        options = select_container.find_elements(By.CSS_SELECTOR, ".Select-option, [class*='Select-option']")
-        for opt in options:
-            if keyword in opt.text:
-                opt.click()
-                _sleep(0.5)
-                return True
-    except Exception:
-        pass
-    return False
-
-
 def _safe_input(prompt: str) -> str:
     """비대화형 실행에서는 입력 대기 대신 빈 문자열을 반환한다."""
     try:
