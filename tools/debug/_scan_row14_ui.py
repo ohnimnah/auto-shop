@@ -1,8 +1,44 @@
 import time
-from buyma_upload import setup_visible_chrome_driver, BUYMA_SELL_URL, _dismiss_overlay, _select_category_by_arrow, _find_best_option_by_arrow
 from selenium.webdriver.common.by import By
 from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
+from marketplace.buyma.selectors import BUYMA_SELL_URL
+from marketplace.buyma.login import setup_visible_chrome_driver
+from marketplace.buyma import category as buyma_category_mod
+from marketplace.buyma import ui as buyma_ui_mod
+
+
+def _sleep(seconds: float) -> None:
+    time.sleep(seconds)
+
+
+def _scroll_and_click(driver, element):
+    return buyma_ui_mod.scroll_and_click(driver, element, sleep_fn=_sleep)
+
+
+def _dismiss_overlay(driver):
+    return buyma_ui_mod.dismiss_overlay(driver, sleep_fn=_sleep)
+
+
+def _select_category_by_arrow(driver, item_index: int, target_label: str) -> bool:
+    return buyma_category_mod.select_category_by_typing(
+        driver,
+        item_index,
+        target_label,
+        sleep_fn=_sleep,
+        scroll_and_click=_scroll_and_click,
+    )
+
+
+def _find_best_option_by_arrow(driver, item_index: int, target_keyword: str, fallback_other: bool = True) -> bool:
+    return buyma_category_mod.find_best_option_by_arrow(
+        driver,
+        item_index,
+        target_keyword,
+        fallback_other=fallback_other,
+        sleep_fn=_sleep,
+        scroll_and_click=_scroll_and_click,
+    )
 
 
 driver = setup_visible_chrome_driver()
