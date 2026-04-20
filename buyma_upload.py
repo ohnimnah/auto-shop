@@ -2937,9 +2937,8 @@ def _handle_success_after_fill(driver, row_num: int, upload_mode: str, interacti
     )
 
 
-def fill_buyma_form(driver, row_data: Dict[str, str]) -> str:
-    """바이마 출품 시 상품 정보를 자동 입력한다.
-    바이마는 React 기반 bmm-c-* 컴포넌트를 사용하며 name/id 속성이 없음."""
+def _fill_buyma_form_via_modules(driver, row_data: Dict[str, str]) -> str:
+    """Assemble BUYMA form-fill from marketplace modules."""
     return buyma_uploader_mod.fill_buyma_form(
         driver,
         row_data,
@@ -2980,8 +2979,13 @@ def fill_buyma_form(driver, row_data: Dict[str, str]) -> str:
     )
 
 
-def upload_products(specific_row: int = 0, upload_mode: str = 'auto', max_items: int = 0, interactive: bool = True):
-    """메인 업로드 루프: 시트 읽기 → 로그 → 각 행별 입력 자동화 엔트리"""
+def _upload_buyma_rows_via_modules(
+    specific_row: int = 0,
+    upload_mode: str = 'auto',
+    max_items: int = 0,
+    interactive: bool = True,
+):
+    """Assemble BUYMA upload loop from marketplace modules."""
     return buyma_uploader_mod.upload_products(
         specific_row=specific_row,
         upload_mode=upload_mode,
@@ -3000,6 +3004,28 @@ def upload_products(specific_row: int = 0, upload_mode: str = 'auto', max_items:
         progress_status_header=PROGRESS_STATUS_HEADER,
         status_uploading=STATUS_UPLOADING,
         status_completed=STATUS_COMPLETED,
+    )
+
+
+BUYMA_UPLOADER = buyma_uploader_mod.BuymaUploaderAdapter(
+    fill_form_fn=_fill_buyma_form_via_modules,
+    upload_rows_fn=_upload_buyma_rows_via_modules,
+)
+
+
+def fill_buyma_form(driver, row_data: Dict[str, str]) -> str:
+    """바이마 출품 시 상품 정보를 자동 입력한다.
+    바이마는 React 기반 bmm-c-* 컴포넌트를 사용하며 name/id 속성이 없음."""
+    return BUYMA_UPLOADER.fill_form(driver, row_data)
+
+
+def upload_products(specific_row: int = 0, upload_mode: str = 'auto', max_items: int = 0, interactive: bool = True):
+    """메인 업로드 루프: 시트 읽기 → 로그 → 각 행별 입력 자동화 엔트리"""
+    return BUYMA_UPLOADER.upload_rows(
+        specific_row=specific_row,
+        upload_mode=upload_mode,
+        max_items=max_items,
+        interactive=interactive,
     )
 
 
