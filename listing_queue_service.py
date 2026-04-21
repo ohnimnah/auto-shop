@@ -37,6 +37,29 @@ def _now_text() -> str:
     return datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 
 
+def _extract_expected_total_count(text: str) -> int:
+    source = str(text or "")
+    if not source:
+        return 0
+
+    patterns = [
+        r"총\s*([0-9,]+)",
+        r"([0-9,]+)\s*개",
+        r"([0-9,]+)\s*items?",
+    ]
+    for pat in patterns:
+        m = re.search(pat, source, re.IGNORECASE)
+        if not m:
+            continue
+        try:
+            value = int(m.group(1).replace(",", ""))
+            if value > 0:
+                return value
+        except Exception:
+            continue
+    return 0
+
+
 SEED_READY_STATUSES = {"", "대기", "pending", "new"}
 
 
@@ -244,15 +267,7 @@ def _collect_products_from_single_page(
 
     def _detect_total_expected() -> int:
         text = str(driver.execute_script("return document.body ? document.body.innerText : ''") or "")
-        m = re.search(r"?\s*([0-9,]+)\s*?", text)
-        if not m:
-            m = re.search(r"([0-9,]+)\s*?", text)
-        if not m:
-            return 0
-        try:
-            return int(m.group(1).replace(",", ""))
-        except Exception:
-            return 0
+        return _extract_expected_total_count(text)
 
     expected_total = _detect_total_expected()
 
@@ -412,11 +427,7 @@ def _collect_products_from_listing_page(
     if expected_total <= 0:
         try:
             body_text = str(driver.execute_script("return document.body ? document.body.innerText : ''") or "")
-            m = re.search(r"?\s*([0-9,]+)\s*?", body_text)
-            if not m:
-                m = re.search(r"([0-9,]+)\s*?", body_text)
-            if m:
-                expected_total = int(m.group(1).replace(",", ""))
+            expected_total = _extract_expected_total_count(body_text)
         except Exception:
             expected_total = 0
 
