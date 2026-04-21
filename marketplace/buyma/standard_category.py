@@ -15,32 +15,23 @@ class StandardCategory(str, Enum):
     TOP_CARDIGAN = "TOP_CARDIGAN"
     OUTER = "OUTER"
     PANTS = "PANTS"
+    SNEAKER = "SNEAKER"
+    DRESS = "DRESS"
     HOME_PAJAMA = "HOME_PAJAMA"
     ETC = "ETC"
 
 
-HOME_PAJAMA_KEYWORDS = [
-    "파자마", "잠옷", "룸웨어", "홈웨어", "라운지웨어",
-    "pajama", "sleepwear", "loungewear",
-]
+HOME_PAJAMA_KEYWORDS = ["파자마", "잠옷", "룸웨어", "홈웨어", "pajama", "sleepwear", "loungewear"]
 TOP_HOODIE_KEYWORDS = ["후드", "후디", "후드티", "hoodie", "hooded", "zip hoodie"]
 TOP_SWEAT_KEYWORDS = ["맨투맨", "스웨트", "스웻", "sweatshirt"]
-TOP_SHIRT_KEYWORDS = ["셔츠", "남방", "button-down", "shirt"]
 TOP_TSHIRT_KEYWORDS = ["티셔츠", "반팔", "긴팔", "t-shirt", "tee"]
+TOP_SHIRT_KEYWORDS = ["셔츠", "남방", "button-down", "shirt"]
 TOP_KNIT_KEYWORDS = ["니트", "스웨터", "knit", "sweater"]
 TOP_CARDIGAN_KEYWORDS = ["가디건", "cardigan"]
-OUTER_KEYWORDS = [
-    "자켓", "재킷", "jacket",
-    "코트", "coat",
-    "패딩", "다운", "down jacket", "puffer",
-    "바람막이", "windbreaker",
-]
-PANTS_KEYWORDS = [
-    "팬츠", "바지",
-    "슬랙스", "trousers", "slacks",
-    "데님", "청바지", "jeans", "denim",
-    "쇼츠", "반바지", "shorts",
-]
+OUTER_KEYWORDS = ["자켓", "재킷", "jacket", "코트", "coat", "패딩", "다운", "down jacket", "puffer", "windbreaker"]
+PANTS_KEYWORDS = ["팬츠", "바지", "슬랙스", "trousers", "slacks", "데님", "청바지", "jeans", "denim", "쇼츠", "반바지", "shorts"]
+SNEAKER_KEYWORDS = ["스니커즈", "운동화", "sneaker", "sneakers", "trainer"]
+DRESS_KEYWORDS = ["원피스", "드레스", "dress", "onepiece"]
 
 OUTER_DOWN_KEYWORDS = ["down jacket", "puffer", "패딩", "다운"]
 OUTER_COAT_KEYWORDS = ["coat", "코트"]
@@ -70,12 +61,14 @@ def build_combined_text(
     product_name: str,
 ) -> str:
     return _normalize_text(
-        " ".join([
-            musinsa_large or "",
-            musinsa_middle or "",
-            musinsa_small or "",
-            product_name or "",
-        ])
+        " ".join(
+            [
+                musinsa_large or "",
+                musinsa_middle or "",
+                musinsa_small or "",
+                product_name or "",
+            ]
+        )
     )
 
 
@@ -91,18 +84,18 @@ def resolve_standard_category(
         return StandardCategory.ETC, text
 
     # Priority:
-    # HOME_PAJAMA > TOP_HOODIE > TOP_SWEAT > TOP_SHIRT > TOP_TSHIRT >
-    # TOP_KNIT > TOP_CARDIGAN > OUTER > PANTS > ETC
+    # HOME_PAJAMA > TOP_HOODIE > TOP_SWEAT > TOP_TSHIRT > TOP_SHIRT >
+    # TOP_KNIT > TOP_CARDIGAN > OUTER > PANTS > SNEAKER > DRESS > ETC
     if _contains_any(text, HOME_PAJAMA_KEYWORDS):
         return StandardCategory.HOME_PAJAMA, text
     if _contains_any(text, TOP_HOODIE_KEYWORDS):
         return StandardCategory.TOP_HOODIE, text
     if _contains_any(text, TOP_SWEAT_KEYWORDS):
         return StandardCategory.TOP_SWEAT, text
-    if _contains_any(text, TOP_SHIRT_KEYWORDS):
-        return StandardCategory.TOP_SHIRT, text
     if _contains_any(text, TOP_TSHIRT_KEYWORDS):
         return StandardCategory.TOP_TSHIRT, text
+    if _contains_any(text, TOP_SHIRT_KEYWORDS):
+        return StandardCategory.TOP_SHIRT, text
     if _contains_any(text, TOP_KNIT_KEYWORDS):
         return StandardCategory.TOP_KNIT, text
     if _contains_any(text, TOP_CARDIGAN_KEYWORDS):
@@ -111,6 +104,10 @@ def resolve_standard_category(
         return StandardCategory.OUTER, text
     if _contains_any(text, PANTS_KEYWORDS):
         return StandardCategory.PANTS, text
+    if _contains_any(text, SNEAKER_KEYWORDS):
+        return StandardCategory.SNEAKER, text
+    if _contains_any(text, DRESS_KEYWORDS):
+        return StandardCategory.DRESS, text
     return StandardCategory.ETC, text
 
 
@@ -156,4 +153,14 @@ def map_standard_to_buyma_middle_and_subcategory(
             return pants_mid, "ハーフ・ショートパンツ"
         return pants_mid, "パンツ"
 
+    if standard_category == StandardCategory.SNEAKER:
+        shoes_mid = "靴・ブーツ・サンダル" if is_mens else "靴・シューズ"
+        return shoes_mid, "スニーカー"
+
+    if standard_category == StandardCategory.DRESS:
+        if is_mens:
+            return "その他ファッション", ""
+        return "ワンピース・オールインワン", ""
+
     return "", ""
+

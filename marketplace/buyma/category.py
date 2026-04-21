@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from selenium.webdriver.common.by import By
 from selenium.webdriver.common.keys import Keys
+import sys
 from typing import Callable, Dict, List, Tuple
 from marketplace.buyma.standard_category import (
     StandardCategory,
@@ -11,6 +12,15 @@ from marketplace.buyma.standard_category import (
     resolve_standard_category,
 )
 import standard_category_map as standard_category_map_mod
+
+
+def _safe_log(message: str) -> None:
+    try:
+        print(message)
+    except UnicodeEncodeError:
+        encoding = sys.stdout.encoding or "utf-8"
+        encoded = (message or "").encode(encoding, errors="replace")
+        print(encoded.decode(encoding, errors="replace"))
 
 
 FEMALE_KEYWORDS = [
@@ -218,28 +228,33 @@ def build_buyma_category_plan(
     )
     is_mens_category = "メンズ" in (cat1 or "")
     # Prefer table-based mapping layer first; keep existing semantic mapper as fallback.
-    semantic_parent, semantic_cat2, semantic_cat3 = standard_category_map_mod.resolve_standard_category_buyma_target(
+    mapped_parent, mapped_cat2, mapped_cat3 = standard_category_map_mod.resolve_standard_category_buyma_target(
         standard_category,
         is_mens=is_mens_category,
         combined_text=combined_text,
     )
-    if not semantic_cat2:
-        semantic_cat2, semantic_cat3 = map_standard_to_buyma_middle_and_subcategory(
+    mapping_table_used = standard_category != StandardCategory.ETC and bool(mapped_cat2)
+
+    legacy_cat2, legacy_cat3 = "", ""
+    if not mapping_table_used:
+        legacy_cat2, legacy_cat3 = map_standard_to_buyma_middle_and_subcategory(
             standard_category,
             combined_text,
             is_mens=is_mens_category,
         )
-    semantic_used = standard_category != StandardCategory.ETC and bool(semantic_cat2)
-    semantic_fallback_used = False
+    legacy_used = standard_category != StandardCategory.ETC and bool(legacy_cat2)
+    semantic_fallback_used = not mapping_table_used
 
-    if semantic_used:
-        if semantic_parent:
-            cat1 = semantic_parent
-        cat2 = semantic_cat2
-        cat3 = semantic_cat3
-        cat_source = f"{cat_source}+semantic"
-    else:
-        semantic_fallback_used = True
+    if mapping_table_used:
+        if mapped_parent:
+            cat1 = mapped_parent
+        cat2 = mapped_cat2
+        cat3 = mapped_cat3
+        cat_source = f"{cat_source}+stdmap"
+    elif legacy_used:
+        cat2 = legacy_cat2
+        cat3 = legacy_cat3
+        cat_source = f"{cat_source}+legacy-semantic"
 
     corrected_cat2 = category_corrector(cat2, source_product_name, musinsa_category_text)
     fallback_cat1, fallback_cat2, fallback_cat3 = infer_buyma_category(product_name_kr, product_name_en, brand)
@@ -249,12 +264,14 @@ def build_buyma_category_plan(
         musinsa_category_text,
     )
 
-    print(f"  [category][semantic] musinsa={sheet_cat1} / {sheet_cat2} / {sheet_cat3}")
-    print(f"  [category][semantic] product_name={source_product_name}")
-    print(f"  [category][semantic] combined_text={combined_text}")
-    print(f"  [category][semantic] standard_category={standard_category.value}")
-    print(f"  [category][semantic] final_buyma_cat2={corrected_cat2}")
-    print(f"  [category][semantic] fallback_used={semantic_fallback_used}")
+    _safe_log(f"  [category][semantic] musinsa={sheet_cat1} / {sheet_cat2} / {sheet_cat3}")
+    _safe_log(f"  [category][semantic] product_name={source_product_name}")
+    _safe_log(f"  [category][semantic] combined_text={combined_text}")
+    _safe_log(f"  [category][semantic] standard_category={standard_category.value}")
+    _safe_log(f"  [category][semantic] mapped_buyma={cat1} > {corrected_cat2} > {cat3}")
+    _safe_log(f"  [category][semantic] mapping_table_used={mapping_table_used}")
+    _safe_log(f"  [category][semantic] legacy_used={legacy_used}")
+    _safe_log(f"  [category][semantic] fallback_used={semantic_fallback_used}")
 
     return {
         "sheet_cat1": sheet_cat1,
@@ -268,6 +285,8 @@ def build_buyma_category_plan(
         "source_product_name": source_product_name,
         "combined_text": combined_text,
         "standard_category": standard_category.value,
+        "mapping_table_used": mapping_table_used,
+        "legacy_used": legacy_used,
         "semantic_fallback_used": semantic_fallback_used,
         "fallback_cat1": fallback_cat1,
         "fallback_cat2": corrected_fallback_cat2,

@@ -8,6 +8,8 @@ from __future__ import annotations
 
 from dataclasses import dataclass, asdict
 from datetime import datetime
+import json
+import os
 from typing import Dict, Iterable, List, Optional, Sequence, Tuple
 
 from marketplace.buyma.standard_category import StandardCategory
@@ -19,12 +21,26 @@ PARENT_MEN = "\u30e1\u30f3\u30ba\u30d5\u30a1\u30c3\u30b7\u30e7\u30f3"
 
 MIDDLE_TOPS = "\u30c8\u30c3\u30d7\u30b9"
 MIDDLE_INNER_ROOM = "\u30a4\u30f3\u30ca\u30fc\u30fb\u30eb\u30fc\u30e0\u30a6\u30a7\u30a2"
+MIDDLE_OUTER_WOMEN = "\u30a2\u30a6\u30bf\u30fc"
+MIDDLE_OUTER_MEN = "\u30a2\u30a6\u30bf\u30fc\u30fb\u30b8\u30e3\u30b1\u30c3\u30c8"
+MIDDLE_BOTTOMS_WOMEN = "\u30dc\u30c8\u30e0\u30b9"
+MIDDLE_BOTTOMS_MEN = "\u30d1\u30f3\u30c4\u30fb\u30dc\u30c8\u30e0\u30b9"
+MIDDLE_SHOES_WOMEN = "\u9774\u30fb\u30b7\u30e5\u30fc\u30ba"
+MIDDLE_SHOES_MEN = "\u9774\u30fb\u30d6\u30fc\u30c4\u30fb\u30b5\u30f3\u30c0\u30eb"
+MIDDLE_DRESS_WOMEN = "\u30ef\u30f3\u30d4\u30fc\u30b9\u30fb\u30aa\u30fc\u30eb\u30a4\u30f3\u30ef\u30f3"
+MIDDLE_OTHER_FASHION_MEN = "\u305d\u306e\u4ed6\u30d5\u30a1\u30c3\u30b7\u30e7\u30f3"
 
 CHILD_HOODIE = "\u30d1\u30fc\u30ab\u30fc\u30fb\u30d5\u30fc\u30c7\u30a3"
 CHILD_SWEAT = "\u30b9\u30a6\u30a7\u30c3\u30c8\u30fb\u30c8\u30ec\u30fc\u30ca\u30fc"
 CHILD_TSHIRT = "T\u30b7\u30e3\u30c4\u30fb\u30ab\u30c3\u30c8\u30bd\u30fc"
 CHILD_KNIT = "\u30cb\u30c3\u30c8\u30fb\u30bb\u30fc\u30bf\u30fc"
 CHILD_PAJAMA = "\u30eb\u30fc\u30e0\u30a6\u30a7\u30a2\u30fb\u30d1\u30b8\u30e3\u30de"
+CHILD_SHIRT = "\u30b7\u30e3\u30c4"
+CHILD_CARDIGAN = "\u30ab\u30fc\u30c7\u30a3\u30ac\u30f3"
+CHILD_OUTER_JACKET = "\u30b8\u30e3\u30b1\u30c3\u30c8"
+CHILD_PANTS = "\u30d1\u30f3\u30c4"
+CHILD_SNEAKER = "\u30b9\u30cb\u30fc\u30ab\u30fc"
+CHILD_DRESS = ""
 
 
 MAPPING_HEADERS: List[str] = [
@@ -99,6 +115,10 @@ def resolve_standard_category_for_test(
         return StandardCategory.TOP_KNIT
     if _contains(text, ["\ud2f0\uc154\uce20", "\ubc18\ud314", "\uae34\ud314", "t-shirt", "tee"]):
         return StandardCategory.TOP_TSHIRT
+    if _contains(text, ["\uc2a4\ub2c8\ucee4\uc988", "\uc6b4\ub3d9\ud654", "sneaker", "sneakers"]):
+        return StandardCategory.SNEAKER
+    if _contains(text, ["\uc6d0\ud53c\uc2a4", "\ub4dc\ub808\uc2a4", "dress", "onepiece"]):
+        return StandardCategory.DRESS
     return StandardCategory.ETC
 
 
@@ -121,18 +141,52 @@ def _find_raw_category_row(
 
 def build_common_mapping_rows_from_raw(raw_rows: Iterable[Dict[str, str]]) -> List[CategoryMappingRow]:
     """Build mapping rows for common categories and both genders."""
-    specs: List[Tuple[StandardCategory, str, str]] = [
+    top_specs: List[Tuple[StandardCategory, str, str]] = [
         (StandardCategory.TOP_HOODIE, MIDDLE_TOPS, CHILD_HOODIE),
         (StandardCategory.TOP_SWEAT, MIDDLE_TOPS, CHILD_SWEAT),
         (StandardCategory.TOP_TSHIRT, MIDDLE_TOPS, CHILD_TSHIRT),
+        (StandardCategory.TOP_SHIRT, MIDDLE_TOPS, CHILD_SHIRT),
         (StandardCategory.TOP_KNIT, MIDDLE_TOPS, CHILD_KNIT),
+        (StandardCategory.TOP_CARDIGAN, MIDDLE_TOPS, CHILD_CARDIGAN),
         (StandardCategory.HOME_PAJAMA, MIDDLE_INNER_ROOM, CHILD_PAJAMA),
     ]
 
     out: List[CategoryMappingRow] = []
     now = _now_iso()
     for gender, parent in (("women", PARENT_WOMEN), ("men", PARENT_MEN)):
-        for std_cat, middle, child in specs:
+        for std_cat, middle, child in top_specs:
+            hit = _find_raw_category_row(raw_rows, parent=parent, middle=middle, child=child)
+            out.append(
+                CategoryMappingRow(
+                    standard_category=std_cat.value,
+                    gender=gender,
+                    buyma_parent_category=parent,
+                    buyma_middle_category=middle,
+                    buyma_child_category=child,
+                    category_url=_norm((hit or {}).get("category_url", "")),
+                    category_id=_norm((hit or {}).get("category_id", "")),
+                    source="buyma_categories_raw",
+                    note="" if hit else "NOT_FOUND_IN_RAW",
+                    updated_at=now,
+                )
+            )
+        outer_middle = MIDDLE_OUTER_MEN if gender == "men" else MIDDLE_OUTER_WOMEN
+        pants_middle = MIDDLE_BOTTOMS_MEN if gender == "men" else MIDDLE_BOTTOMS_WOMEN
+
+        for std_cat, middle, child in (
+            (StandardCategory.OUTER, outer_middle, CHILD_OUTER_JACKET),
+            (StandardCategory.PANTS, pants_middle, CHILD_PANTS),
+            (
+                StandardCategory.SNEAKER,
+                MIDDLE_SHOES_MEN if gender == "men" else MIDDLE_SHOES_WOMEN,
+                CHILD_SNEAKER,
+            ),
+            (
+                StandardCategory.DRESS,
+                MIDDLE_OTHER_FASHION_MEN if gender == "men" else MIDDLE_DRESS_WOMEN,
+                CHILD_DRESS,
+            ),
+        ):
             hit = _find_raw_category_row(raw_rows, parent=parent, middle=middle, child=child)
             out.append(
                 CategoryMappingRow(
@@ -204,3 +258,140 @@ def mapping_rows_to_sheet_values(rows: Iterable[CategoryMappingRow]) -> List[Lis
         out.append([str(d.get(h, "") or "") for h in MAPPING_HEADERS])
     return out
 
+
+def build_default_mapping_rows() -> List[CategoryMappingRow]:
+    """Return the current default 18-row mapping set."""
+    now = _now_iso()
+    rows: List[CategoryMappingRow] = []
+    for gender, parent in (("women", PARENT_WOMEN), ("men", PARENT_MEN)):
+        rows.extend(
+            [
+                CategoryMappingRow(StandardCategory.TOP_HOODIE.value, gender, parent, MIDDLE_TOPS, CHILD_HOODIE, "", "", "default", "", now),
+                CategoryMappingRow(StandardCategory.TOP_SWEAT.value, gender, parent, MIDDLE_TOPS, CHILD_SWEAT, "", "", "default", "", now),
+                CategoryMappingRow(StandardCategory.TOP_TSHIRT.value, gender, parent, MIDDLE_TOPS, CHILD_TSHIRT, "", "", "default", "", now),
+                CategoryMappingRow(StandardCategory.TOP_SHIRT.value, gender, parent, MIDDLE_TOPS, CHILD_SHIRT, "", "", "default", "", now),
+                CategoryMappingRow(StandardCategory.TOP_KNIT.value, gender, parent, MIDDLE_TOPS, CHILD_KNIT, "", "", "default", "", now),
+                CategoryMappingRow(StandardCategory.TOP_CARDIGAN.value, gender, parent, MIDDLE_TOPS, CHILD_CARDIGAN, "", "", "default", "", now),
+                CategoryMappingRow(StandardCategory.HOME_PAJAMA.value, gender, parent, MIDDLE_INNER_ROOM, CHILD_PAJAMA, "", "", "default", "", now),
+                CategoryMappingRow(
+                    StandardCategory.SNEAKER.value,
+                    gender,
+                    parent,
+                    MIDDLE_SHOES_MEN if gender == "men" else MIDDLE_SHOES_WOMEN,
+                    CHILD_SNEAKER,
+                    "",
+                    "",
+                    "default",
+                    "",
+                    now,
+                ),
+                CategoryMappingRow(
+                    StandardCategory.DRESS.value,
+                    gender,
+                    parent,
+                    MIDDLE_OTHER_FASHION_MEN if gender == "men" else MIDDLE_DRESS_WOMEN,
+                    CHILD_DRESS,
+                    "",
+                    "",
+                    "default",
+                    "",
+                    now,
+                ),
+            ]
+        )
+        rows.append(
+            CategoryMappingRow(
+                StandardCategory.OUTER.value,
+                gender,
+                parent,
+                MIDDLE_OUTER_MEN if gender == "men" else MIDDLE_OUTER_WOMEN,
+                CHILD_OUTER_JACKET,
+                "",
+                "",
+                "default",
+                "",
+                now,
+            )
+        )
+        rows.append(
+            CategoryMappingRow(
+                StandardCategory.PANTS.value,
+                gender,
+                parent,
+                MIDDLE_BOTTOMS_MEN if gender == "men" else MIDDLE_BOTTOMS_WOMEN,
+                CHILD_PANTS,
+                "",
+                "",
+                "default",
+                "",
+                now,
+            )
+        )
+    return rows
+
+
+def load_mapping_rows_from_json(path: str) -> List[CategoryMappingRow]:
+    if not path or not os.path.exists(path):
+        return []
+    try:
+        with open(path, "r", encoding="utf-8") as f:
+            data = json.load(f)
+        if not isinstance(data, list):
+            return []
+        out: List[CategoryMappingRow] = []
+        for item in data:
+            if not isinstance(item, dict):
+                continue
+            out.append(
+                CategoryMappingRow(
+                    standard_category=str(item.get("standard_category", "") or ""),
+                    gender=normalize_gender(str(item.get("gender", "") or "")),
+                    buyma_parent_category=str(item.get("buyma_parent_category", "") or ""),
+                    buyma_middle_category=str(item.get("buyma_middle_category", "") or ""),
+                    buyma_child_category=str(item.get("buyma_child_category", "") or ""),
+                    category_url=str(item.get("category_url", "") or ""),
+                    category_id=str(item.get("category_id", "") or ""),
+                    source=str(item.get("source", "") or "json"),
+                    note=str(item.get("note", "") or ""),
+                    updated_at=str(item.get("updated_at", "") or ""),
+                )
+            )
+        return out
+    except Exception:
+        return []
+
+
+def get_runtime_mapping_rows() -> List[CategoryMappingRow]:
+    """Load mapping from _debug/category_mapping.json if possible, else use defaults."""
+    here = os.path.dirname(os.path.abspath(__file__))
+    json_path = os.path.join(here, "_debug", "category_mapping.json")
+    loaded = load_mapping_rows_from_json(json_path)
+    if loaded:
+        return loaded
+    return build_default_mapping_rows()
+
+
+def resolve_standard_category_buyma_target(
+    standard_category: StandardCategory,
+    *,
+    is_mens: bool,
+    combined_text: str = "",
+) -> Tuple[str, str, str]:
+    """Resolve BUYMA target from StandardCategory mapping table.
+
+    Returns (parent, middle, child). Empty values mean not matched.
+    """
+    gender = "men" if is_mens else "women"
+    rows = get_runtime_mapping_rows()
+    match = resolve_buyma_category_from_mapping(
+        rows,
+        standard_category=standard_category,
+        gender=gender,
+    )
+    if not match:
+        return "", "", ""
+    return (
+        match.buyma_parent_category or "",
+        match.buyma_middle_category or "",
+        match.buyma_child_category or "",
+    )
