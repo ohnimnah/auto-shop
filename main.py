@@ -564,6 +564,7 @@ def write_to_sheet(
     row_num: int,
     product_info: Dict[str, str],
     existing_values: Dict[str, str] = None,
+    return_updates_only: bool = False,
 ):
     """Google Sheets의 A, C~O 열에 한 행 데이터를 쓴다"""
     try:
@@ -580,22 +581,50 @@ def write_to_sheet(
 
         if not updates:
             print(f" {sheet_name} {row_num}행: 기존 값이 있어 새로 쓸 내용이 없습니다")
-            return
+            return []
 
+        if return_updates_only:
+            print(f"[batch][row] payload prepared row={row_num} cells={len(updates)}")
+            return updates
+
+        print(f"[batch][row] buffer size={len(updates)}")
+        print(f"[batch][row] flush start: write_to_sheet row={row_num}")
         success = svc_batch_update_values(
             service=service,
             spreadsheet_id=SPREADSHEET_ID,
             updates=updates,
         )
         if success:
+            print(f"[batch][row] flush success: write_to_sheet row={row_num}")
             print(
                 f" {sheet_name} {row_num}행 저장: "
                 f"{len(updates)}개 셀 업데이트"
             )
         else:
-            print(f" {sheet_name} {row_num}행 저장 실패")
+            print(f"[batch][row] flush failure: write_to_sheet row={row_num} -> fallback per-range update")
+            fallback_ok = 0
+            for update in updates:
+                range_a1 = str(update.get("range", "") or "")
+                values = update.get("values") or []
+                value = ""
+                if values and isinstance(values, list) and values[0]:
+                    value = str(values[0][0])
+                if svc_update_value_by_range(
+                    service=service,
+                    spreadsheet_id=SPREADSHEET_ID,
+                    range_a1=range_a1,
+                    value=value,
+                ):
+                    fallback_ok += 1
+            if fallback_ok == len(updates):
+                print(f"[batch][row] flush success: fallback row={row_num} ({fallback_ok}/{len(updates)})")
+            else:
+                print(f"[batch][row] flush failure: fallback row={row_num} ({fallback_ok}/{len(updates)})")
+                print(f" {sheet_name} {row_num}행 저장 실패")
+        return updates
     except Exception as e:
         print(f" {sheet_name} {row_num}행 저장 실패: {e}")
+        return []
 
 
 def process_sheet_once(
@@ -641,6 +670,17 @@ def process_sheet_once(
         ),
         "lookup_shipping_cost": svc_lookup_shipping_cost,
         "write_to_sheet": write_to_sheet,
+        "batch_update_values": lambda svc, updates: svc_batch_update_values(
+            service=svc,
+            spreadsheet_id=SPREADSHEET_ID,
+            updates=updates,
+        ),
+        "update_value_by_range": lambda svc, range_a1, value: svc_update_value_by_range(
+            service=svc,
+            spreadsheet_id=SPREADSHEET_ID,
+            range_a1=range_a1,
+            value=value,
+        ),
         "get_row_dynamic_values": get_row_dynamic_values,
         "determine_progress_status": determine_progress_status,
         "get_existing_row_values": get_existing_row_values,
@@ -664,6 +704,9 @@ def process_sheet_once(
         "STATUS_HOLD": STATUS_HOLD,
         "STATUS_CRAWLED": STATUS_CRAWLED,
         "CRAWLER_ROW_DELAY_SECONDS": CRAWLER_ROW_DELAY_SECONDS,
+        "BATCH_FLUSH_SIZE": 60,
+        "BATCH_FLUSH_ROWS": 10,
+        "BATCH_FLUSH_CELLS": 140,
     }
     return svc_process_sheet_once(
         service=service,
