@@ -2,8 +2,9 @@
 
 import time
 import re
-from dataclasses import asdict, is_dataclass
 from typing import Any, Dict, List, Tuple
+
+from models.product_model import product_to_sheet_field_map
 
 
 def _column_index_to_letter(index: int) -> str:
@@ -222,7 +223,7 @@ def build_incremental_payload(
     sheet_name: str,
     row_num: int,
     row_start: int,
-    product_info: Dict[str, str],
+    product_info: Any,
     existing_values: Dict[str, str],
     sequence_column: str,
     brand_column: str,
@@ -241,23 +242,24 @@ def build_incremental_payload(
     category_small_column: str,
 ) -> List[Dict[str, object]]:
     """Build update payload for only empty target cells."""
+    product_map = product_to_sheet_field_map(product_info)
     sequence = f"{row_num - row_start + 1:03d}"
     candidates = [
         (sequence_column, sequence),
-        (brand_column, product_info.get("brand", "")),
-        (brand_en_column, product_info.get("brand_en", "")),
-        (product_name_kr_column, product_info.get("product_name_kr", "")),
-        (musinsa_sku_column, product_info.get("musinsa_sku", "")),
-        (color_kr_column, product_info.get("color_kr", "")),
-        (size_column, product_info.get("size", "")),
-        (actual_size_column, product_info.get("actual_size", "")),
-        (price_column, product_info.get("price", "")),
-        (buyma_sell_price_column, product_info.get("buyma_price", "")),
-        (image_paths_column, product_info.get("image_paths", "")),
-        (shipping_cost_column, product_info.get("shipping_cost", "")),
-        (category_large_column, product_info.get("musinsa_category_large", "")),
-        (category_middle_column, product_info.get("musinsa_category_middle", "")),
-        (category_small_column, product_info.get("musinsa_category_small", "")),
+        (brand_column, product_map.get("brand", "")),
+        (brand_en_column, product_map.get("brand_en", "")),
+        (product_name_kr_column, product_map.get("product_name_kr", "")),
+        (musinsa_sku_column, product_map.get("musinsa_sku", "")),
+        (color_kr_column, product_map.get("color_kr", "")),
+        (size_column, product_map.get("size", "")),
+        (actual_size_column, product_map.get("actual_size", "")),
+        (price_column, product_map.get("price", "")),
+        (buyma_sell_price_column, product_map.get("buyma_price", "")),
+        (image_paths_column, product_map.get("image_paths", "")),
+        (shipping_cost_column, product_map.get("shipping_cost", "")),
+        (category_large_column, product_map.get("musinsa_category_large", "")),
+        (category_middle_column, product_map.get("musinsa_category_middle", "")),
+        (category_small_column, product_map.get("musinsa_category_small", "")),
     ]
 
     updates: List[Dict[str, object]] = []
@@ -353,15 +355,7 @@ def row_needs_image_download(existing_values: Dict[str, str], image_paths_column
 
 
 def _product_to_dict(product_info: Any) -> Dict[str, str]:
-    if product_info is None:
-        return {}
-    if isinstance(product_info, dict):
-        return product_info
-    if is_dataclass(product_info):
-        return asdict(product_info)
-    if hasattr(product_info, "to_dict"):
-        return product_info.to_dict()
-    return {}
+    return product_to_sheet_field_map(product_info)
 
 
 def process_sheet_once(

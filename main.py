@@ -7,7 +7,6 @@
 
 import json
 import argparse
-from dataclasses import asdict, is_dataclass
 import os
 import re
 import sys
@@ -112,7 +111,7 @@ from services.shipping_service import (
     read_shipping_table as svc_read_shipping_table,
 )
 from services.browser_service import setup_chrome_driver as svc_setup_chrome_driver
-from models.product_model import Product
+from models.product_model import Product, product_to_sheet_field_map
 from services.listing_queue_service import collect_listing_queue_once, resolve_listing_queue_target
 
 # Windows cp949 터미널에서 유니코드 출력 오류 방지
@@ -577,19 +576,13 @@ def write_to_sheet(
     service,
     sheet_name: str,
     row_num: int,
-    product_info: Dict[str, str],
+    product_info,
     existing_values: Dict[str, str] = None,
     return_updates_only: bool = False,
 ):
     """Google Sheets의 A, C~O 열에 한 행 데이터를 쓴다"""
     try:
-        if product_info is not None and not isinstance(product_info, dict):
-            if is_dataclass(product_info):
-                product_info = asdict(product_info)
-            elif hasattr(product_info, "to_dict"):
-                product_info = product_info.to_dict()
-            else:
-                product_info = {}
+        product_info = product_to_sheet_field_map(product_info)
         if existing_values is None:
             existing_values = get_existing_row_values(service, sheet_name, row_num)
         updates = build_incremental_payload(sheet_name, row_num, product_info, existing_values)
