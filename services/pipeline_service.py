@@ -1,10 +1,10 @@
-"""Pipeline/status decision helpers."""
+﻿"""Pipeline/status decision helpers."""
 
 import time
 import re
 from typing import Any, Dict, List, Tuple
 
-from models.product_model import product_to_sheet_field_map
+from models.product_model import product_from_sheet_row, product_to_sheet_field_map
 
 
 def _column_index_to_letter(index: int) -> str:
@@ -358,6 +358,26 @@ def _product_to_dict(product_info: Any) -> Dict[str, str]:
     return product_to_sheet_field_map(product_info)
 
 
+def _sheet_product_column_map(cfg: Dict[str, Any]) -> Dict[str, str]:
+    """Map Product fields to sheet column letters from cfg."""
+    return {
+        "brand": str(cfg.get("BRAND_COLUMN", "") or ""),
+        "brand_en": str(cfg.get("BRAND_EN_COLUMN", "") or ""),
+        "product_name_kr": str(cfg.get("PRODUCT_NAME_KR_COLUMN", "") or ""),
+        "musinsa_sku": str(cfg.get("MUSINSA_SKU_COLUMN", "") or ""),
+        "color_kr": str(cfg.get("COLOR_KR_COLUMN", "") or ""),
+        "size": str(cfg.get("SIZE_COLUMN", "") or ""),
+        "actual_size": str(cfg.get("ACTUAL_SIZE_COLUMN", "") or ""),
+        "price": str(cfg.get("PRICE_COLUMN", "") or ""),
+        "buyma_price": str(cfg.get("BUYMA_SELL_PRICE_COLUMN", "") or ""),
+        "image_paths": str(cfg.get("IMAGE_PATHS_COLUMN", "") or ""),
+        "shipping_cost": str(cfg.get("SHIPPING_COST_COLUMN", "") or ""),
+        "musinsa_category_large": str(cfg.get("CATEGORY_LARGE_COLUMN", "") or ""),
+        "musinsa_category_middle": str(cfg.get("CATEGORY_MIDDLE_COLUMN", "") or ""),
+        "musinsa_category_small": str(cfg.get("CATEGORY_SMALL_COLUMN", "") or ""),
+    }
+
+
 def process_sheet_once(
     service,
     driver,
@@ -369,19 +389,19 @@ def process_sheet_once(
     cfg: Dict[str, Any],
 ) -> None:
     """Run one sheet scan cycle using injected APIs/config."""
-    print(f"'{sheet_name}' 시트에서 B열 링크를 읽는 중...")
+    print(f"'{sheet_name}' ?쒗듃?먯꽌 B??留곹겕瑜??쎈뒗 以?..")
     rows = api["read_urls_from_sheet"](service, sheet_name)
     if not rows:
-        print(f"'{sheet_name}' 시트의 B열에 처리할 URL이 없습니다.")
+        print(f"'{sheet_name}' ?쒗듃??B?댁뿉 泥섎━??URL???놁뒿?덈떎.")
         return
 
     header_map = api["get_sheet_header_map"](service, sheet_name)
     has_margin_header = cfg["MARGIN_RATE_HEADER"] in header_map
     has_status_header = cfg["PROGRESS_STATUS_HEADER"] in header_map
     if not has_margin_header:
-        print(f"'{sheet_name}' 시트: '{cfg['MARGIN_RATE_HEADER']}' 헤더를 찾지 못했습니다.")
+        print(f"'{sheet_name}' ?쒗듃: '{cfg['MARGIN_RATE_HEADER']}' ?ㅻ뜑瑜?李얠? 紐삵뻽?듬땲??")
     if not has_status_header:
-        print(f"'{sheet_name}' 시트: '{cfg['PROGRESS_STATUS_HEADER']}' 헤더를 찾지 못했습니다.")
+        print(f"'{sheet_name}' ?쒗듃: '{cfg['PROGRESS_STATUS_HEADER']}' ?ㅻ뜑瑜?李얠? 紐삵뻽?듬땲??")
 
     row_numbers = [row_num for row_num, _ in rows]
     existing_rows_map = api["get_existing_rows_bulk"](service, sheet_name, row_numbers)
@@ -413,19 +433,20 @@ def process_sheet_once(
             should_backfill_shipping = shipping_missing and status_normalized not in {
                 cfg["STATUS_COMPLETED"],
                 cfg["STATUS_UPLOAD_READY"],
-                "업로드중",
+                "?낅줈?쒖쨷",
             }
             if (api["is_crawler_ready_status"](current_status) and needs_update) or should_backfill_shipping:
                 target_rows.append((row_num, url))
 
     if not target_rows:
-        print(f"'{sheet_name}' 시트: 신규 작성 대상이 없습니다.")
+        print(f"'{sheet_name}' ?쒗듃: ?좉퇋 ?묒꽦 ??곸씠 ?놁뒿?덈떎.")
         return
 
-    print(f"'{sheet_name}' 시트: {len(target_rows)}개 행을 처리합니다.")
+    print(f"'{sheet_name}' ?쒗듃: {len(target_rows)}媛??됱쓣 泥섎━?⑸땲??")
 
     updates_buffer: List[Dict[str, object]] = []
     flush_size = int(cfg.get("BATCH_FLUSH_SIZE", 60))
+    sheet_product_columns = _sheet_product_column_map(cfg)
 
     if make_thumbnails:
         print(f"'{sheet_name}' thumbnail mode start")
@@ -466,7 +487,8 @@ def process_sheet_once(
         for idx, url in target_rows:
             print(f"[{sheet_name}] row {idx} image processing: {url}")
             existing_values_for_row = existing_rows_map.get(idx, {})
-            sheet_sku = existing_values_for_row.get(cfg["MUSINSA_SKU_COLUMN"], "")
+            existing_product_for_row = product_from_sheet_row(existing_values_for_row, sheet_product_columns)
+            sheet_sku = existing_product_for_row.musinsa_sku
             if has_status_header:
                 _enqueue_update(
                     updates_buffer,
@@ -568,7 +590,8 @@ def process_sheet_once(
         for idx, url in target_rows:
             print(f"[{sheet_name}] {idx}????? ?? {url}")
             existing_values_for_row = existing_rows_map.get(idx, {})
-            sheet_sku = existing_values_for_row.get(cfg["MUSINSA_SKU_COLUMN"], "")
+            existing_product_for_row = product_from_sheet_row(existing_values_for_row, sheet_product_columns)
+            sheet_sku = existing_product_for_row.musinsa_sku
             if has_status_header:
                 api["update_cell_by_header"](
                     service,
@@ -639,4 +662,7 @@ def process_sheet_once(
                 pending_status_rows.discard(flushed_row)
     finally:
         _flush_normal_buffer("normal-finally", force=True)
+
+
+
 
