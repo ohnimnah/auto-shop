@@ -4,6 +4,7 @@ import time
 import re
 from typing import Any, Dict, List, Tuple
 
+from constants.status import STATUS_UPLOADING
 from models.product_model import product_from_sheet_row, product_to_sheet_field_map
 
 
@@ -433,7 +434,7 @@ def process_sheet_once(
             should_backfill_shipping = shipping_missing and status_normalized not in {
                 cfg["STATUS_COMPLETED"],
                 cfg["STATUS_UPLOAD_READY"],
-                "?낅줈?쒖쨷",
+                STATUS_UPLOADING,
             }
             if (api["is_crawler_ready_status"](current_status) and needs_update) or should_backfill_shipping:
                 target_rows.append((row_num, url))

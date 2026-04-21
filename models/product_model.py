@@ -1,26 +1,70 @@
-"""Product model used across crawler/pipeline/services."""
+﻿"""Product model used across crawler/pipeline/services."""
 
 from dataclasses import asdict, dataclass
 from typing import Any, Dict, Mapping
 
 
+# Product field groups (current usage based)
+PRODUCT_CORE_ID_FIELDS = (
+    "musinsa_sku",
+    "product_name_kr",
+    "brand",
+)
+
+PRODUCT_SHEET_DERIVED_FIELDS = (
+    "image_paths",
+    "buyma_price",
+    "shipping_cost",
+    "musinsa_category_large",
+    "musinsa_category_middle",
+    "musinsa_category_small",
+)
+
+PRODUCT_CRAWL_RESULT_FIELDS = (
+    "brand_en",
+    "color_kr",
+    "size",
+    "actual_size",
+    "price",
+    "brand_logo_url",
+    "opt_kind_cd",
+)
+
+PRODUCT_POST_PROCESS_FIELDS = (
+    "buyma_price",
+    "image_paths",
+    "shipping_cost",
+)
+
+# Reserved candidates (not introduced to dataclass yet):
+# - status
+# - row_num
+# - url
+# - error_message
+
+
 @dataclass
 class Product:
-    brand: str = ""
-    brand_en: str = ""
+    # Core identifiers
+    musinsa_sku: str = ""
     product_name_kr: str = "상품명 미확인"
+    brand: str = ""
+
+    # Crawl result fields
+    brand_en: str = ""
     color_kr: str = "none"
     size: str = ""
     actual_size: str = "못찾음"
     price: str = "가격 미확인"
-    buyma_price: str = ""
-    musinsa_sku: str = ""
-    image_paths: str = ""
     brand_logo_url: str = ""
     opt_kind_cd: str = ""
     musinsa_category_large: str = ""
     musinsa_category_middle: str = ""
     musinsa_category_small: str = ""
+
+    # Post-process / upload derived fields
+    buyma_price: str = ""
+    image_paths: str = ""
     shipping_cost: str = ""
 
     def to_dict(self) -> Dict[str, str]:
