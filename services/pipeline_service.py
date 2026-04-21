@@ -6,6 +6,10 @@ from typing import Any, Dict, List, Tuple
 
 from constants.status import STATUS_UPLOADING
 from models.product_model import product_from_sheet_row, product_to_sheet_field_map
+from utils.logger import get_logger
+
+
+LOGGER = get_logger("auto_shop.pipeline")
 
 
 def _column_index_to_letter(index: int) -> str:
@@ -453,6 +457,8 @@ def process_sheet_once(
         print(f"'{sheet_name}' thumbnail mode start")
         for idx, _url in target_rows:
             print(f"[{sheet_name}] row {idx} thumbnail processing")
+            LOGGER.info("[START] SKU=- ROW=%s", idx)
+            LOGGER.info("[THUMBNAIL START] ROW=%s", idx)
             existing_values_for_row = existing_rows_map.get(idx, {})
             folder_path = api["resolve_image_folder_from_paths"](existing_values_for_row.get(cfg["IMAGE_PATHS_COLUMN"], ""))
             brand = api["build_thumbnail_brand"](existing_values_for_row)
@@ -470,6 +476,8 @@ def process_sheet_once(
                         cfg["STATUS_THUMBNAILS_DONE"],
                     )
                     print(f" {sheet_name} row {idx} status -> {cfg['STATUS_THUMBNAILS_DONE']}")
+                    LOGGER.info("[THUMBNAIL DONE] ROW=%s", idx)
+                    LOGGER.info("[DONE] ROW=%s", idx)
             elif has_status_header:
                 _enqueue_update(
                     updates_buffer,
@@ -477,10 +485,12 @@ def process_sheet_once(
                     cfg["STATUS_ERROR"],
                 )
                 print(f" {sheet_name} row {idx} status -> {cfg['STATUS_ERROR']}")
+                LOGGER.error("[ERROR] SKU=- ROW=%s - thumbnail failed", idx)
             if len(updates_buffer) >= flush_size:
                 _flush_updates_buffer(service, api, updates_buffer, f"thumbnail-row-{idx}")
             time.sleep(cfg["THUMB_ROW_DELAY_SECONDS"])
         _flush_updates_buffer(service, api, updates_buffer, "thumbnail-final")
+        LOGGER.info("[DONE] sheet=%s mode=thumbnail total_rows=%s", sheet_name, len(target_rows))
         return
 
     if download_images:
@@ -490,6 +500,8 @@ def process_sheet_once(
             existing_values_for_row = existing_rows_map.get(idx, {})
             existing_product_for_row = product_from_sheet_row(existing_values_for_row, sheet_product_columns)
             sheet_sku = existing_product_for_row.musinsa_sku
+            LOGGER.info("[START] SKU=%s ROW=%s", sheet_sku or "-", idx)
+            LOGGER.info("[IMAGE START] SKU=%s ROW=%s", sheet_sku or "-", idx)
             if has_status_header:
                 _enqueue_update(
                     updates_buffer,
@@ -530,10 +542,13 @@ def process_sheet_once(
                     cfg["STATUS_IMAGES_SAVED"],
                 )
                 print(f" {sheet_name} row {idx} status -> {cfg['STATUS_IMAGES_SAVED']}")
+                LOGGER.info("[IMAGE DONE] SKU=%s ROW=%s", sheet_sku or "-", idx)
+                LOGGER.info("[DONE] SKU=%s ROW=%s", sheet_sku or "-", idx)
             if len(updates_buffer) >= flush_size:
                 _flush_updates_buffer(service, api, updates_buffer, f"image-row-{idx}")
             time.sleep(cfg["IMAGE_ROW_DELAY_SECONDS"])
         _flush_updates_buffer(service, api, updates_buffer, "image-final")
+        LOGGER.info("[DONE] sheet=%s mode=image total_rows=%s", sheet_name, len(target_rows))
         return
 
     shipping_table = api["read_shipping_table"](service, sheet_name)
@@ -593,6 +608,7 @@ def process_sheet_once(
             existing_values_for_row = existing_rows_map.get(idx, {})
             existing_product_for_row = product_from_sheet_row(existing_values_for_row, sheet_product_columns)
             sheet_sku = existing_product_for_row.musinsa_sku
+            LOGGER.info("[START] SKU=%s ROW=%s", sheet_sku or "-", idx)
             if has_status_header:
                 api["update_cell_by_header"](
                     service,
@@ -603,7 +619,9 @@ def process_sheet_once(
                     cfg["STATUS_CRAWLING"],
                 )
 
+            product = None
             try:
+                LOGGER.info("[CRAWL START] SKU=%s ROW=%s", sheet_sku or "-", idx)
                 product = api["scrape_musinsa_product"](
                     driver,
                     url,
@@ -634,8 +652,15 @@ def process_sheet_once(
                 if row_updates:
                     multi_row_buffer.extend(row_updates)
                 pending_status_rows.add(idx)
+                LOGGER.info("[CRAWL DONE] SKU=%s ROW=%s", sheet_sku or "-", idx)
             except Exception as row_exc:
                 print(f" {sheet_name} {idx}? ?? ??: {row_exc}")
+                if product is not None:
+                    try:
+                        product.error_message = str(row_exc)
+                    except Exception:
+                        pass
+                LOGGER.error("[ERROR] SKU=%s ROW=%s - %s", sheet_sku or "-", idx, row_exc)
                 if has_status_header:
                     # keep critical error marking immediate for observability
                     api["update_cell_by_header"](
@@ -661,8 +686,10 @@ def process_sheet_once(
             if flushed_row in pending_status_rows:
                 _write_status_for_row(flushed_row)
                 pending_status_rows.discard(flushed_row)
+                LOGGER.info("[DONE] ROW=%s", flushed_row)
     finally:
         _flush_normal_buffer("normal-finally", force=True)
+        LOGGER.info("[DONE] sheet=%s mode=crawl total_rows=%s", sheet_name, len(target_rows))
 
 
 
