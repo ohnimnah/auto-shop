@@ -159,7 +159,7 @@ def build_buyma_form_payload(
 
     raw_buyma_price = re.sub(r"[^\d]", "", row_data.get("buyma_price", ""))
     buyma_price_value = int(raw_buyma_price) if raw_buyma_price else 0
-    adjusted_price = max(0, buyma_price_value - 10) if raw_buyma_price else 0
+    adjusted_price = max(0, buyma_price_value - 1) if raw_buyma_price else 0
 
     return {
         "row_num": row_data.get("row_num"),

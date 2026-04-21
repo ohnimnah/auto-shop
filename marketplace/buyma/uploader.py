@@ -494,7 +494,7 @@ def apply_buyma_post_option_fields(
                     pass
 
             if filled_count:
-                print(f"  ✓ 판매가 입력: ¥{adjusted_price} (엑셀값-10)")
+                print(f"  ✓ 판매가 입력: ¥{adjusted_price} (엑셀값-1)")
             else:
                 print("  ✗ 가격 입력 필드를 찾을 수 없습니다")
         except Exception as exc:
