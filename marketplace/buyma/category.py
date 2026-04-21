@@ -10,6 +10,7 @@ from marketplace.buyma.standard_category import (
     map_standard_to_buyma_middle_and_subcategory,
     resolve_standard_category,
 )
+import standard_category_map as standard_category_map_mod
 
 
 FEMALE_KEYWORDS = [
@@ -216,15 +217,24 @@ def build_buyma_category_plan(
         source_product_name,
     )
     is_mens_category = "メンズ" in (cat1 or "")
-    semantic_cat2, semantic_cat3 = map_standard_to_buyma_middle_and_subcategory(
+    # Prefer table-based mapping layer first; keep existing semantic mapper as fallback.
+    semantic_parent, semantic_cat2, semantic_cat3 = standard_category_map_mod.resolve_standard_category_buyma_target(
         standard_category,
-        combined_text,
         is_mens=is_mens_category,
+        combined_text=combined_text,
     )
+    if not semantic_cat2:
+        semantic_cat2, semantic_cat3 = map_standard_to_buyma_middle_and_subcategory(
+            standard_category,
+            combined_text,
+            is_mens=is_mens_category,
+        )
     semantic_used = standard_category != StandardCategory.ETC and bool(semantic_cat2)
     semantic_fallback_used = False
 
     if semantic_used:
+        if semantic_parent:
+            cat1 = semantic_parent
         cat2 = semantic_cat2
         cat3 = semantic_cat3
         cat_source = f"{cat_source}+semantic"

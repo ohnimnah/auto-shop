@@ -1,99 +1,206 @@
-"""Reusable StandardCategory -> BUYMA category table layer.
+"""Standalone StandardCategory -> BUYMA mapping table support.
 
-Standalone support module. No direct integration into current upload flow.
+This module does NOT change upload behavior.
+It is a support layer for manual `category_mapping` table creation and tests.
 """
 
 from __future__ import annotations
 
-from dataclasses import asdict, dataclass
-from typing import Dict, List, Tuple
+from dataclasses import dataclass, asdict
+from datetime import datetime
+from typing import Dict, Iterable, List, Optional, Sequence, Tuple
 
 from marketplace.buyma.standard_category import StandardCategory
 
 
-@dataclass(frozen=True)
-class StandardCategoryMapRow:
-    standard_category: str
-    gender_scope: str  # women / men / unisex
-    parent_category: str
-    middle_category: str
-    child_category: str
-    note: str = ""
+# BUYMA labels (use unicode escapes to avoid terminal/font encoding issues)
+PARENT_WOMEN = "\u30ec\u30c7\u30a3\u30fc\u30b9\u30d5\u30a1\u30c3\u30b7\u30e7\u30f3"
+PARENT_MEN = "\u30e1\u30f3\u30ba\u30d5\u30a1\u30c3\u30b7\u30e7\u30f3"
+
+MIDDLE_TOPS = "\u30c8\u30c3\u30d7\u30b9"
+MIDDLE_INNER_ROOM = "\u30a4\u30f3\u30ca\u30fc\u30fb\u30eb\u30fc\u30e0\u30a6\u30a7\u30a2"
+
+CHILD_HOODIE = "\u30d1\u30fc\u30ab\u30fc\u30fb\u30d5\u30fc\u30c7\u30a3"
+CHILD_SWEAT = "\u30b9\u30a6\u30a7\u30c3\u30c8\u30fb\u30c8\u30ec\u30fc\u30ca\u30fc"
+CHILD_TSHIRT = "T\u30b7\u30e3\u30c4\u30fb\u30ab\u30c3\u30c8\u30bd\u30fc"
+CHILD_KNIT = "\u30cb\u30c3\u30c8\u30fb\u30bb\u30fc\u30bf\u30fc"
+CHILD_PAJAMA = "\u30eb\u30fc\u30e0\u30a6\u30a7\u30a2\u30fb\u30d1\u30b8\u30e3\u30de"
 
 
-DEFAULT_STANDARD_CATEGORY_MAP: List[StandardCategoryMapRow] = [
-    StandardCategoryMapRow(StandardCategory.TOP_HOODIE.value, "women", "レディーズファッション", "トップス", "パーカー・フーディ"),
-    StandardCategoryMapRow(StandardCategory.TOP_HOODIE.value, "men", "メンズファッション", "トップス", "パーカー・フーディ"),
-    StandardCategoryMapRow(StandardCategory.TOP_SWEAT.value, "women", "レディーズファッション", "トップス", "スウェット・トレーナー"),
-    StandardCategoryMapRow(StandardCategory.TOP_SWEAT.value, "men", "メンズファッション", "トップス", "スウェット・トレーナー"),
-    StandardCategoryMapRow(StandardCategory.TOP_TSHIRT.value, "women", "レディーズファッション", "トップス", "Tシャツ・カットソー"),
-    StandardCategoryMapRow(StandardCategory.TOP_TSHIRT.value, "men", "メンズファッション", "トップス", "Tシャツ・カットソー"),
-    StandardCategoryMapRow(StandardCategory.TOP_SHIRT.value, "women", "レディーズファッション", "トップス", "シャツ"),
-    StandardCategoryMapRow(StandardCategory.TOP_SHIRT.value, "men", "メンズファッション", "トップス", "シャツ"),
-    StandardCategoryMapRow(StandardCategory.TOP_KNIT.value, "women", "レディーズファッション", "トップス", "ニット・セーター"),
-    StandardCategoryMapRow(StandardCategory.TOP_KNIT.value, "men", "メンズファッション", "トップス", "ニット・セーター"),
-    StandardCategoryMapRow(StandardCategory.TOP_CARDIGAN.value, "women", "レディーズファッション", "トップス", "カーディガン"),
-    StandardCategoryMapRow(StandardCategory.TOP_CARDIGAN.value, "men", "メンズファッション", "トップス", "カーディガン"),
-    StandardCategoryMapRow(StandardCategory.HOME_PAJAMA.value, "women", "レディーズファッション", "インナー・ルームウェア", "ルームウェア・パジャマ"),
-    StandardCategoryMapRow(StandardCategory.HOME_PAJAMA.value, "men", "メンズファッション", "インナー・ルームウェア", "ルームウェア・パジャマ"),
-    StandardCategoryMapRow(StandardCategory.OUTER.value, "women", "レディーズファッション", "アウター", "ジャケット", "default outer"),
-    StandardCategoryMapRow(StandardCategory.OUTER.value, "men", "メンズファッション", "アウター・ジャケット", "ジャケット", "default outer"),
-    StandardCategoryMapRow(StandardCategory.PANTS.value, "women", "レディーズファッション", "ボトムス", "パンツ", "default pants"),
-    StandardCategoryMapRow(StandardCategory.PANTS.value, "men", "メンズファッション", "パンツ・ボトムス", "パンツ", "default pants"),
+MAPPING_HEADERS: List[str] = [
+    "standard_category",
+    "gender",
+    "buyma_parent_category",
+    "buyma_middle_category",
+    "buyma_child_category",
+    "category_url",
+    "category_id",
+    "source",
+    "note",
+    "updated_at",
 ]
 
 
-def _to_gender_scope(is_mens: bool) -> str:
-    return "men" if is_mens else "women"
+@dataclass(frozen=True)
+class CategoryMappingRow:
+    standard_category: str
+    gender: str
+    buyma_parent_category: str
+    buyma_middle_category: str
+    buyma_child_category: str
+    category_url: str
+    category_id: str
+    source: str
+    note: str
+    updated_at: str
+
+    def to_dict(self) -> Dict[str, str]:
+        return asdict(self)
 
 
-def resolve_standard_category_map_row(
-    standard_category: StandardCategory,
+def _now_iso() -> str:
+    return datetime.now().isoformat(timespec="seconds")
+
+
+def _norm(v: str) -> str:
+    return (v or "").strip()
+
+
+def _contains(text: str, keywords: Sequence[str]) -> bool:
+    t = text.lower()
+    return any(k.lower() in t for k in keywords)
+
+
+def normalize_gender(value: str) -> str:
+    text = (value or "").strip().lower()
+    if text in {"women", "woman", "female", "f", "w", "\uc5ec\uc131", "\ub808\ub514\uc2a4"}:
+        return "women"
+    if text in {"men", "man", "male", "m", "\ub0a8\uc131", "\uba58\uc988"}:
+        return "men"
+    return "women"
+
+
+def resolve_standard_category_for_test(
+    product_name: str,
+    musinsa_large: str = "",
+    musinsa_middle: str = "",
+    musinsa_small: str = "",
+) -> StandardCategory:
+    """Small standalone resolver for mapping-table tests."""
+    text = " ".join([musinsa_large or "", musinsa_middle or "", musinsa_small or "", product_name or ""]).lower()
+
+    if _contains(text, ["\ud30c\uc790\ub9c8", "\uc7a0\uc637", "\ub8f8\uc6e8\uc5b4", "pajama", "sleepwear", "loungewear"]):
+        return StandardCategory.HOME_PAJAMA
+    if _contains(text, ["\ud6c4\ub4dc", "\ud6c4\ub514", "hoodie", "hooded"]):
+        return StandardCategory.TOP_HOODIE
+    if _contains(text, ["\ub9e8\ud22c\ub9e8", "\uc2a4\uc6e8\ud2b8", "\uc2a4\uc6fb", "sweatshirt"]):
+        return StandardCategory.TOP_SWEAT
+    if _contains(text, ["\ub2c8\ud2b8", "\uc2a4\uc6e8\ud130", "knit", "sweater"]):
+        return StandardCategory.TOP_KNIT
+    if _contains(text, ["\ud2f0\uc154\uce20", "\ubc18\ud314", "\uae34\ud314", "t-shirt", "tee"]):
+        return StandardCategory.TOP_TSHIRT
+    return StandardCategory.ETC
+
+
+def _find_raw_category_row(
+    raw_rows: Iterable[Dict[str, str]],
     *,
-    is_mens: bool,
-) -> StandardCategoryMapRow | None:
-    scope = _to_gender_scope(is_mens)
-    key = standard_category.value
-    for row in DEFAULT_STANDARD_CATEGORY_MAP:
-        if row.standard_category == key and row.gender_scope == scope:
+    parent: str,
+    middle: str,
+    child: str,
+) -> Optional[Dict[str, str]]:
+    for row in raw_rows:
+        if (
+            _norm(row.get("parent_category", "")) == parent
+            and _norm(row.get("middle_category", "")) == middle
+            and _norm(row.get("child_category", "")) == child
+        ):
             return row
     return None
 
 
-def resolve_standard_category_buyma_target(
-    standard_category: StandardCategory,
+def build_common_mapping_rows_from_raw(raw_rows: Iterable[Dict[str, str]]) -> List[CategoryMappingRow]:
+    """Build mapping rows for common categories and both genders."""
+    specs: List[Tuple[StandardCategory, str, str]] = [
+        (StandardCategory.TOP_HOODIE, MIDDLE_TOPS, CHILD_HOODIE),
+        (StandardCategory.TOP_SWEAT, MIDDLE_TOPS, CHILD_SWEAT),
+        (StandardCategory.TOP_TSHIRT, MIDDLE_TOPS, CHILD_TSHIRT),
+        (StandardCategory.TOP_KNIT, MIDDLE_TOPS, CHILD_KNIT),
+        (StandardCategory.HOME_PAJAMA, MIDDLE_INNER_ROOM, CHILD_PAJAMA),
+    ]
+
+    out: List[CategoryMappingRow] = []
+    now = _now_iso()
+    for gender, parent in (("women", PARENT_WOMEN), ("men", PARENT_MEN)):
+        for std_cat, middle, child in specs:
+            hit = _find_raw_category_row(raw_rows, parent=parent, middle=middle, child=child)
+            out.append(
+                CategoryMappingRow(
+                    standard_category=std_cat.value,
+                    gender=gender,
+                    buyma_parent_category=parent,
+                    buyma_middle_category=middle,
+                    buyma_child_category=child,
+                    category_url=_norm((hit or {}).get("category_url", "")),
+                    category_id=_norm((hit or {}).get("category_id", "")),
+                    source="buyma_categories_raw",
+                    note="" if hit else "NOT_FOUND_IN_RAW",
+                    updated_at=now,
+                )
+            )
+    return out
+
+
+def resolve_buyma_category_from_mapping(
+    mapping_rows: Iterable[CategoryMappingRow],
     *,
-    is_mens: bool,
-    combined_text: str = "",
-) -> Tuple[str, str, str]:
-    """Return (parent, middle, child) target using table + rule refinements.
-
-    This module is standalone support and does not alter current upload path.
-    """
-    base = resolve_standard_category_map_row(standard_category, is_mens=is_mens)
-    if base is None:
-        return "", "", ""
-
-    text = (combined_text or "").lower()
-    parent, middle, child = base.parent_category, base.middle_category, base.child_category
-
-    if standard_category == StandardCategory.OUTER:
-        if any(k in text for k in ("down jacket", "puffer", "패딩", "다운")):
-            child = "ダウンジャケット"
-        elif any(k in text for k in ("coat", "코트")):
-            child = "コート"
-
-    if standard_category == StandardCategory.PANTS:
-        if any(k in text for k in ("denim", "jeans", "데님", "청바지")):
-            child = "デニム・ジーパン"
-        elif any(k in text for k in ("slacks", "trousers", "슬랙스")):
-            child = "スラックス"
-        elif any(k in text for k in ("shorts", "쇼츠", "반바지")):
-            child = "ハーフ・ショートパンツ"
-
-    return parent, middle, child
+    standard_category: StandardCategory,
+    gender: str,
+) -> Optional[CategoryMappingRow]:
+    g = normalize_gender(gender)
+    for row in mapping_rows:
+        if row.standard_category == standard_category.value and row.gender == g:
+            return row
+    return None
 
 
-def default_mapping_rows_as_dicts() -> List[Dict[str, str]]:
-    return [asdict(row) for row in DEFAULT_STANDARD_CATEGORY_MAP]
+def run_mapping_tests(
+    mapping_rows: Iterable[CategoryMappingRow],
+    samples: Iterable[Dict[str, str]],
+) -> List[Dict[str, str]]:
+    rows = list(mapping_rows)
+    results: List[Dict[str, str]] = []
+    for sample in samples:
+        name = sample.get("product_name", "") or ""
+        musinsa_large = sample.get("musinsa_large", "") or ""
+        musinsa_middle = sample.get("musinsa_middle", "") or ""
+        musinsa_small = sample.get("musinsa_small", "") or ""
+        gender = normalize_gender(sample.get("gender", "women"))
+        std = resolve_standard_category_for_test(
+            name,
+            musinsa_large=musinsa_large,
+            musinsa_middle=musinsa_middle,
+            musinsa_small=musinsa_small,
+        )
+        match = resolve_buyma_category_from_mapping(rows, standard_category=std, gender=gender)
+        results.append(
+            {
+                "product_name": name,
+                "gender": gender,
+                "standard_category": std.value,
+                "buyma_parent": match.buyma_parent_category if match else "",
+                "buyma_middle": match.buyma_middle_category if match else "",
+                "buyma_child": match.buyma_child_category if match else "",
+                "mapping_found": "Y" if match else "N",
+            }
+        )
+    return results
+
+
+def mapping_rows_to_sheet_values(rows: Iterable[CategoryMappingRow]) -> List[List[str]]:
+    out = [MAPPING_HEADERS]
+    for row in rows:
+        d = row.to_dict()
+        out.append([str(d.get(h, "") or "") for h in MAPPING_HEADERS])
+    return out
 

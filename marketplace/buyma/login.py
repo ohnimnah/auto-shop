@@ -44,7 +44,7 @@ def save_buyma_credentials(email: str, password: str) -> None:
     }
     with open(BUYMA_CRED_PATH, "w", encoding="utf-8") as file:
         json.dump(payload, file)
-    print("  로그인 정보가 저장되었습니다.")
+    print("  BUYMA credentials saved.")
 
 
 def load_buyma_credentials() -> Tuple[Optional[str], Optional[str]]:
@@ -63,16 +63,21 @@ def load_buyma_credentials() -> Tuple[Optional[str], Optional[str]]:
 
 
 def prompt_buyma_credentials() -> Tuple[str, str]:
-    print("\n바이마 로그인 정보를 입력해주세요 (최초 1회만):")
-    email = input("  이메일: ").strip()
-    password = input("  비밀번호: ").strip()
+    print("\nEnter BUYMA login credentials (first time only):")
+    email = input("  Email: ").strip()
+    password = input("  Password: ").strip()
     if email and password:
         save_buyma_credentials(email, password)
     return email, password
 
 
 def setup_visible_chrome_driver():
-    os.makedirs(CHROME_PROFILE_DIR, exist_ok=True)
+    profile_dir = CHROME_PROFILE_DIR
+    try:
+        os.makedirs(profile_dir, exist_ok=True)
+    except PermissionError:
+        profile_dir = os.path.join(tempfile.gettempdir(), "auto_shop", "chrome_profile")
+        os.makedirs(profile_dir, exist_ok=True)
 
     def _build_options(user_data_dir: str) -> ChromeOptions:
         chrome_options = ChromeOptions()
@@ -89,7 +94,7 @@ def setup_visible_chrome_driver():
         chrome_options.add_experimental_option("useAutomationExtension", False)
         return chrome_options
 
-    chrome_options = _build_options(CHROME_PROFILE_DIR)
+    chrome_options = _build_options(profile_dir)
 
     driver_path = None
     cached_candidates = sorted(
@@ -111,10 +116,14 @@ def setup_visible_chrome_driver():
     try:
         driver = webdriver.Chrome(service=service, options=chrome_options)
     except SessionNotCreatedException as exc:
+        # Most common failure in this project env: chrome profile prefs write issue.
         if "failed to write prefs file" not in str(exc).lower():
             raise
-        fallback_profile = tempfile.mkdtemp(prefix="buyma_profile_", dir=os.path.dirname(CHROME_PROFILE_DIR))
-        print(f"Chrome 기본 프로필이 잠겨 있어 임시 프로필로 재시도합니다: {fallback_profile}")
+        try:
+            fallback_profile = tempfile.mkdtemp(prefix="buyma_profile_", dir=os.path.dirname(profile_dir))
+        except PermissionError:
+            fallback_profile = tempfile.mkdtemp(prefix="buyma_profile_")
+        print(f"Chrome profile write issue detected. Using temporary profile: {fallback_profile}")
         driver = webdriver.Chrome(service=service, options=_build_options(fallback_profile))
 
     driver.execute_cdp_cmd(
@@ -136,18 +145,22 @@ def wait_for_buyma_login(
         email, password = prompt_buyma_credentials()
 
     force_relogin = os.environ.get("AUTO_SHOP_FORCE_BUYMA_RELOGIN", "0").strip().lower() in {
-        "1", "true", "yes", "y", "on"
+        "1",
+        "true",
+        "yes",
+        "y",
+        "on",
     }
 
     driver.get(BUYMA_SELL_URL)
     _sleep(3, wait_scale)
 
     if "/login" not in driver.current_url and not (force_relogin and email and password):
-        print("이미 로그인 상태입니다.")
+        print("Already logged in.")
         return True
 
     if email and password:
-        print("자동 로그인 시도 중...")
+        print("Trying auto login...")
         try:
             if force_relogin:
                 try:
@@ -179,24 +192,22 @@ def wait_for_buyma_login(
             _sleep(5, wait_scale)
 
             if "/login" not in driver.current_url:
-                print("✓ 자동 로그인 성공!")
+                print("Auto login success.")
                 driver.get(BUYMA_SELL_URL)
                 _sleep(2, wait_scale)
                 return True
 
-            print("✗ 자동 로그인 실패 (비밀번호 오류 또는 캡차 필요)")
-            print("  저장된 로그인 정보가 틀리면 다음에 다시 입력해주세요.")
+            print("Auto login failed. Please login manually.")
             try:
                 os.remove(BUYMA_CRED_PATH)
             except Exception:
                 pass
         except Exception as exc:
-            print(f"✗ 자동 로그인 오류: {exc}")
+            print(f"Auto login error: {exc}")
 
     print("\n" + "=" * 60)
-    print("  바이마 로그인이 필요합니다.")
-    print("  브라우저에서 직접 로그인 해주세요.")
-    print("  로그인 완료 감지되면 자동으로 진행됩니다.")
+    print("BUYMA login is required.")
+    print("Please login manually in the browser window.")
     print("=" * 60 + "\n")
 
     for _ in range(300):
@@ -204,11 +215,11 @@ def wait_for_buyma_login(
         try:
             current_url = driver.current_url
             if "/login" not in current_url:
-                print("로그인 성공! 출품 페이지로 이동합니다..")
-                save = safe_input_fn("  이 계정 정보를 저장하겠습니까? (y/n): ").strip().lower()
+                print("Login success. Continuing.")
+                save = safe_input_fn("Save this account credential? (y/n): ").strip().lower()
                 if save == "y":
-                    new_email = safe_input_fn("  이메일: ").strip()
-                    new_pw = safe_input_fn("  비밀번호: ").strip()
+                    new_email = safe_input_fn("  Email: ").strip()
+                    new_pw = safe_input_fn("  Password: ").strip()
                     if new_email and new_pw:
                         save_buyma_credentials(new_email, new_pw)
                 _sleep(2, wait_scale)
@@ -216,5 +227,6 @@ def wait_for_buyma_login(
         except Exception:
             pass
 
-    print("로그인 대기시간 초과 (5분)")
+    print("Login wait timeout (5 minutes).")
     return False
+
