@@ -1,5 +1,5 @@
 """Marketplace-neutral model exports."""
 
-from product_model import Product
+from models.product_model import Product
 
 __all__ = ["Product"]

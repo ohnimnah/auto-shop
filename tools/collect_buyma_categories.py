@@ -14,7 +14,7 @@ ROOT_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
 if ROOT_DIR not in sys.path:
     sys.path.insert(0, ROOT_DIR)
 
-from browser_service import setup_chrome_driver
+from services.browser_service import setup_chrome_driver
 from buyma_category_collector import collect_buyma_category_hierarchy_with_stats, rows_to_dicts
 from buyma_category_repository import (
     load_category_json,

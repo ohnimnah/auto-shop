@@ -13,7 +13,7 @@ import re
 import sys
 import time
 from typing import Dict, List, Tuple
-from app_config import (
+from config.app_config import (
     ACTUAL_SIZE_COLUMN,
     BAIMA_SELL_PRICE_COLUMN,
     BRAND_COLUMN,
@@ -67,7 +67,7 @@ from app_config import (
     get_default_data_dir,
     get_default_images_dir,
 )
-from sheet_service import (
+from services.sheet_service import (
     batch_update_values as svc_batch_update_values,
     get_existing_row_values as svc_get_existing_row_values,
     get_existing_rows_bulk as svc_get_existing_rows_bulk,
@@ -81,18 +81,18 @@ from sheet_service import (
     update_value_by_range as svc_update_value_by_range,
     update_cell_by_header as svc_update_cell_by_header,
 )
-from image_service import (
+from services.image_service import (
     build_thumbnail_brand as svc_build_thumbnail_brand,
     create_thumbnail_for_folder as svc_create_thumbnail_for_folder,
     download_brand_logo as svc_download_brand_logo,
     download_thumbnail_images as svc_download_thumbnail_images,
     resolve_image_folder_from_paths as svc_resolve_image_folder_from_paths,
 )
-from crawler_service import (
+from services.crawler_service import (
     build_image_folder_name as svc_build_image_folder_name,
     scrape_musinsa_product as svc_scrape_musinsa_product,
 )
-from pipeline_service import (
+from services.pipeline_service import (
     build_incremental_payload as svc_build_incremental_payload,
     determine_progress_status as svc_determine_progress_status,
     is_empty_cell as svc_is_empty_cell,
@@ -103,17 +103,17 @@ from pipeline_service import (
     process_sheet_once as svc_process_sheet_once,
     is_thumbnail_ready_status as svc_is_thumbnail_ready_status,
 )
-from buyma_service import (
+from services.buyma_service import (
     fetch_buyma_lowest_price as svc_fetch_buyma_lowest_price,
 )
-from shipping_service import (
+from services.shipping_service import (
     estimate_weight as svc_estimate_weight,
     lookup_shipping_cost as svc_lookup_shipping_cost,
     read_shipping_table as svc_read_shipping_table,
 )
-from browser_service import setup_chrome_driver as svc_setup_chrome_driver
-from product_model import Product
-from listing_queue_service import collect_listing_queue_once, resolve_listing_queue_target
+from services.browser_service import setup_chrome_driver as svc_setup_chrome_driver
+from models.product_model import Product
+from services.listing_queue_service import collect_listing_queue_once, resolve_listing_queue_target
 
 # Windows cp949 터미널에서 유니코드 출력 오류 방지
 if sys.stdout.encoding and sys.stdout.encoding.lower().replace("-", "") in ("cp949", "euckr"):
