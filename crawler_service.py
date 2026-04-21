@@ -1010,6 +1010,10 @@ def extract_musinsa_sku(
             val = str(mss_state.get(field, "")).strip()
             if val and re.fullmatch(r"[A-Z0-9-]{4,}", val, re.IGNORECASE):
                 return val.upper()
+        # Fallback: use Musinsa goodsNo when style/model code is unavailable.
+        goods_no = str(mss_state.get("goodsNo", "")).strip()
+        if goods_no.isdigit() and len(goods_no) >= 4:
+            return goods_no
 
     if isinstance(product_json, dict):
         for field in ("mpn", "sku", "model", "productID"):
@@ -1244,6 +1248,47 @@ def scrape_musinsa_product(
     """Scrape one Musinsa product and return Product model."""
     from buyma_service import format_price, normalize_price, extract_discounted_product_price
 
+    def _is_unknown_price(value: str) -> bool:
+        text = (value or "").strip()
+        return text in {"", "\uac00\uaca9 \ubbf8\ud655\uc778", "?? ???", "?????????"}
+
+    def _find_price_candidates_from_state(data) -> List[int]:
+        """Recursively collect coupon/benefit/sale/normal price candidates from mss_state."""
+        key_priority = (
+            "maxbenefitprice",
+            "benefitprice",
+            "couponappliedprice",
+            "couponapplyprice",
+            "coupondcprice",
+            "couponprice",
+            "saleprice",
+            "discountprice",
+            "currentprice",
+            "normalprice",
+            "listprice",
+        )
+        found = []  # (priority_index, value)
+
+        def walk(obj):
+            if isinstance(obj, dict):
+                for k, v in obj.items():
+                    lk = str(k).lower().replace("_", "")
+                    if isinstance(v, (int, float)):
+                        iv = int(v)
+                        if iv >= 1000:
+                            for idx, key in enumerate(key_priority):
+                                if key in lk:
+                                    found.append((idx, iv))
+                                    break
+                    walk(v)
+            elif isinstance(obj, list):
+                for item in obj:
+                    walk(item)
+
+        walk(data)
+        found.sort(key=lambda x: (x[0], x[1]))
+        return [v for _, v in found]
+
     try:
         print(f"    페이지 로드 중... {url}")
         driver.get(url)
@@ -1349,14 +1394,21 @@ def scrape_musinsa_product(
         if not size_text:
             size_text = extract_sizes(soup, opt_kind_cd)
 
-        discounted_price_text = extract_discounted_product_price(soup)
-        if discounted_price_text != "가격 미확인":
-            price_text = discounted_price_text
+        # 0) structured state price (coupon/benefit/sale/normal priority)
+        state_price_candidates = _find_price_candidates_from_state(mss_state)
+        if state_price_candidates:
+            price_text = format_price(state_price_candidates[0])
         else:
-            offers = product_json.get("offers", {}) if isinstance(product_json, dict) else {}
-            price_text = format_price(offers.get("price") if isinstance(offers, dict) else None)
+            # 1) rendered DOM text price parser
+            discounted_price_text = extract_discounted_product_price(soup)
+            if not _is_unknown_price(discounted_price_text):
+                price_text = discounted_price_text
+            else:
+                # 2) schema offers
+                offers = product_json.get("offers", {}) if isinstance(product_json, dict) else {}
+                price_text = format_price(offers.get("price") if isinstance(offers, dict) else None)
 
-        if price_text == "가격 미확인":
+        if _is_unknown_price(price_text):
             for selector in [
                 '[class*="CurrentPrice"]',
                 '[class*="CalculatedPrice"]',
@@ -1371,18 +1423,18 @@ def scrape_musinsa_product(
             ]:
                 for price_tag in soup.select(selector):
                     text = price_tag.get_text(separator=" ", strip=True)
-                    if "결제 시" in text and "할인" in text:
+                    if "??" in text and "??" in text:
                         continue
                     normalized = normalize_price(text)
-                    if normalized != "가격 미확인":
+                    if not _is_unknown_price(normalized):
                         price_text = normalized
                         break
-                if price_text != "가격 미확인":
+                if not _is_unknown_price(price_text):
                     break
 
-        if price_text == "가격 미확인":
+        if _is_unknown_price(price_text):
             page_text = soup.get_text()
-            matches = re.findall(r"(\d{1,3}(?:,\d{3})*)\s*원", page_text)
+            matches = re.findall(r"(\d{1,3}(?:,\d{3})*)\s*?", page_text)
             if matches:
                 price_text = normalize_price(matches[0])
 

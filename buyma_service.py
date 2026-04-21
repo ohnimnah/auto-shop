@@ -34,11 +34,33 @@ def format_price(price_value: object) -> str:
 
 
 def extract_discounted_product_price(soup: BeautifulSoup) -> str:
-    """Extract discounted product price (excluding coupon price)."""
+    """Extract Musinsa product price with priority: coupon > discounted > original."""
     if soup is None:
-        return "가격 미확인"
+        return "?? ???"
 
-    candidates: List[int] = []
+    def _to_prices(text: str) -> List[int]:
+        values: List[int] = []
+        for raw in re.findall(r"(\d{1,3}(?:,\d{3})*|\d{3,})", text or ""):
+            try:
+                value = int(str(raw).replace(",", ""))
+            except ValueError:
+                continue
+            if 1000 <= value <= 100000000:
+                values.append(value)
+        return values
+
+    def _extract_by_patterns(text: str, patterns: List[str]) -> List[int]:
+        values: List[int] = []
+        for pattern in patterns:
+            for raw in re.findall(pattern, text or "", re.IGNORECASE):
+                try:
+                    value = int(str(raw).replace(",", ""))
+                except ValueError:
+                    continue
+                if 1000 <= value <= 100000000:
+                    values.append(value)
+        return values
+
     selectors = [
         '[class*="CurrentPrice"]',
         '[class*="CalculatedPrice"]',
@@ -47,37 +69,47 @@ def extract_discounted_product_price(soup: BeautifulSoup) -> str:
         '[class*="sale_price"]',
         '[class*="price"]',
     ]
+    selector_texts: List[str] = []
     for selector in selectors:
         for tag in soup.select(selector):
             text = tag.get_text(" ", strip=True)
-            if not text or "쿠폰" in text:
-                continue
-            for raw in re.findall(r"(\d{1,3}(?:,\d{3})*)\s*원", text):
-                try:
-                    value = int(raw.replace(",", ""))
-                except ValueError:
-                    continue
-                if 1000 <= value <= 100000000:
-                    candidates.append(value)
+            if text:
+                selector_texts.append(text)
 
     page_text = soup.get_text(" ", strip=True)
-    patterns = [
-        r"(?:할인가|판매가|현재가)[^0-9]{0,20}(\d{1,3}(?:,\d{3})*)\s*원",
-        r"(\d{1,3}(?:,\d{3})*)\s*원[^가-힣A-Za-z0-9]{0,10}(?:할인)",
+    all_text = " ".join(selector_texts + [page_text])
+
+    coupon_patterns = [
+        r"(?:\ucfe0\ud3f0\s*\uc801\uc6a9\uac00|\ucfe0\ud3f0\uac00|\ucfe0\ud3f0\s*\ud560\uc778\uac00|coupon\s*price)[^0-9]{0,20}(\d{1,3}(?:,\d{3})*|\d{3,})",
+        r"(\d{1,3}(?:,\d{3})*|\d{3,})[^0-9]{0,20}(?:\ucfe0\ud3f0\s*\uc801\uc6a9\uac00|\ucfe0\ud3f0\uac00|\ucfe0\ud3f0\s*\ud560\uc778\uac00|coupon\s*price)",
     ]
-    for pattern in patterns:
-        for raw in re.findall(pattern, page_text, re.IGNORECASE):
-            try:
-                value = int(str(raw).replace(",", ""))
-            except ValueError:
-                continue
-            if 1000 <= value <= 100000000:
-                candidates.append(value)
+    coupon_candidates = _extract_by_patterns(all_text, coupon_patterns)
+    if coupon_candidates:
+        return f"{min(coupon_candidates):,}"
 
-    if not candidates:
-        return "가격 미확인"
-    return f"{min(candidates):,}"
+    discount_patterns = [
+        r"(?:\ud560\uc778\uac00|\uc138\uc77c\uac00|sale\s*price|discount(?:ed)?\s*price|\ud310\ub9e4\uac00|\ud604\uc7ac\uac00)[^0-9]{0,20}(\d{1,3}(?:,\d{3})*|\d{3,})",
+        r"(\d{1,3}(?:,\d{3})*|\d{3,})[^0-9]{0,20}(?:\ud560\uc778|\uc138\uc77c|sale|discount)",
+    ]
+    discount_candidates = _extract_by_patterns(all_text, discount_patterns)
+    if discount_candidates:
+        return f"{min(discount_candidates):,}"
 
+    original_patterns = [
+        r"(?:\uc815\uac00|\uc6d0\uac00|\uc18c\ube44\uc790\uac00|regular\s*price|original\s*price|list\s*price)[^0-9]{0,20}(\d{1,3}(?:,\d{3})*|\d{3,})",
+    ]
+    original_candidates = _extract_by_patterns(all_text, original_patterns)
+    if original_candidates:
+        return f"{min(original_candidates):,}"
+
+    fallback_candidates: List[int] = []
+    for text in selector_texts:
+        fallback_candidates.extend(_to_prices(text))
+    if not fallback_candidates:
+        fallback_candidates = _to_prices(page_text)
+    if fallback_candidates:
+        return f"{min(fallback_candidates):,}"
+    return "?? ???"
 
 def extract_yen_values(text: str) -> List[int]:
     """Extract JPY amount candidates from text."""
@@ -475,6 +507,12 @@ def fetch_buyma_lowest_price(driver, product_name: str, brand: str, musinsa_sku:
             combined_prices = list(detail_prices)
             if not combined_prices:
                 combined_prices.extend(listing_matched_prices)
+            if not combined_prices:
+                # Last-resort fallback: use visible listing card prices to avoid empty sell-price cell.
+                card_prices = [int(entry["price"]) for entry in candidate_entries if int(entry.get("price", 0)) >= 3000]
+                if card_prices:
+                    combined_prices.extend(card_prices)
+                    print(f"    [fallback] 관련도 미매칭으로 카드 최저가 사용: {min(card_prices):,}엔")
 
             if combined_prices:
                 unique_prices = sorted(set(combined_prices))
