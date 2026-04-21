@@ -136,11 +136,14 @@ SHEET_GIDS = list(DEFAULT_SHEET_GIDS)
 SHEET_NAME = DEFAULT_SHEET_NAME
 ROW_START = DEFAULT_ROW_START
 LISTING_QUEUE_SHEET_NAME = "목록 페이지 url"
+LISTING_QUEUE_SHEET_URL = ""
+# 미지정 시 런타임에 queue_sheet_name으로 자동 대체
+LISTING_SEED_SHEET_NAME = ""
 
 
 def _load_sheet_runtime_config() -> None:
     """런처에서 저장한 시트 설정을 읽어 런타임 기본값을 덮어쓴다."""
-    global SPREADSHEET_ID, SHEET_GIDS, SHEET_NAME, ROW_START
+    global SPREADSHEET_ID, SHEET_GIDS, SHEET_NAME, ROW_START, LISTING_QUEUE_SHEET_NAME, LISTING_QUEUE_SHEET_URL, LISTING_SEED_SHEET_NAME
     local_app_data = os.environ.get('LOCALAPPDATA', '').strip()
     if local_app_data:
         data_dir = os.path.join(local_app_data, 'auto_shop')
@@ -173,6 +176,18 @@ def _load_sheet_runtime_config() -> None:
         sname = (cfg.get('sheet_name') or '').strip()
         if sname:
             SHEET_NAME = sname
+
+        queue_sname = (cfg.get('queue_sheet_name') or '').strip()
+        if queue_sname:
+            LISTING_QUEUE_SHEET_NAME = queue_sname
+
+        seed_sname = (cfg.get('queue_seed_sheet_name') or '').strip()
+        if seed_sname:
+            LISTING_SEED_SHEET_NAME = seed_sname
+
+        queue_surl = (cfg.get('queue_sheet_url') or '').strip()
+        if queue_surl:
+            LISTING_QUEUE_SHEET_URL = queue_surl
 
         gids = cfg.get('sheet_gids')
         if isinstance(gids, list):
@@ -777,8 +792,13 @@ def parse_args():
     )
     parser.add_argument(
         "--queue-sheet-url",
-        default="",
+        default=LISTING_QUEUE_SHEET_URL,
         help="목록 수집 큐 시트 탭 URL(권장). gid로 탭 이름을 자동 해석",
+    )
+    parser.add_argument(
+        "--queue-seed-sheet-name",
+        default=LISTING_SEED_SHEET_NAME,
+        help="목록 수집 seed 전용 시트 이름(미지정 시 queue 시트와 동일)",
     )
     return parser.parse_args()
 
@@ -834,11 +854,13 @@ def main():
         )
         driver = setup_chrome_driver()
         try:
+            seed_sheet_name = (args.queue_seed_sheet_name or "").strip() or target_queue_sheet_name
             collect_listing_queue_once(
                 service=service,
                 driver=driver,
                 spreadsheet_id=target_spreadsheet_id,
                 queue_sheet_name=target_queue_sheet_name,
+                seed_sheet_name=seed_sheet_name,
                 get_sheet_header_map_fn=lambda svc, sname: svc_get_sheet_header_map(
                     svc,
                     target_spreadsheet_id,

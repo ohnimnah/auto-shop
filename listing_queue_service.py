@@ -37,6 +37,9 @@ def _now_text() -> str:
     return datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 
 
+SEED_READY_STATUSES = {"", "대기", "pending", "new"}
+
+
 def _col_letter(index: int) -> str:
     if index < 0:
         raise ValueError("index must be >= 0")
@@ -211,8 +214,9 @@ def _extract_page_num_from_url(url: str) -> int | None:
 def _collect_products_from_single_page(
     driver,
     target_url: str,
-) -> Tuple[List[Tuple[str, str]], int, int]:
-    """Return (products, href_candidate_count, malformed_count)."""
+) -> Tuple[List[Tuple[str, str]], int, int, int]:
+    """Return (products, href_candidate_count, malformed_count, expected_total)."""
+
     def _capture_product_hrefs() -> List[str]:
         return list(
             driver.execute_script(
@@ -239,11 +243,10 @@ def _collect_products_from_single_page(
     collected_hrefs = set(_capture_product_hrefs())
 
     def _detect_total_expected() -> int:
-        # Try to read total product count from visible text (e.g. "총 78개")
         text = str(driver.execute_script("return document.body ? document.body.innerText : ''") or "")
-        m = re.search(r"총\s*([0-9,]+)\s*개", text)
+        m = re.search(r"?\s*([0-9,]+)\s*?", text)
         if not m:
-            m = re.search(r"([0-9,]+)\s*개", text)
+            m = re.search(r"([0-9,]+)\s*?", text)
         if not m:
             return 0
         try:
@@ -271,7 +274,6 @@ def _collect_products_from_single_page(
             )
         )
 
-    # Infinite-scroll pages: keep scrolling until product link count stops growing.
     prev_count = -1
     stable_rounds = 0
     for _ in range(40):
@@ -281,7 +283,6 @@ def _collect_products_from_single_page(
         driver.execute_script("window.dispatchEvent(new Event('scroll'));")
         time.sleep(0.65)
 
-        # Some pages load on small delta-scroll events.
         driver.execute_script("window.scrollBy(0, -320);")
         driver.execute_script("window.scrollBy(0, 460);")
         time.sleep(0.35)
@@ -293,14 +294,11 @@ def _collect_products_from_single_page(
         else:
             stable_rounds += 1
 
-        # If we already reached detected total count, stop safely.
         if expected_total > 0 and len(collected_hrefs) >= expected_total:
             break
-
         if stable_rounds >= 6:
             break
 
-    # 일부 목록은 "더보기" 버튼으로 추가 로딩된다.
     for _ in range(8):
         for href in _capture_product_hrefs():
             collected_hrefs.add(href)
@@ -308,9 +306,9 @@ def _collect_products_from_single_page(
             """
             const candidates = Array.from(document.querySelectorAll('button, a[role="button"], a'));
             for (const el of candidates) {
-                const txt = (el.textContent || '').trim();
+                const txt = (el.textContent || '').trim().toLowerCase();
                 if (!txt) continue;
-                if (txt.includes('더보기') || txt.includes('더 보기') || txt.includes('more')) {
+                if (txt.includes('???') || txt.includes('more')) {
                     el.click();
                     return true;
                 }
@@ -324,7 +322,6 @@ def _collect_products_from_single_page(
         driver.execute_script("window.scrollTo(0, document.body.scrollHeight);")
         time.sleep(0.35)
 
-    # 더보기 이후 한 번 더 안정화 스크롤
     prev_count = -1
     stable_rounds = 0
     for _ in range(24):
@@ -344,13 +341,9 @@ def _collect_products_from_single_page(
         if stable_rounds >= 5:
             break
 
-    # final snapshot
     for href in _capture_product_hrefs():
         collected_hrefs.add(href)
 
-    # Recovery pass: after speed tuning, some infinite-scroll pages occasionally
-    # leave the very last batch unloaded. If we can see expected total and are
-    # still short, do a short conservative recovery scroll.
     if expected_total > 0 and len(collected_hrefs) < expected_total:
         prev_size = len(collected_hrefs)
         stable_rounds = 0
@@ -371,7 +364,6 @@ def _collect_products_from_single_page(
             if stable_rounds >= 4:
                 break
 
-    soup = BeautifulSoup(driver.page_source, "html.parser")
     products: List[Tuple[str, str]] = []
     seen = set()
     malformed_count = 0
@@ -392,17 +384,16 @@ def _collect_products_from_single_page(
         f"[queue] page collect snapshot: expected={expected_total or '-'} "
         f"captured_hrefs={len(collected_hrefs)} unique_products={len(products)}"
     )
-    return products, href_candidate_count, malformed_count
-
+    return products, href_candidate_count, malformed_count, expected_total
 
 def _collect_products_from_listing_page(
     driver,
     page_url: str,
     max_pages: int = 30,
-) -> Tuple[List[Tuple[str, str]], int, int]:
+) -> Tuple[List[Tuple[str, str]], int, int, Dict[str, int | bool]]:
     """Collect products from first listing page + pagination pages."""
-    # 1) 첫 페이지
-    first_products, first_href_cnt, first_malformed = _collect_products_from_single_page(driver, page_url)
+
+    first_products, first_href_cnt, first_malformed, first_expected_total = _collect_products_from_single_page(driver, page_url)
     first_soup = BeautifulSoup(driver.page_source, "html.parser")
     page_urls = _discover_pagination_urls(page_url, first_soup)
 
@@ -417,19 +408,44 @@ def _collect_products_from_listing_page(
         seen_ids.add(pid)
         all_products.append((pid, purl))
 
-    # Try to detect displayed total count from first page.
-    expected_total = 0
-    try:
-        body_text = str(driver.execute_script("return document.body ? document.body.innerText : ''") or "")
-        m = re.search(r"총\s*([0-9,]+)\s*개", body_text)
-        if not m:
-            m = re.search(r"([0-9,]+)\s*개", body_text)
-        if m:
-            expected_total = int(m.group(1).replace(",", ""))
-    except Exception:
-        expected_total = 0
+    expected_total = int(first_expected_total or 0)
+    if expected_total <= 0:
+        try:
+            body_text = str(driver.execute_script("return document.body ? document.body.innerText : ''") or "")
+            m = re.search(r"?\s*([0-9,]+)\s*?", body_text)
+            if not m:
+                m = re.search(r"([0-9,]+)\s*?", body_text)
+            if m:
+                expected_total = int(m.group(1).replace(",", ""))
+        except Exception:
+            expected_total = 0
 
-    # 2) 페이지네이션 링크 순회
+    plateau_detected = False
+    plateau_rounds = 0
+    last_snapshot = (expected_total, first_href_cnt, len(first_products))
+
+    def _check_plateau(expected_local: int, href_cnt: int, products: List[Tuple[str, str]], new_count: int, source: str) -> bool:
+        nonlocal plateau_detected, plateau_rounds, last_snapshot
+        snapshot = (expected_local or expected_total, href_cnt, len(products))
+        if (
+            new_count == 0
+            and snapshot == last_snapshot
+            and snapshot[0] > 0
+            and snapshot[2] < snapshot[0]
+        ):
+            plateau_rounds += 1
+        else:
+            plateau_rounds = 0
+        last_snapshot = snapshot
+        if plateau_rounds >= 2:
+            plateau_detected = True
+            print(
+                f"[queue] plateau detected at {source}: expected={snapshot[0]} "
+                f"captured_hrefs={snapshot[1]} unique_products={snapshot[2]}"
+            )
+            return True
+        return False
+
     traversed = 1
     tried_page_numbers = set([1])
     for next_url in page_urls:
@@ -438,32 +454,10 @@ def _collect_products_from_listing_page(
         detected_page_num = _extract_page_num_from_url(next_url)
         if detected_page_num is not None and detected_page_num in tried_page_numbers:
             continue
-        products, href_cnt, malformed_cnt = _collect_products_from_single_page(driver, next_url)
+        products, href_cnt, malformed_cnt, local_expected = _collect_products_from_single_page(driver, next_url)
         traversed += 1
         if detected_page_num is not None:
             tried_page_numbers.add(detected_page_num)
-        total_href_candidates += href_cnt
-        total_malformed += malformed_cnt
-        for pid, purl in products:
-            if pid in seen_ids:
-                continue
-            seen_ids.add(pid)
-            all_products.append((pid, purl))
-        if expected_total > 0 and len(seen_ids) >= expected_total:
-            return all_products, total_href_candidates, total_malformed
-
-    # 3) 링크 탐색으로 못 찾는 경우를 위해 page=n 강제 순회 보강
-    # - 한두 페이지만 보이는 UI에서도 전체 페이지 수집 가능
-    # - 신규가 2페이지 연속 0건이면 조기 종료
-    consecutive_empty = 0
-    # Important: always start from page=2 so we never skip the second page.
-    # Some UI link scans include duplicate/non-query anchors that can advance
-    # `traversed` without actually visiting page 2.
-    for page_num in range(2, max_pages + 1):
-        if page_num in tried_page_numbers:
-            continue
-        forced_url = _build_forced_page_url(page_url, page_num)
-        products, href_cnt, malformed_cnt = _collect_products_from_single_page(driver, forced_url)
         total_href_candidates += href_cnt
         total_malformed += malformed_cnt
 
@@ -475,6 +469,31 @@ def _collect_products_from_listing_page(
             all_products.append((pid, purl))
             new_count += 1
 
+        if _check_plateau(local_expected, href_cnt, products, new_count, f"pagination:{next_url}"):
+            break
+        if expected_total > 0 and len(seen_ids) >= expected_total:
+            break
+
+    consecutive_empty = 0
+    for page_num in range(2, max_pages + 1):
+        if page_num in tried_page_numbers:
+            continue
+        forced_url = _build_forced_page_url(page_url, page_num)
+        products, href_cnt, malformed_cnt, local_expected = _collect_products_from_single_page(driver, forced_url)
+        total_href_candidates += href_cnt
+        total_malformed += malformed_cnt
+
+        new_count = 0
+        for pid, purl in products:
+            if pid in seen_ids:
+                continue
+            seen_ids.add(pid)
+            all_products.append((pid, purl))
+            new_count += 1
+
+        if _check_plateau(local_expected, href_cnt, products, new_count, f"forced-page:{page_num}"):
+            break
+
         if new_count == 0:
             consecutive_empty += 1
         else:
@@ -483,36 +502,37 @@ def _collect_products_from_listing_page(
         if consecutive_empty >= 2:
             break
         if expected_total > 0 and len(seen_ids) >= expected_total:
-            return all_products, total_href_candidates, total_malformed
+            break
 
-    # 3-b) query key sweep for hidden pagination styles (page/pageNo/pageNum/p...)
-    if expected_total > 0 and len(seen_ids) < expected_total:
+    if expected_total > 0 and len(seen_ids) < expected_total and not plateau_detected:
         page_keys = ("page", "pageNo", "pageNum", "p", "pg")
-        # Avoid assuming fixed page-size(60). Musinsa listing pages can vary
-        # (e.g. 12/30/60) and that can miss late pages.
         max_needed_page = min(max_pages, max(2, (expected_total + 9) // 10 + 2))
         for key in page_keys:
             before_key_count = len(seen_ids)
             for page_num in range(2, max_needed_page + 1):
                 forced_url = _build_forced_page_url_by_key(page_url, key, page_num)
-                products, href_cnt, malformed_cnt = _collect_products_from_single_page(driver, forced_url)
+                products, href_cnt, malformed_cnt, local_expected = _collect_products_from_single_page(driver, forced_url)
                 total_href_candidates += href_cnt
                 total_malformed += malformed_cnt
+
+                new_count = 0
                 for pid, purl in products:
                     if pid in seen_ids:
                         continue
                     seen_ids.add(pid)
                     all_products.append((pid, purl))
+                    new_count += 1
+
+                if _check_plateau(local_expected, href_cnt, products, new_count, f"forced-key:{key}:{page_num}"):
+                    break
                 if expected_total > 0 and len(seen_ids) >= expected_total:
                     break
+
             if expected_total > 0 and len(seen_ids) >= expected_total:
                 break
-            # if this key did not add anything, quickly continue
             if len(seen_ids) == before_key_count:
                 continue
 
-    # 4) 스크롤형 + 클라이언트 페이지네이션("다음") 보강
-    #    - 일부 페이지는 URL page 파라미터보다 UI 클릭으로만 다음 데이터가 로드됨.
     def _try_click_next_page() -> bool:
         try:
             return bool(
@@ -543,9 +563,9 @@ def _collect_products_from_listing_page(
                       const title = (el.getAttribute('title') || '').toLowerCase();
                       const href = (el.getAttribute('href') || '').toLowerCase();
                       let score = 0;
-                      if (txt.includes('다음') || txt.includes('next')) score += 8;
-                      if (aria.includes('다음') || aria.includes('next')) score += 8;
-                      if (title.includes('다음') || title.includes('next')) score += 6;
+                      if (txt.includes('??') || txt.includes('next')) score += 8;
+                      if (aria.includes('??') || aria.includes('next')) score += 8;
+                      if (title.includes('??') || title.includes('next')) score += 6;
                       if (rel === 'next') score += 10;
                       if (href.includes('page=')) score += 3;
                       if (cls.includes('page') || cls.includes('pager') || cls.includes('pagination')) score += 3;
@@ -567,14 +587,21 @@ def _collect_products_from_listing_page(
         if not _try_click_next_page():
             break
         time.sleep(1.1)
-        products, href_cnt, malformed_cnt = _collect_products_from_single_page(driver, driver.current_url)
+        products, href_cnt, malformed_cnt, local_expected = _collect_products_from_single_page(driver, driver.current_url)
         total_href_candidates += href_cnt
         total_malformed += malformed_cnt
+
+        new_count = 0
         for pid, purl in products:
             if pid in seen_ids:
                 continue
             seen_ids.add(pid)
             all_products.append((pid, purl))
+            new_count += 1
+
+        if _check_plateau(local_expected, href_cnt, products, new_count, "next-click"):
+            break
+
         after = len(seen_ids)
         if after == before:
             unchanged_rounds += 1
@@ -583,8 +610,12 @@ def _collect_products_from_listing_page(
         if unchanged_rounds >= 2:
             break
 
-    return all_products, total_href_candidates, total_malformed
-
+    meta = {
+        'plateau_detected': bool(plateau_detected),
+        'expected_total': int(expected_total or 0),
+        'captured_total': int(len(seen_ids)),
+    }
+    return all_products, total_href_candidates, total_malformed, meta
 
 def _read_all_queue_rows(
     service,
@@ -611,6 +642,54 @@ def _read_all_queue_rows(
         rows.append((row_num, mapped))
     return rows
 
+
+
+
+def _read_seed_urls_from_seed_sheet(
+    service,
+    spreadsheet_id: str,
+    seed_sheet_name: str,
+    row_start: int = 2,
+    row_end: int = 5000,
+) -> List[Tuple[int, str]]:
+    """Read seed URLs from seed-only tab (A=url, C=status)."""
+    result = service.spreadsheets().values().get(
+        spreadsheetId=spreadsheet_id,
+        range=f"'{seed_sheet_name}'!A{row_start}:D{row_end}",
+    ).execute()
+    values = result.get('values', [])
+
+    rows: List[Tuple[int, str]] = []
+    for offset, row in enumerate(values):
+        row_num = row_start + offset
+        page_url = (row[0] if len(row) > 0 else '').strip()
+        collect_status = (row[2] if len(row) > 2 else '').strip().lower()
+        if collect_status and collect_status not in SEED_READY_STATUSES:
+            continue
+        if page_url and _is_http_url(page_url):
+            rows.append((row_num, page_url))
+    return rows
+
+
+def _update_seed_row_simple(
+    service,
+    spreadsheet_id: str,
+    sheet_name: str,
+    row_num: int,
+    status: str,
+    note: str,
+) -> None:
+    """Update seed-only tab row (B=????, C=????, D=??)."""
+    now = _now_text()
+    data = [
+        {'range': f"'{sheet_name}'!B{row_num}", 'values': [[now]]},
+        {'range': f"'{sheet_name}'!C{row_num}", 'values': [[status]]},
+        {'range': f"'{sheet_name}'!D{row_num}", 'values': [[note]]},
+    ]
+    service.spreadsheets().values().batchUpdate(
+        spreadsheetId=spreadsheet_id,
+        body={'valueInputOption': 'USER_ENTERED', 'data': data},
+    ).execute()
 
 def _update_seed_row(service, spreadsheet_id: str, sheet_name: str, row_num: int, header_map: Dict[str, int], status: str, note: str) -> None:
     now = _now_text()
@@ -655,37 +734,56 @@ def collect_listing_queue_once(
     driver,
     spreadsheet_id: str,
     queue_sheet_name: str,
+    seed_sheet_name: str,
     get_sheet_header_map_fn,
 ) -> Dict[str, int]:
-    """Collect product URLs/IDs from listing page queue sheet."""
+    """Collect product URLs/IDs from listing page seed sheet into queue sheet."""
     header_map = get_sheet_header_map_fn(service, queue_sheet_name)
     missing_headers = [h for h in QUEUE_HEADERS if h not in header_map]
     if missing_headers:
-        raise RuntimeError(f"큐 시트 헤더 누락: {', '.join(missing_headers)}")
+        raise RuntimeError(f"? ?? ?? ??: {', '.join(missing_headers)}")
 
     rows = _read_all_queue_rows(service, spreadsheet_id, queue_sheet_name, header_map)
 
     existing_ids = set()
-    seed_rows: List[Tuple[int, str]] = []
-    for row_num, row in rows:
-        page_url = row.get("페이지URL", "").strip()
-        product_id = row.get("상품ID", "").strip()
+    for _row_num, row in rows:
+        product_id = row.get(QUEUE_HEADERS[1], '').strip()
         if product_id:
             existing_ids.add(product_id)
-        if page_url and not product_id and _is_http_url(page_url):
-            seed_rows.append((row_num, page_url))
 
-    summary = {"seed_rows": len(seed_rows), "new_rows": 0, "duplicate_rows": 0, "error_rows": 0}
+    use_seed_sheet = bool(seed_sheet_name and seed_sheet_name != queue_sheet_name)
+    if use_seed_sheet:
+        seed_rows = _read_seed_urls_from_seed_sheet(
+            service=service,
+            spreadsheet_id=spreadsheet_id,
+            seed_sheet_name=seed_sheet_name,
+        )
+        print(f"[queue] seed ?? ?? ??: '{seed_sheet_name}'")
+    else:
+        seed_rows: List[Tuple[int, str]] = []
+        page_url_header = QUEUE_HEADERS[0]
+        product_id_header = QUEUE_HEADERS[1]
+        collect_status_header = QUEUE_HEADERS[4]
+        for row_num, row in rows:
+            page_url = row.get(page_url_header, '').strip()
+            product_id = row.get(product_id_header, '').strip()
+            collect_status = row.get(collect_status_header, '').strip().lower()
+            if collect_status not in SEED_READY_STATUSES:
+                continue
+            if page_url and not product_id and _is_http_url(page_url):
+                seed_rows.append((row_num, page_url))
+
+    summary = {'seed_rows': len(seed_rows), 'new_rows': 0, 'duplicate_rows': 0, 'error_rows': 0}
 
     if not seed_rows:
-        print(f"[queue] '{queue_sheet_name}' 시트: 수집할 페이지URL(seed row)이 없습니다.")
+        print(f"[queue] '{queue_sheet_name}' ??: ??? ???URL(seed row)? ????.")
         return summary
 
-    print(f"[queue] '{queue_sheet_name}' 시트: 페이지URL {len(seed_rows)}건 수집 시작")
+    print(f"[queue] '{queue_sheet_name}' ??: ???URL {len(seed_rows)}? ?? ??")
 
     for row_num, page_url in seed_rows:
         try:
-            collected, href_candidates, malformed_count = _collect_products_from_listing_page(driver, page_url)
+            collected, href_candidates, malformed_count, collect_meta = _collect_products_from_listing_page(driver, page_url)
             append_values: List[List[str]] = []
             duplicate_count = 0
 
@@ -695,29 +793,38 @@ def collect_listing_queue_once(
                     continue
                 existing_ids.add(product_id)
                 append_values.append([
-                    page_url,
+                    "",
                     product_id,
                     product_url,
                     _now_text(),
-                    "수집완료",
-                    "대기",
-                    "",
+                    '????',
+                    '??',
+                    '',
                 ])
 
             if append_values:
                 service.spreadsheets().values().append(
                     spreadsheetId=spreadsheet_id,
                     range=f"'{queue_sheet_name}'!A:G",
-                    valueInputOption="USER_ENTERED",
-                    insertDataOption="INSERT_ROWS",
-                    body={"values": append_values},
+                    valueInputOption='USER_ENTERED',
+                    insertDataOption='INSERT_ROWS',
+                    body={'values': append_values},
                 ).execute()
-                summary["new_rows"] += len(append_values)
+                summary['new_rows'] += len(append_values)
 
-            summary["duplicate_rows"] += duplicate_count
+            summary['duplicate_rows'] += duplicate_count
 
-            if len(append_values) > 0:
-                note = NOTE_DUPLICATE if duplicate_count > 0 else ""
+            plateau_detected = bool((collect_meta or {}).get("plateau_detected"))
+            expected_total = int((collect_meta or {}).get("expected_total") or 0)
+            captured_total = int((collect_meta or {}).get("captured_total") or 0)
+            if plateau_detected and expected_total > 0 and captured_total < expected_total:
+                note = NOTE_DATA_MISSING
+                print(
+                    f"[queue] plateau summary: expected={expected_total} "
+                    f"captured={captured_total} -> note={NOTE_DATA_MISSING}"
+                )
+            elif len(append_values) > 0:
+                note = NOTE_DUPLICATE if duplicate_count > 0 else ''
             else:
                 if href_candidates == 0:
                     note = NOTE_NO_PRODUCT
@@ -728,35 +835,55 @@ def collect_listing_queue_once(
                 else:
                     note = NOTE_NO_PRODUCT
 
-            _update_seed_row(
-                service=service,
-                spreadsheet_id=spreadsheet_id,
-                sheet_name=queue_sheet_name,
-                row_num=row_num,
-                header_map=header_map,
-                status="수집완료",
-                note=note,
-            )
-            print(f"[queue] {row_num}행 완료: 신규 {len(append_values)}건 / 중복 {duplicate_count}건 / 비고 {note or '-'}")
-        except Exception as exc:
-            summary["error_rows"] += 1
-            note = _classify_exception(exc)
-            try:
+            if use_seed_sheet:
+                _update_seed_row_simple(
+                    service=service,
+                    spreadsheet_id=spreadsheet_id,
+                    sheet_name=seed_sheet_name,
+                    row_num=row_num,
+                    status='????',
+                    note=note,
+                )
+            else:
                 _update_seed_row(
                     service=service,
                     spreadsheet_id=spreadsheet_id,
                     sheet_name=queue_sheet_name,
                     row_num=row_num,
                     header_map=header_map,
-                    status="오류",
+                    status='????',
                     note=note,
                 )
+            print(f"[queue] {row_num}? ??: ?? {len(append_values)}? / ?? {duplicate_count}? / ?? {note or '-'}")
+        except Exception as exc:
+            summary['error_rows'] += 1
+            note = _classify_exception(exc)
+            try:
+                if use_seed_sheet:
+                    _update_seed_row_simple(
+                        service=service,
+                        spreadsheet_id=spreadsheet_id,
+                        sheet_name=seed_sheet_name,
+                        row_num=row_num,
+                        status='??',
+                        note=note,
+                    )
+                else:
+                    _update_seed_row(
+                        service=service,
+                        spreadsheet_id=spreadsheet_id,
+                        sheet_name=queue_sheet_name,
+                        row_num=row_num,
+                        header_map=header_map,
+                        status='??',
+                        note=note,
+                    )
             except Exception:
                 pass
-            print(f"[queue] {row_num}행 오류: {note} ({exc})")
+            print(f"[queue] {row_num}? ??: {note} ({exc})")
 
     print(
-        f"[queue] 수집 종료: seed={summary['seed_rows']} 신규={summary['new_rows']} "
-        f"중복={summary['duplicate_rows']} 오류={summary['error_rows']}"
+        f"[queue] ?? ??: seed={summary['seed_rows']} ??={summary['new_rows']} "
+        f"??={summary['duplicate_rows']} ??={summary['error_rows']}"
     )
     return summary
