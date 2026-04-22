@@ -1,4 +1,4 @@
-"""BUYMA upload orchestration.
+﻿"""BUYMA upload orchestration.
 
 This module keeps browser form-filling callbacks injected from the legacy
 entrypoint so behavior stays stable while orchestration moves out of
@@ -410,6 +410,57 @@ def apply_buyma_post_option_fields(
             print("  △ OCS 체크박스를 찾지 못했습니다. 수동 선택 필요")
     except Exception as exc:
         print(f"  ✗ 배송방법 선택 실패: {exc}")
+
+    # 관세 관련 체크박스 자동 선택
+    try:
+        customs_checked = driver.execute_script("""
+            function norm(t) {
+                return (t || '').replace(/\\s+/g, ' ').trim().toLowerCase();
+            }
+            var keywords = ['関税', '관세', 'duty', 'customs'];
+            var rows = document.querySelectorAll('.bmm-c-form-table__table tbody tr, .bmm-c-field, .bmm-c-form-table tr');
+            for (var i = 0; i < rows.length; i++) {
+                var text = norm(rows[i].textContent || '');
+                var matched = false;
+                for (var k = 0; k < keywords.length; k++) {
+                    if (text.indexOf(keywords[k]) >= 0) {
+                        matched = true;
+                        break;
+                    }
+                }
+                if (!matched) continue;
+
+                var cb = rows[i].querySelector('input[type="checkbox"]');
+                if (!cb) {
+                    var labels = rows[i].querySelectorAll('label');
+                    for (var j = 0; j < labels.length; j++) {
+                        var forId = labels[j].getAttribute('for') || '';
+                        if (!forId) continue;
+                        var linked = document.getElementById(forId);
+                        if (linked && linked.type === 'checkbox') {
+                            cb = linked;
+                            break;
+                        }
+                    }
+                }
+
+                if (cb && !cb.checked) {
+                    cb.click();
+                    return 'clicked';
+                } else if (cb && cb.checked) {
+                    return 'already';
+                }
+            }
+            return 'not_found';
+        """)
+        if customs_checked == "clicked":
+            print("  ✓ 관세 관련 체크박스 선택 완료")
+        elif customs_checked == "already":
+            print("  ✓ 관세 관련 체크박스 이미 선택됨")
+        else:
+            print("  △ 관세 관련 체크박스를 찾지 못했습니다.")
+    except Exception as exc:
+        print(f"  ⚠ 관세 관련 체크 실패: {exc}")
 
     buyma_price = payload["buyma_price_digits"]
     if buyma_price:
