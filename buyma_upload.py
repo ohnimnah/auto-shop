@@ -12,6 +12,7 @@ Usage:
 """
 
 import argparse
+from datetime import datetime, timedelta
 import glob
 import json
 import os
@@ -24,7 +25,7 @@ if sys.stdout.encoding and sys.stdout.encoding.lower().replace("-", "") in ("cp9
     sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding="utf-8", errors="replace")
     sys.stderr = io.TextIOWrapper(sys.stderr.buffer, encoding="utf-8", errors="replace")
 import time
-from typing import Dict, List, Tuple
+from typing import Any, Dict, List, Tuple
 
 # 전체 대기시간 스케일링: 환경변수 AUTO_SHOP_WAIT_SCALE (기본 0.6)
 _RAW_SLEEP = time.sleep
@@ -70,6 +71,29 @@ STATUS_UPLOADING = "업로드중"
 STATUS_COMPLETED = "출품완료"
 JP_SHITEI_NASHI = buyma_selectors.JP_SHITEI_NASHI  # 指定なし
 JP_SIZE_SHITEI_NASHI = buyma_selectors.JP_SIZE_SHITEI_NASHI  # サイズ指定なし
+CATEGORY_MAPPING_CANDIDATES_SHEET = "category_mapping_candidates"
+CATEGORY_MAPPING_CANDIDATES_COLUMNS = [
+    "collected_at",
+    "product_name",
+    "musinsa_sku",
+    "product_url",
+    "standard_category",
+    "gender",
+    "musinsa_category_large",
+    "musinsa_category_middle",
+    "musinsa_category_small",
+    "target_buyma_parent_category",
+    "target_buyma_middle_category",
+    "target_buyma_child_category",
+    "actual_selected_parent_category",
+    "actual_selected_middle_category",
+    "actual_selected_child_category",
+    "failure_stage",
+    "fallback_used",
+    "final_result",
+    "review_status",
+    "reviewer_note",
+]
 
 
 def get_runtime_data_dir() -> str:
@@ -507,6 +531,178 @@ def get_sheet_name(service) -> str:
 column_index_to_letter = common_sheet_source_mod.column_index_to_letter
 
 
+def _quote_sheet_name(sheet_name: str) -> str:
+    return sheet_name.replace("'", "''")
+
+
+def _ensure_category_mapping_candidates_sheet(service) -> None:
+    metadata = service.spreadsheets().get(
+        spreadsheetId=SPREADSHEET_ID,
+        fields="sheets(properties(sheetId,title))",
+    ).execute()
+    sheets = metadata.get("sheets", [])
+    title_to_id = {
+        (s.get("properties", {}) or {}).get("title", ""): (s.get("properties", {}) or {}).get("sheetId")
+        for s in sheets
+    }
+
+    if CATEGORY_MAPPING_CANDIDATES_SHEET not in title_to_id:
+        service.spreadsheets().batchUpdate(
+            spreadsheetId=SPREADSHEET_ID,
+            body={
+                "requests": [
+                    {
+                        "addSheet": {
+                            "properties": {
+                                "title": CATEGORY_MAPPING_CANDIDATES_SHEET,
+                            }
+                        }
+                    }
+                ]
+            },
+        ).execute()
+
+    last_col = column_index_to_letter(len(CATEGORY_MAPPING_CANDIDATES_COLUMNS) - 1)
+    service.spreadsheets().values().update(
+        spreadsheetId=SPREADSHEET_ID,
+        range=f"'{_quote_sheet_name(CATEGORY_MAPPING_CANDIDATES_SHEET)}'!A1:{last_col}1",
+        valueInputOption="RAW",
+        body={"values": [CATEGORY_MAPPING_CANDIDATES_COLUMNS]},
+    ).execute()
+
+
+def _normalize_candidate_gender(row_data: Dict[str, str], product_name: str) -> str:
+    raw = (row_data.get("musinsa_category_large") or "").strip()
+    raw_lower = raw.lower()
+    if raw in {"여성", "남성"}:
+        return raw
+    if "여성" in raw or "woman" in raw_lower or "women" in raw_lower:
+        return "여성"
+    if "남성" in raw or "man" in raw_lower or "men" in raw_lower:
+        return "남성"
+
+    detected = buyma_category_mod.detect_gender_raw(product_name or "")
+    if detected == "F":
+        return "여성"
+    if detected == "M":
+        return "남성"
+    return ""
+
+
+def _parse_candidate_collected_at(raw: str) -> datetime | None:
+    text = (raw or "").strip()
+    if not text:
+        return None
+    for fmt in ("%Y-%m-%d %H:%M:%S", "%Y-%m-%dT%H:%M:%S"):
+        try:
+            return datetime.strptime(text, fmt)
+        except Exception:
+            pass
+    try:
+        return datetime.fromisoformat(text)
+    except Exception:
+        return None
+
+
+def _build_candidate_dedupe_keys(candidate: Dict[str, str]) -> Tuple[Tuple[str, ...], Tuple[str, ...]]:
+    primary = (
+        (candidate.get("musinsa_sku") or "").strip(),
+        (candidate.get("failure_stage") or "").strip(),
+        (candidate.get("target_buyma_parent_category") or "").strip(),
+        (candidate.get("target_buyma_middle_category") or "").strip(),
+        (candidate.get("target_buyma_child_category") or "").strip(),
+        (candidate.get("final_result") or "").strip(),
+    )
+    fallback = (
+        (candidate.get("product_url") or "").strip(),
+        (candidate.get("product_name") or "").strip(),
+        (candidate.get("failure_stage") or "").strip(),
+        (candidate.get("target_buyma_parent_category") or "").strip(),
+        (candidate.get("target_buyma_middle_category") or "").strip(),
+        (candidate.get("target_buyma_child_category") or "").strip(),
+    )
+    return primary, fallback
+
+
+def _is_duplicate_candidate_within_24h(
+    service,
+    candidate: Dict[str, str],
+    *,
+    recent_limit: int = 1000,
+) -> bool:
+    last_col = column_index_to_letter(len(CATEGORY_MAPPING_CANDIDATES_COLUMNS) - 1)
+    response = service.spreadsheets().values().get(
+        spreadsheetId=SPREADSHEET_ID,
+        range=f"'{_quote_sheet_name(CATEGORY_MAPPING_CANDIDATES_SHEET)}'!A2:{last_col}",
+    ).execute()
+    rows = response.get("values", [])
+    if not rows:
+        return False
+
+    recent_rows = rows[-max(1, recent_limit):]
+    now = datetime.now()
+    threshold = now - timedelta(hours=24)
+    primary_key, fallback_key = _build_candidate_dedupe_keys(candidate)
+    use_primary = bool(primary_key[0])
+
+    idx = {name: i for i, name in enumerate(CATEGORY_MAPPING_CANDIDATES_COLUMNS)}
+    for row in reversed(recent_rows):
+        collected = _parse_candidate_collected_at(row[idx["collected_at"]] if idx["collected_at"] < len(row) else "")
+        if not collected or collected < threshold:
+            continue
+
+        row_candidate = {name: (row[i] if i < len(row) else "") for name, i in idx.items()}
+        row_primary, row_fallback = _build_candidate_dedupe_keys(row_candidate)
+        if use_primary:
+            if row_primary == primary_key:
+                return True
+        elif row_fallback == fallback_key:
+            return True
+    return False
+
+
+def _append_category_candidate_row(service, row_data: Dict[str, str], category_diag: Dict[str, Any]) -> None:
+    _ensure_category_mapping_candidates_sheet(service)
+
+    product_name = (row_data.get("product_name_kr") or "").strip()
+    candidate: Dict[str, str] = {
+        "collected_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+        "product_name": product_name,
+        "musinsa_sku": str(row_data.get("musinsa_sku", "") or ""),
+        "product_url": str(row_data.get("url", "") or ""),
+        "standard_category": str(category_diag.get("standard_category", "") or ""),
+        "gender": _normalize_candidate_gender(row_data, product_name),
+        "musinsa_category_large": str(row_data.get("musinsa_category_large", "") or ""),
+        "musinsa_category_middle": str(row_data.get("musinsa_category_middle", "") or ""),
+        "musinsa_category_small": str(row_data.get("musinsa_category_small", "") or ""),
+        "target_buyma_parent_category": str(category_diag.get("target_buyma_parent_category", "") or ""),
+        "target_buyma_middle_category": str(category_diag.get("target_buyma_middle_category", "") or ""),
+        "target_buyma_child_category": str(category_diag.get("target_buyma_child_category", "") or ""),
+        "actual_selected_parent_category": str(category_diag.get("actual_selected_parent_category", "") or ""),
+        "actual_selected_middle_category": str(category_diag.get("actual_selected_middle_category", "") or ""),
+        "actual_selected_child_category": str(category_diag.get("actual_selected_child_category", "") or ""),
+        "failure_stage": str(category_diag.get("failure_stage", "") or ""),
+        "fallback_used": "TRUE" if bool(category_diag.get("fallback_used", False)) else "FALSE",
+        "final_result": str(category_diag.get("final_result", "") or ""),
+        "review_status": "NEW",
+        "reviewer_note": "",
+    }
+
+    if _is_duplicate_candidate_within_24h(service, candidate):
+        print("  ℹ category_mapping_candidates 중복(24h)으로 기록 생략")
+        return
+
+    row_values = [candidate.get(col, "") for col in CATEGORY_MAPPING_CANDIDATES_COLUMNS]
+    service.spreadsheets().values().append(
+        spreadsheetId=SPREADSHEET_ID,
+        range=f"'{_quote_sheet_name(CATEGORY_MAPPING_CANDIDATES_SHEET)}'!A:A",
+        valueInputOption="USER_ENTERED",
+        insertDataOption="INSERT_ROWS",
+        body={"values": [row_values]},
+    ).execute()
+    print("  ✓ category_mapping_candidates 후보 기록 완료")
+
+
 def get_sheet_header_map(service, sheet_name: str) -> Dict[str, int]:
     return common_sheet_source_mod.get_sheet_header_map(service, SPREADSHEET_ID, sheet_name, HEADER_ROW)
 
@@ -632,7 +828,7 @@ def _handle_success_after_fill(driver, row_num: int, upload_mode: str, interacti
     )
 
 
-def _fill_buyma_form_via_modules(driver, row_data: Dict[str, str]) -> str:
+def _fill_buyma_form_via_modules(driver, row_data: Dict[str, str]) -> Dict[str, Any]:
     """Assemble BUYMA form-fill from marketplace modules."""
     return buyma_uploader_mod.fill_buyma_form(
         driver,
@@ -695,6 +891,7 @@ def _upload_buyma_rows_via_modules(
         update_cell_by_header=update_cell_by_header,
         fill_buyma_form=fill_buyma_form,
         handle_success_after_fill=_handle_success_after_fill,
+        append_category_candidate=_append_category_candidate_row,
         safe_input=_safe_input,
         progress_status_header=PROGRESS_STATUS_HEADER,
         status_uploading=STATUS_UPLOADING,
@@ -708,7 +905,7 @@ BUYMA_UPLOADER = buyma_uploader_mod.BuymaUploaderAdapter(
 )
 
 
-def fill_buyma_form(driver, row_data: Dict[str, str]) -> str:
+def fill_buyma_form(driver, row_data: Dict[str, str]) -> Dict[str, Any]:
     """바이마 출품 시 상품 정보를 자동 입력한다.
     바이마는 React 기반 bmm-c-* 컴포넌트를 사용하며 name/id 속성이 없음."""
     return BUYMA_UPLOADER.fill_form(driver, row_data)

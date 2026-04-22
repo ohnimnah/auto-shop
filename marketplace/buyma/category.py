@@ -1,4 +1,4 @@
-"""BUYMA category and gender inference helpers."""
+﻿"""BUYMA category and gender inference helpers."""
 
 from __future__ import annotations
 
@@ -300,16 +300,36 @@ def apply_buyma_category_selection(
     *,
     select_category_by_arrow: Callable[[object, int, str], bool],
     find_best_option_by_arrow: Callable[[object, int, str, bool], bool],
-) -> None:
-    """Apply BUYMA category plan to the browser UI."""
+) -> Dict[str, object]:
+    """Apply BUYMA category plan to the browser UI and return diagnostics."""
     cat1 = category_plan["cat1"]
     cat2 = category_plan["cat2"]
     cat3 = category_plan["cat3"]
     cat_source = category_plan["cat_source"]
 
+    diag: Dict[str, object] = {
+        "category_selection_success": False,
+        "failure_stage": "",
+        "final_result": "",
+        "fallback_used": False,
+        "standard_category": category_plan.get("standard_category", ""),
+        "cat_source": category_plan.get("cat_source", ""),
+        "semantic_fallback_used": bool(category_plan.get("semantic_fallback_used", False)),
+        "target_buyma_parent_category": cat1,
+        "target_buyma_middle_category": cat2,
+        "target_buyma_child_category": cat3,
+        "actual_selected_parent_category": "",
+        "actual_selected_middle_category": "",
+        "actual_selected_child_category": "",
+        "mapping_table_used": bool(category_plan.get("mapping_table_used", False)),
+        "legacy_used": bool(category_plan.get("legacy_used", False)),
+    }
+
     if not cat1 or not cat2:
-        print("  ✗ 카테고리 추론 불가, 자동 선택 필요")
-        return
+        print("  △ 카테고리 추론 불가, 수동 선택 필요")
+        diag["failure_stage"] = "plan_invalid"
+        diag["final_result"] = "failed"
+        return diag
 
     print(f"  카테고리({cat_source}): {cat1} > {cat2} > {cat3}")
     selected_cat1 = select_category_by_arrow(driver, 0, cat1)
@@ -323,18 +343,27 @@ def apply_buyma_category_selection(
         if f1 and f2:
             print(f"  △ 시트 카테고리 미매칭, 자동추론 fallback: {f1} > {f2} > {f3}")
             cat1, cat2, cat3 = f1, f2, f3
+            diag["fallback_used"] = True
+            diag["target_buyma_parent_category"] = cat1
+            diag["target_buyma_middle_category"] = cat2
+            diag["target_buyma_child_category"] = cat3
             selected_cat1 = select_category_by_arrow(driver, 0, cat1)
             if not selected_cat1:
                 selected_cat1 = find_best_option_by_arrow(driver, 0, cat1, False)
 
     if not selected_cat1:
         print(f"  △ 대카테 '{cat1}' 미발견, 자동 선택 필요")
-        return
+        diag["failure_stage"] = "parent"
+        diag["final_result"] = "failed"
+        return diag
 
-    print(f"  대카테: {cat1}")
+    diag["actual_selected_parent_category"] = cat1
+    print(f"  ✓ 대카테: {cat1}")
     if not cat2 or not find_best_option_by_arrow(driver, 1, cat2):
         print(f"  △ 중카테 '{cat2}' 미발견, その他도 없음")
-        return
+        diag["failure_stage"] = "middle"
+        diag["final_result"] = "failed"
+        return diag
 
     sel_val = driver.execute_script(
         """
@@ -344,17 +373,26 @@ def apply_buyma_category_selection(
         return v ? v.textContent.trim() : '';
         """
     )
+    diag["actual_selected_middle_category"] = sel_val or cat2
     if "その他" in sel_val and sel_val != cat2:
         print(f"  ✓ 중카테: {cat2} -> その他 (기타)")
+        diag["failure_stage"] = "middle_other"
+        diag["final_result"] = "other"
     else:
         print(f"  ✓ 중카테: {sel_val or cat2}")
 
     if not cat3:
-        return
+        diag["category_selection_success"] = True
+        if not diag["final_result"]:
+            diag["final_result"] = "success"
+        return diag
 
     items_count = len(driver.find_elements(By.CSS_SELECTOR, ".sell-category__item"))
     if items_count < 3:
-        return
+        diag["category_selection_success"] = True
+        if not diag["final_result"]:
+            diag["final_result"] = "success"
+        return diag
 
     if find_best_option_by_arrow(driver, 2, cat3):
         sel_val3 = driver.execute_script(
@@ -365,12 +403,24 @@ def apply_buyma_category_selection(
             return v ? v.textContent.trim() : '';
             """
         )
+        diag["actual_selected_child_category"] = sel_val3 or cat3
         if "その他" in (sel_val3 or "") and sel_val3 != cat3:
             print(f"  ✓ 소카테: {cat3} -> その他 (기타)")
+            if not diag["failure_stage"]:
+                diag["failure_stage"] = "child_other"
+            diag["final_result"] = "other"
         else:
             print(f"  ✓ 소카테: {sel_val3 or cat3}")
     else:
         print(f"  △ 소카테 '{cat3}' 미발견, その他도 없음")
+        diag["failure_stage"] = "child"
+        diag["final_result"] = "failed"
+        return diag
+
+    diag["category_selection_success"] = True
+    if not diag["final_result"]:
+        diag["final_result"] = "success"
+    return diag
 
 
 def get_category_select_el(driver, item_index: int):

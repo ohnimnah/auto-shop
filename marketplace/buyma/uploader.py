@@ -9,7 +9,7 @@ from __future__ import annotations
 
 from datetime import datetime, timedelta
 import re
-from typing import Callable, Dict, List
+from typing import Any, Callable, Dict, List
 
 from marketplace.buyma.mapper import buyma_title_units
 from marketplace.common.interfaces import MarketplaceRow, MarketplaceUploader
@@ -32,8 +32,9 @@ def upload_products(
     setup_visible_chrome_driver: Callable[[], object],
     wait_for_buyma_login: Callable[[object], bool],
     update_cell_by_header: Callable[[object, str, int, Dict[str, int], str, str], bool],
-    fill_buyma_form: Callable[[object, Dict[str, str]], str],
+    fill_buyma_form: Callable[[object, Dict[str, str]], object],
     handle_success_after_fill: Callable[[object, int, str, bool], tuple[bool, bool]],
+    append_category_candidate: Callable[[object, Dict[str, str], Dict[str, Any]], None] | None = None,
     safe_input: Callable[[str], str],
     progress_status_header: str,
     status_uploading: str,
@@ -86,7 +87,13 @@ def upload_products(
                 print(f"  {row_num}행 상태 업데이트: {status_uploading}")
             processed += 1
 
-            fill_result = fill_buyma_form(driver, row_data)
+            fill_output = fill_buyma_form(driver, row_data)
+            if isinstance(fill_output, dict):
+                fill_result = str(fill_output.get("result", "error"))
+                category_diag = dict(fill_output.get("category_diag") or {})
+            else:
+                fill_result = str(fill_output)
+                category_diag = {}
 
             if fill_result == "success":
                 should_continue, fully_submitted = handle_success_after_fill(
@@ -107,6 +114,7 @@ def upload_products(
                         status_completed,
                     ):
                         print(f"  {row_num}행 상태 업데이트: {status_completed}")
+                    category_diag["final_result"] = "success"
                 elif upload_mode == "auto":
                     if update_cell_by_header(
                         service,
@@ -117,9 +125,17 @@ def upload_products(
                         "오류",
                     ):
                         print(f"  {row_num}행 상태 업데이트: 오류")
+                    if not category_diag.get("final_result"):
+                        category_diag["final_result"] = "failed"
             elif fill_result == "manual_review":
                 print(f"  {row_num}행은 상품명 등 수동 확인이 필요합니다. 현재 브라우저 화면을 확인해주세요.")
+                category_diag["final_result"] = "manual_review"
                 keep_browser_open = True
+                if append_category_candidate:
+                    try:
+                        append_category_candidate(service, row_data, category_diag)
+                    except Exception as exc:
+                        print(f"  △ category_mapping_candidates 기록 실패: {exc}")
                 if interactive:
                     safe_input("  수정 또는 확인 후 Enter를 눌러주세요..")
                 return
@@ -134,8 +150,20 @@ def upload_products(
                     "오류",
                 ):
                     print(f"  {row_num}행 상태 업데이트: 오류")
+                if not category_diag.get("final_result"):
+                    category_diag["final_result"] = "error"
                 if interactive:
                     safe_input("  Enter를 눌러 다음으로 진행...")
+
+            # 후보 기록: 기타/실패/manual_review 중심
+            if append_category_candidate:
+                final_result = str(category_diag.get("final_result", "") or "").lower()
+                failure_stage = str(category_diag.get("failure_stage", "") or "")
+                if final_result in {"other", "failed", "error", "manual_review"} or failure_stage:
+                    try:
+                        append_category_candidate(service, row_data, category_diag)
+                    except Exception as exc:
+                        print(f"  △ category_mapping_candidates 기록 실패: {exc}")
 
         print(f"\n모든 상품 처리 완료! ({len(rows)}건)")
 
@@ -832,8 +860,9 @@ def fill_buyma_form(
     enable_size_selection_ui,
     fill_size_text_inputs,
     fill_size_supplement,
-) -> str:
+) -> Dict[str, Any]:
     """Marketplace BUYMA form fill orchestration."""
+    category_diag: Dict[str, Any] = {}
     try:
         try:
             payload = build_buyma_form_payload(
@@ -868,7 +897,7 @@ def fill_buyma_form(
                 row_data,
                 category_corrector=category_corrector,
             )
-            apply_buyma_category_selection(
+            category_diag = apply_buyma_category_selection(
                 driver,
                 category_plan,
                 select_category_by_arrow=select_category_by_arrow,
@@ -876,6 +905,23 @@ def fill_buyma_form(
             )
         except Exception as exc:
             print(f"  ✗ 카테고리 선택 실패: {exc}")
+            category_diag = {
+                "category_selection_success": False,
+                "failure_stage": "category_exception",
+                "final_result": "failed",
+                "fallback_used": False,
+                "standard_category": (category_plan.get("standard_category", "") if "category_plan" in locals() else ""),
+                "cat_source": (category_plan.get("cat_source", "") if "category_plan" in locals() else ""),
+                "semantic_fallback_used": bool(category_plan.get("semantic_fallback_used", False)) if "category_plan" in locals() else False,
+                "target_buyma_parent_category": (category_plan.get("cat1", "") if "category_plan" in locals() else ""),
+                "target_buyma_middle_category": (category_plan.get("cat2", "") if "category_plan" in locals() else ""),
+                "target_buyma_child_category": (category_plan.get("cat3", "") if "category_plan" in locals() else ""),
+                "actual_selected_parent_category": "",
+                "actual_selected_middle_category": "",
+                "actual_selected_child_category": "",
+                "mapping_table_used": bool(category_plan.get("mapping_table_used", False)) if "category_plan" in locals() else False,
+                "legacy_used": bool(category_plan.get("legacy_used", False)) if "category_plan" in locals() else False,
+            }
 
         core_fill_result = apply_buyma_core_fields(
             driver,
@@ -888,7 +934,7 @@ def fill_buyma_form(
             build_buyma_title_retry_candidates=build_buyma_title_retry_candidates,
         )
         if core_fill_result != "success":
-            return core_fill_result
+            return {"result": core_fill_result, "category_diag": category_diag}
 
         apply_buyma_option_selection(
             driver,
@@ -922,10 +968,28 @@ def fill_buyma_form(
         )
 
         upload_product_images(driver, payload["image_files"], sleep_fn=sleep_fn)
-        return "success"
+        return {"result": "success", "category_diag": category_diag}
     except Exception as exc:
         print(f"  ✗ 이미지 업로드 오류: {exc}")
-        return "error"
+        if not category_diag:
+            category_diag = {
+                "category_selection_success": False,
+                "failure_stage": "upload_exception",
+                "final_result": "error",
+                "fallback_used": False,
+                "standard_category": "",
+                "cat_source": "",
+                "semantic_fallback_used": False,
+                "target_buyma_parent_category": "",
+                "target_buyma_middle_category": "",
+                "target_buyma_child_category": "",
+                "actual_selected_parent_category": "",
+                "actual_selected_middle_category": "",
+                "actual_selected_child_category": "",
+                "mapping_table_used": False,
+                "legacy_used": False,
+            }
+        return {"result": "error", "category_diag": category_diag}
 
 
 class BuymaUploaderAdapter(MarketplaceUploader):
