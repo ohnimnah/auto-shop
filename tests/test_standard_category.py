@@ -1,6 +1,11 @@
 import unittest
 
-from marketplace.buyma.category import build_buyma_category_plan
+from marketplace.buyma.category import (
+    _best_fuzzy_match,
+    _category_recovery_aliases,
+    _category_recovery_candidates,
+    build_buyma_category_plan,
+)
 from marketplace.buyma.standard_category import (
     StandardCategory,
     explain_standard_category_mapping,
@@ -70,6 +75,31 @@ class StandardCategoryTests(unittest.TestCase):
         self.assertEqual(plan["cat2"], "ボトムス")
         self.assertEqual(plan["cat3"], "デニム・ジーパン")
         self.assertTrue(plan["category_path_valid"])
+
+    def test_category_recovery_aliases(self):
+        self.assertIn("デニム・ジーンズ", _category_recovery_aliases("デニム・ジーパン"))
+        self.assertIn("スウェット", _category_recovery_aliases("スウェット・トレーナー"))
+
+    def test_category_recovery_fuzzy_match(self):
+        label, score = _best_fuzzy_match("デニム・ジーパン", ["パンツ", "デニム・ジーンズ", "スラックス"])
+
+        self.assertEqual(label, "デニム・ジーンズ")
+        self.assertGreaterEqual(score, 78)
+
+    def test_category_recovery_candidates_same_parent(self):
+        plan = {
+            "cat1": "レディースファッション",
+            "cat2": "ボトムス",
+            "cat3": "デニム・ジーパン",
+            "standard_category": "PANTS_DENIM",
+        }
+
+        middle_candidates = _category_recovery_candidates(plan, 1, parent="レディースファッション")
+        child_candidates = _category_recovery_candidates(plan, 2, parent="レディースファッション", middle="ボトムス")
+
+        self.assertIn("ボトムス", middle_candidates)
+        self.assertIn("デニム・ジーパン", child_candidates)
+        self.assertIn("スラックス", child_candidates)
 
 
 if __name__ == "__main__":
