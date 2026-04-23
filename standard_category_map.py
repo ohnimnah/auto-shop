@@ -1,7 +1,11 @@
-"""Standalone StandardCategory -> BUYMA mapping table support.
+"""Runtime StandardCategory -> BUYMA mapping table support.
 
-This module does NOT change upload behavior.
-It is a support layer for manual `category_mapping` table creation and tests.
+The upload flow resolves StandardCategory through this module. Runtime mapping
+rows are loaded once in this priority order:
+
+1. Google Sheet tab `category_mapping`
+2. local `_debug/category_mapping.json`
+3. built-in default mapping rows
 """
 
 from __future__ import annotations
@@ -62,6 +66,10 @@ MAPPING_HEADERS: List[str] = [
     "note",
     "updated_at",
 ]
+
+CATEGORY_MAPPING_SHEET_NAME = "category_mapping"
+_RUNTIME_MAPPING_CACHE: Optional[Tuple[List["CategoryMappingRow"], str]] = None
+_RUNTIME_MAPPING_LOGGED_SOURCE = ""
 
 
 @dataclass(frozen=True)
@@ -267,17 +275,185 @@ def load_mapping_rows_from_json(path: str) -> List[CategoryMappingRow]:
         return []
 
 
-def get_runtime_mapping_rows() -> List[CategoryMappingRow]:
-    """Load mapping from _debug/category_mapping.json and fill gaps with defaults."""
-    here = os.path.dirname(os.path.abspath(__file__))
-    json_path = os.path.join(here, "_debug", "category_mapping.json")
-    loaded = load_mapping_rows_from_json(json_path)
+def _safe_log(message: str) -> None:
+    try:
+        print(message)
+    except UnicodeEncodeError:
+        encoding = "utf-8"
+        print((message or "").encode(encoding, errors="replace").decode(encoding, errors="replace"))
+
+
+def _log_mapping_source(source: str, count: int, detail: str = "") -> None:
+    global _RUNTIME_MAPPING_LOGGED_SOURCE
+    if _RUNTIME_MAPPING_LOGGED_SOURCE == source:
+        return
+    _RUNTIME_MAPPING_LOGGED_SOURCE = source
+    suffix = f" ({detail})" if detail else ""
+    _safe_log(f"  [category][mapping] mapping_source={source} rows={count}{suffix}")
+
+
+def reset_runtime_mapping_cache() -> None:
+    """Clear runtime mapping cache. Intended for tests and explicit reload tools."""
+    global _RUNTIME_MAPPING_CACHE, _RUNTIME_MAPPING_LOGGED_SOURCE
+    _RUNTIME_MAPPING_CACHE = None
+    _RUNTIME_MAPPING_LOGGED_SOURCE = ""
+
+
+def _mapping_row_from_dict(item: Dict[str, str], *, source: str) -> CategoryMappingRow:
+    return CategoryMappingRow(
+        standard_category=str(item.get("standard_category", "") or "").strip(),
+        gender=normalize_gender(str(item.get("gender", "") or "")),
+        buyma_parent_category=str(item.get("buyma_parent_category", "") or "").strip(),
+        buyma_middle_category=str(item.get("buyma_middle_category", "") or "").strip(),
+        buyma_child_category=str(item.get("buyma_child_category", "") or "").strip(),
+        category_url=str(item.get("category_url", "") or "").strip(),
+        category_id=str(item.get("category_id", "") or "").strip(),
+        source=str(item.get("source", "") or source).strip() or source,
+        note=str(item.get("note", "") or "").strip(),
+        updated_at=str(item.get("updated_at", "") or "").strip(),
+    )
+
+
+def _is_valid_mapping_row(row: CategoryMappingRow) -> bool:
+    if not row.standard_category:
+        return False
+    try:
+        category = normalize_standard_category(row.standard_category)
+    except Exception:
+        return False
+    if category == StandardCategory.ETC:
+        return False
+    return validate_buyma_category_path(
+        row.buyma_parent_category,
+        row.buyma_middle_category,
+        row.buyma_child_category,
+    )
+
+
+def _filter_valid_mapping_rows(rows: Iterable[CategoryMappingRow]) -> List[CategoryMappingRow]:
+    valid: List[CategoryMappingRow] = []
+    for row in rows:
+        if _is_valid_mapping_row(row):
+            valid.append(
+                CategoryMappingRow(
+                    standard_category=normalize_standard_category(row.standard_category).value,
+                    gender=normalize_gender(row.gender),
+                    buyma_parent_category=row.buyma_parent_category,
+                    buyma_middle_category=row.buyma_middle_category,
+                    buyma_child_category=row.buyma_child_category,
+                    category_url=row.category_url,
+                    category_id=row.category_id,
+                    source=row.source,
+                    note=row.note,
+                    updated_at=row.updated_at,
+                )
+            )
+    return valid
+
+
+def _load_sheet_runtime_config() -> Tuple[str, str]:
+    try:
+        from marketplace.common.runtime import get_runtime_data_dir
+        from marketplace.common.sheet_source import extract_spreadsheet_id
+
+        cfg_path = os.path.join(get_runtime_data_dir(), "sheets_config.json")
+        if not os.path.exists(cfg_path):
+            return "", CATEGORY_MAPPING_SHEET_NAME
+        with open(cfg_path, "r", encoding="utf-8") as f:
+            cfg = json.load(f)
+        if not isinstance(cfg, dict):
+            return "", CATEGORY_MAPPING_SHEET_NAME
+        spreadsheet_id = extract_spreadsheet_id(str(cfg.get("spreadsheet_id") or ""))
+        mapping_sheet_name = str(cfg.get("category_mapping_sheet_name") or CATEGORY_MAPPING_SHEET_NAME).strip()
+        return spreadsheet_id, mapping_sheet_name or CATEGORY_MAPPING_SHEET_NAME
+    except Exception:
+        return "", CATEGORY_MAPPING_SHEET_NAME
+
+
+def _read_google_sheet_values(spreadsheet_id: str, sheet_name: str) -> List[List[str]]:
+    if not spreadsheet_id:
+        return []
+    try:
+        from marketplace.common.sheet_source import get_credentials_path, get_sheets_service
+
+        here = os.path.dirname(os.path.abspath(__file__))
+        credentials_path = get_credentials_path(here)
+        service = get_sheets_service(credentials_path)
+        last_col = chr(ord("A") + len(MAPPING_HEADERS) - 1)
+        result = service.spreadsheets().values().get(
+            spreadsheetId=spreadsheet_id,
+            range=f"'{sheet_name}'!A1:{last_col}5000",
+        ).execute()
+        return result.get("values", []) or []
+    except Exception as exc:
+        _safe_log(f"  [category][mapping] google_sheet load failed: {exc}")
+        return []
+
+
+def load_mapping_rows_from_google_sheet() -> List[CategoryMappingRow]:
+    """Load validator-passing rows from Google Sheet tab `category_mapping`."""
+    spreadsheet_id, sheet_name = _load_sheet_runtime_config()
+    values = _read_google_sheet_values(spreadsheet_id, sheet_name)
+    if not values:
+        return []
+
+    raw_header = [str(v or "").strip() for v in values[0]]
+    header_index = {name: idx for idx, name in enumerate(raw_header) if name}
+    if "standard_category" not in header_index:
+        return []
+
+    rows: List[CategoryMappingRow] = []
+    for raw in values[1:]:
+        record: Dict[str, str] = {}
+        for header in MAPPING_HEADERS:
+            idx = header_index.get(header)
+            record[header] = str(raw[idx]).strip() if idx is not None and idx < len(raw) else ""
+        rows.append(_mapping_row_from_dict(record, source="google_sheet"))
+    return _filter_valid_mapping_rows(rows)
+
+
+def _merge_with_defaults(rows: List[CategoryMappingRow]) -> List[CategoryMappingRow]:
     defaults = build_default_mapping_rows()
-    if not loaded:
+    if not rows:
         return defaults
     by_key = {(row.standard_category, row.gender): row for row in defaults}
-    by_key.update({(row.standard_category, row.gender): row for row in loaded if row.standard_category})
+    by_key.update({(row.standard_category, row.gender): row for row in rows if row.standard_category})
     return list(by_key.values())
+
+
+def get_runtime_mapping_source() -> str:
+    """Return the cached runtime mapping source label."""
+    if _RUNTIME_MAPPING_CACHE is None:
+        get_runtime_mapping_rows()
+    return _RUNTIME_MAPPING_CACHE[1] if _RUNTIME_MAPPING_CACHE else "default"
+
+
+def get_runtime_mapping_rows() -> List[CategoryMappingRow]:
+    """Load mapping once from Google Sheet, local JSON, then defaults."""
+    global _RUNTIME_MAPPING_CACHE
+    if _RUNTIME_MAPPING_CACHE is not None:
+        return list(_RUNTIME_MAPPING_CACHE[0])
+
+    sheet_rows = _filter_valid_mapping_rows(load_mapping_rows_from_google_sheet())
+    if sheet_rows:
+        rows = _merge_with_defaults(sheet_rows)
+        _RUNTIME_MAPPING_CACHE = (rows, "google_sheet")
+        _log_mapping_source("google_sheet", len(sheet_rows), "validator-passing sheet rows")
+        return list(rows)
+
+    here = os.path.dirname(os.path.abspath(__file__))
+    json_path = os.path.join(here, "_debug", "category_mapping.json")
+    local_rows = _filter_valid_mapping_rows(load_mapping_rows_from_json(json_path))
+    if local_rows:
+        rows = _merge_with_defaults(local_rows)
+        _RUNTIME_MAPPING_CACHE = (rows, "local_json")
+        _log_mapping_source("local_json", len(local_rows), "_debug/category_mapping.json")
+        return list(rows)
+
+    rows = build_default_mapping_rows()
+    _RUNTIME_MAPPING_CACHE = (rows, "default")
+    _log_mapping_source("default", len(rows))
+    return list(rows)
 
 
 def resolve_standard_category_buyma_target(

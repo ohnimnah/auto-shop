@@ -1,4 +1,5 @@
 import unittest
+from unittest.mock import patch
 
 from marketplace.buyma.category import (
     _best_fuzzy_match,
@@ -14,6 +15,7 @@ from marketplace.buyma.standard_category import (
     validate_buyma_category_path,
 )
 import standard_category_map
+from standard_category_map import CategoryMappingRow
 
 
 def _identity_corrector(base_category: str, product_name: str, musinsa_category: str) -> str:
@@ -50,6 +52,53 @@ class StandardCategoryTests(unittest.TestCase):
         self.assertIn(("OUTER_PADDING", "men"), keys)
         self.assertIn(("PANTS_DENIM", "women"), keys)
         self.assertIn(("SHOES_LOAFER", "men"), keys)
+
+    def test_runtime_mapping_prefers_google_sheet_rows(self):
+        standard_category_map.reset_runtime_mapping_cache()
+        sheet_rows = [
+            CategoryMappingRow(
+                "PANTS_DENIM",
+                "women",
+                "レディースファッション",
+                "ボトムス",
+                "デニム・ジーパン",
+                "",
+                "",
+                "google_sheet",
+                "",
+                "",
+            )
+        ]
+
+        with patch.object(standard_category_map, "load_mapping_rows_from_google_sheet", return_value=sheet_rows):
+            rows = standard_category_map.get_runtime_mapping_rows()
+
+        self.assertEqual(standard_category_map.get_runtime_mapping_source(), "google_sheet")
+        self.assertIn(("PANTS_DENIM", "women"), {(row.standard_category, row.gender) for row in rows})
+        standard_category_map.reset_runtime_mapping_cache()
+
+    def test_runtime_mapping_ignores_invalid_sheet_rows_and_falls_back_to_local_json(self):
+        standard_category_map.reset_runtime_mapping_cache()
+        invalid_sheet_rows = [
+            CategoryMappingRow("PANTS_DENIM", "women", "レディースファッション", "INVALID", "", "", "", "google_sheet", "", "")
+        ]
+        local_rows = [
+            CategoryMappingRow("PANTS_DENIM", "women", "レディースファッション", "ボトムス", "デニム・ジーパン", "", "", "json", "", "")
+        ]
+
+        with patch.object(standard_category_map, "load_mapping_rows_from_google_sheet", return_value=invalid_sheet_rows):
+            with patch.object(standard_category_map, "load_mapping_rows_from_json", return_value=local_rows):
+                rows = standard_category_map.get_runtime_mapping_rows()
+
+        self.assertEqual(standard_category_map.get_runtime_mapping_source(), "local_json")
+        match = standard_category_map.resolve_buyma_category_from_mapping(
+            rows,
+            standard_category=StandardCategory.PANTS_DENIM,
+            gender="women",
+        )
+        self.assertIsNotNone(match)
+        self.assertEqual(match.buyma_child_category, "デニム・ジーパン")
+        standard_category_map.reset_runtime_mapping_cache()
 
     def test_buyma_path_validator_and_diagnostics(self):
         diag = explain_standard_category_mapping(StandardCategory.PANTS_DENIM, is_mens=False)
