@@ -2,7 +2,7 @@ import sys
 import time
 import unittest
 
-from core.process_manager import ProcessManager
+from core.process_manager import ProcessManager, build_default_env
 
 
 class ProcessManagerTests(unittest.TestCase):
@@ -46,6 +46,12 @@ class ProcessManagerTests(unittest.TestCase):
         self.assertTrue(first)
         self.assertFalse(second)
         self.assertFalse(manager.is_team_running("assets"))
+
+    def test_default_env_forces_utf8_output(self):
+        env = build_default_env("/tmp/data", "/tmp/images")
+
+        self.assertEqual(env["PYTHONIOENCODING"], "utf-8")
+        self.assertEqual(env["PYTHONUTF8"], "1")
 
 
 if __name__ == "__main__":

@@ -185,6 +185,8 @@ class ProcessManager:
 def build_default_env(data_dir: str, images_dir: str) -> dict[str, str]:
     env = os.environ.copy()
     env["PYTHONUNBUFFERED"] = "1"
+    env["PYTHONIOENCODING"] = "utf-8"
+    env["PYTHONUTF8"] = "1"
     env["AUTO_SHOP_IMAGES_DIR"] = images_dir
     env["AUTO_SHOP_DATA_DIR"] = data_dir
     for proxy_key in ("HTTP_PROXY", "HTTPS_PROXY", "ALL_PROXY", "http_proxy", "https_proxy", "all_proxy"):

@@ -42,7 +42,7 @@ def resolve_python_executable() -> str:
 
 
 def get_default_data_dir() -> str:
-    """湲곕낯 ?고????곗씠??寃쎈줈瑜?OS蹂꾨줈 諛섑솚?쒕떎."""
+    """Return the default runtime data directory for the current OS."""
     local_app_data = os.environ.get('LOCALAPPDATA', '').strip()
     if local_app_data:
         return os.path.join(local_app_data, 'auto_shop')
@@ -50,7 +50,7 @@ def get_default_data_dir() -> str:
 
 
 def get_default_images_dir() -> str:
-    """湲곕낯 ?대?吏 ???寃쎈줈瑜?諛섑솚?쒕떎."""
+    """Return the default image storage directory."""
     env_images_dir = os.environ.get('AUTO_SHOP_IMAGES_DIR', '').strip()
     if env_images_dir:
         return os.path.abspath(os.path.expanduser(env_images_dir))
@@ -461,6 +461,7 @@ class AutoShopLauncher(tk.Tk):
         header.grid(row=0, column=0, sticky="ew", pady=(0, 6))
         tk.Label(header, text="실시간 로그", bg=self.theme["panel"], fg=self.theme["text"], font=("Segoe UI", 10, "bold")).pack(side=tk.LEFT)
         self._mini_button(header, "로그 지우기", self.clear_log, "#1e3350", "#294565").pack(side=tk.RIGHT)
+        self._mini_button(header, "전체 복사", self.copy_all_logs, "#1e3350", "#294565").pack(side=tk.RIGHT, padx=(0, 6))
         self.log = ScrolledText(
             log_card,
             wrap=tk.WORD,
@@ -475,7 +476,11 @@ class AutoShopLauncher(tk.Tk):
             height=9,
         )
         self.log.grid(row=1, column=0, sticky="nsew")
-        self.log.bind("<Key>", lambda _e: "break")
+        self.log.bind("<Command-c>", self.copy_selected_log)
+        self.log.bind("<Control-c>", self.copy_selected_log)
+        self.log.bind("<Command-a>", self.select_all_logs)
+        self.log.bind("<Control-a>", self.select_all_logs)
+        self.log.bind("<Key>", self._block_log_edit_key)
 
         summary = self._panel(wrap, padx=12, pady=10)
         summary.grid(row=0, column=1, sticky="nsew")
@@ -1164,6 +1169,32 @@ class AutoShopLauncher(tk.Tk):
     def clear_log(self) -> None:
         self.log.delete("1.0", tk.END)
 
+    def copy_selected_log(self, _event=None) -> str:
+        try:
+            text = self.log.get(tk.SEL_FIRST, tk.SEL_LAST)
+        except tk.TclError:
+            text = self.log.get("1.0", tk.END).rstrip()
+        self.clipboard_clear()
+        self.clipboard_append(text)
+        return "break"
+
+    def copy_all_logs(self) -> None:
+        text = self.log.get("1.0", tk.END).rstrip()
+        self.clipboard_clear()
+        self.clipboard_append(text)
+        self.status_var.set("로그 복사 완료")
+
+    def select_all_logs(self, _event=None) -> str:
+        self.log.tag_add(tk.SEL, "1.0", tk.END)
+        self.log.mark_set(tk.INSERT, "1.0")
+        self.log.see(tk.INSERT)
+        return "break"
+
+    def _block_log_edit_key(self, event=None) -> str | None:
+        if event and (event.state & 0x4 or event.state & 0x8) and str(event.keysym).lower() in {"a", "c"}:
+            return None
+        return "break"
+
     def _set_running_ui(self, running: bool) -> None:
         normal = tk.DISABLED if running else tk.NORMAL
         self.run_btn.configure(state=normal)
@@ -1561,7 +1592,7 @@ class AutoShopLauncher(tk.Tk):
         cancel_frame.pack(pady=(0, 10))
         ColorButton(cancel_frame, text="취소", bg="#334155", command=dlg.destroy, padx=18, font=("Arial", 10, "bold")).pack()
 
-        # ?붾㈃ 以묒븰 諛곗튂
+        # Center the dialog on the launcher window.
         dlg.update_idletasks()
         w, h = dlg.winfo_width(), dlg.winfo_height()
         x = self.winfo_x() + (self.winfo_width() - w) // 2
@@ -1573,17 +1604,17 @@ class AutoShopLauncher(tk.Tk):
 
     def _guess_brand(self, folder_path: str) -> str:
         name = os.path.basename(folder_path.rstrip("/\\"))
-        # "1. Brand Name" ?뺥깭硫?踰덊샇 ?묐몢???쒓굅
+        # Remove a leading folder sequence like "1. Brand Name".
         return re.sub(r"^\d+\.\s*", "", name).strip()
 
     def _fetch_brand_from_sheets(self, folder_path: str) -> str:
-        """?대뜑 踰덊샇濡??쒗듃 D???곷Ц 釉뚮옖????議고쉶. ?ㅽ뙣 ??鍮?臾몄옄??諛섑솚."""
+        """Fetch the brand from sheet column D using the numbered image folder."""
         try:
             folder_name = os.path.basename(folder_path.rstrip("/\\"))
             m = re.match(r"^(\d+)\.", folder_name)
             if not m:
                 return ""
-            idx = int(m.group(1))  # 1-based ?대뜑 踰덊샇
+            idx = int(m.group(1))  # 1-based folder sequence.
 
             if SCRIPT_DIR not in sys.path:
                 sys.path.insert(0, SCRIPT_DIR)
@@ -1597,7 +1628,7 @@ class AutoShopLauncher(tk.Tk):
                 range=f"'{sheet_name}'!A{bu.ROW_START}:D1000",
             ).execute()
             rows = result.get("values", [])
-            # idx=1 ??rows[0] (泥?踰덉㎏ ?곗씠????
+            # idx=1 maps to rows[0], the first data row.
             row = rows[idx - 1] if 0 < idx <= len(rows) else []
             return row[3].strip() if len(row) > 3 else ""
         except Exception:
@@ -1684,7 +1715,7 @@ class AutoShopLauncher(tk.Tk):
                 pass
             self.auto_refresh_job = None
         if self.process_manager.is_running():
-            if not messagebox.askyesno("醫낅즺", "?ㅽ뻾 以묒씤 ?묒뾽??以묒??섍퀬 醫낅즺?좉퉴??"):
+            if not messagebox.askyesno("종료", "실행 중인 작업을 중지하고 종료할까요?"):
                 return
         self.action_runner.stop_all()
         self.destroy()
