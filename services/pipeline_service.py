@@ -12,6 +12,48 @@ from utils.logger import get_logger
 LOGGER = get_logger("auto_shop.pipeline")
 
 
+class LauncherPipelineService:
+    """Pipeline decisions for the launcher control panel.
+
+    ActionRunner calls this service for stage mapping so orchestration stays
+    separate from UI labels and subprocess log parsing rules.
+    """
+
+    team_watch_actions = {
+        "assets": "watch-images",
+        "design": "watch-thumbnails",
+        "sales": "watch-upload",
+    }
+
+    def stage_for_action(self, action: str) -> str:
+        if action in {"run", "watch", "collect-listings"}:
+            return "scout"
+        if action in {"save-images", "watch-images"}:
+            return "assets"
+        if action in {"thumbnail-create", "watch-thumbnails"}:
+            return "design"
+        if action in {"upload-review", "upload-auto", "watch-upload"}:
+            return "sales"
+        return ""
+
+    def stage_from_log(self, message: str) -> str:
+        text = (message or "").lower()
+        if not text:
+            return ""
+        if "main.py" in text and "--download-images" in text:
+            return "assets"
+        if "main.py" in text and "--make-thumbnails" in text:
+            return "design"
+        if "make_thumbnails.py" in text:
+            return "design"
+        if "buyma_upload.py" in text:
+            return "sales"
+        return ""
+
+    def team_done_status(self, enabled: bool) -> str:
+        return "감시중" if enabled else "대기"
+
+
 def _column_index_to_letter(index: int) -> str:
     """Convert 0-based column index to A1 letters."""
     letters = ""
@@ -690,7 +732,6 @@ def process_sheet_once(
     finally:
         _flush_normal_buffer("normal-finally", force=True)
         LOGGER.info("[DONE] sheet=%s mode=crawl total_rows=%s", sheet_name, len(target_rows))
-
 
 
 
