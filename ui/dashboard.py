@@ -17,8 +17,10 @@ from core.action_runner import ActionRunner
 from core.command_builder import CommandBuilder
 from core.process_manager import ProcessManager, build_default_env
 from services.buyma_service import BuymaCredentialService
+from services.log_store import FileLogWriter
 from services.system_checker import SystemChecker
 from state.app_state import AppLogger, AppState, AppStateChange, LogEvent
+from state.snapshot_store import StateSnapshotStore
 from ui.components import ColorButton
 from ui.sidebar import NAV_ITEMS, SHORTCUTS
 
@@ -79,7 +81,10 @@ class AutoShopLauncher(tk.Tk):
         self.data_dir = get_default_data_dir()
         self.sheet_config_path = os.path.join(self.data_dir, "sheets_config.json")
         self.state = AppState()
+        self.snapshot_store = StateSnapshotStore(os.path.join(self.data_dir, "launcher_state_snapshot.json"))
+        self.snapshot_store.load_into(self.state)
         self.logger = AppLogger()
+        self.file_log_writer = FileLogWriter(os.path.join(self.data_dir, "logs"))
         self.system_checker = SystemChecker(
             script_dir=SCRIPT_DIR,
             data_dir=self.data_dir,
@@ -106,7 +111,9 @@ class AutoShopLauncher(tk.Tk):
             ensure_ready=self._ensure_sheet_config_before_action,
         )
         self.logger.subscribe(self._enqueue_log)
+        self.logger.subscribe(self.file_log_writer.handle)
         self.state.subscribe(self._enqueue_state)
+        self.state.subscribe(lambda change: self.snapshot_store.handle_change(self.state, change))
         self.today_processed = 0
         self.today_success = 0
         self.today_fail = 0
@@ -119,12 +126,12 @@ class AutoShopLauncher(tk.Tk):
         self.kpi_done_var = tk.StringVar(value=f"{self.state.metrics.done:,}")
         self.kpi_error_var = tk.StringVar(value=f"{self.state.metrics.error:,}")
         self.clock_var = tk.StringVar(value="")
-        self.sheet_status_var = tk.StringVar(value="점검 전")
-        self.credentials_status_var = tk.StringVar(value="점검 전")
-        self.buyma_status_var = tk.StringVar(value="점검 전")
-        self.images_status_var = tk.StringVar(value="점검 전")
-        self.runtime_status_var = tk.StringVar(value="점검 전")
-        self.last_check_var = tk.StringVar(value="--:--:--")
+        self.sheet_status_var = tk.StringVar(value=self.state.system_status.get("sheet", "점검 전"))
+        self.credentials_status_var = tk.StringVar(value=self.state.system_status.get("credentials", "점검 전"))
+        self.buyma_status_var = tk.StringVar(value=self.state.system_status.get("buyma", "점검 전"))
+        self.images_status_var = tk.StringVar(value=self.state.system_status.get("images", "점검 전"))
+        self.runtime_status_var = tk.StringVar(value=self.state.system_status.get("runtime", "점검 전"))
+        self.last_check_var = tk.StringVar(value=self.state.system_status.get("last_check", "--:--:--"))
         self.pipeline_progress_vars: dict[str, tk.StringVar] = {}
         self.pipeline_canvas_widgets: dict[str, tk.Canvas] = {}
         self.quick_action_buttons: list[ColorButton] = []
@@ -228,7 +235,7 @@ class AutoShopLauncher(tk.Tk):
         self.title("물류 자동화 런처 - 운영 대시보드")
         self.geometry("1500x860")
         self.minsize(1280, 740)
-        self.status_var = tk.StringVar(value="대기중")
+        self.status_var = tk.StringVar(value=self.state.status_text)
         self._configure_tree_style()
 
         root = tk.Frame(self, bg=self.theme["bg"])

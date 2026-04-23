@@ -2,6 +2,7 @@
 
 import time
 import re
+from dataclasses import dataclass
 from typing import Any, Dict, List, Tuple
 
 from constants.status import STATUS_UPLOADING
@@ -10,6 +11,24 @@ from utils.logger import get_logger
 
 
 LOGGER = get_logger("auto_shop.pipeline")
+
+
+@dataclass(frozen=True)
+class WatchPolicy:
+    """Operational rules for foreground watch and team watch workers.
+
+    Single watch allows one foreground process. Team watch ignores duplicate
+    starts while a worker is alive, restarts only after the worker exits, and
+    pauses after repeated non-zero exits.
+    """
+
+    max_failures_before_pause: int = 3
+
+    def should_count_failure(self, return_code: int, enabled: bool) -> bool:
+        return enabled and return_code != 0
+
+    def should_pause_after_failure(self, failure_count: int) -> bool:
+        return failure_count >= self.max_failures_before_pause
 
 
 class LauncherPipelineService:
@@ -24,6 +43,9 @@ class LauncherPipelineService:
         "design": "watch-thumbnails",
         "sales": "watch-upload",
     }
+
+    def __init__(self, watch_policy: WatchPolicy | None = None) -> None:
+        self.watch_policy = watch_policy or WatchPolicy()
 
     def stage_for_action(self, action: str) -> str:
         if action in {"run", "watch", "collect-listings"}:
@@ -732,6 +754,5 @@ def process_sheet_once(
     finally:
         _flush_normal_buffer("normal-finally", force=True)
         LOGGER.info("[DONE] sheet=%s mode=crawl total_rows=%s", sheet_name, len(target_rows))
-
 
 

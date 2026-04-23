@@ -7,6 +7,8 @@ import subprocess
 import threading
 from typing import Callable, Dict, Optional
 
+from core.errors import ProcessStartError, ProcessStopError
+
 
 LineCallback = Callable[[str], None]
 DoneCallback = Callable[[int], None]
@@ -25,6 +27,11 @@ class ProcessManager:
     def is_running(self) -> bool:
         with self._lock:
             return bool(self.process and self.process.poll() is None)
+
+    def is_team_running(self, team_key: str) -> bool:
+        with self._lock:
+            proc = self.team_processes.get(team_key)
+            return bool(proc and proc.poll() is None)
 
     def start(self, command: list[str], on_line: LineCallback, on_done: DoneCallback) -> bool:
         with self._lock:
@@ -87,17 +94,20 @@ class ProcessManager:
 
     def _popen(self, command: list[str]) -> subprocess.Popen:
         env = self.env_factory()
-        return subprocess.Popen(
-            command,
-            cwd=self.cwd,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.STDOUT,
-            env=env,
-            text=True,
-            encoding="utf-8",
-            errors="replace",
-            bufsize=1,
-        )
+        try:
+            return subprocess.Popen(
+                command,
+                cwd=self.cwd,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.STDOUT,
+                env=env,
+                text=True,
+                encoding="utf-8",
+                errors="replace",
+                bufsize=1,
+            )
+        except OSError as exc:
+            raise ProcessStartError(str(exc)) from exc
 
     def _read_process(
         self,
@@ -122,7 +132,10 @@ class ProcessManager:
             try:
                 return_code = proc.wait(timeout=1)
             except subprocess.TimeoutExpired:
-                self._stop_process(proc)
+                try:
+                    self._stop_process(proc)
+                except ProcessStopError as exc:
+                    on_line(f"[process-manager] stop error: {exc}\n")
                 return_code = proc.poll()
                 if return_code is None:
                     return_code = 1
@@ -155,12 +168,12 @@ class ProcessManager:
                 proc.kill()
                 proc.wait(timeout=5)
             except Exception:
-                pass
+                raise ProcessStopError("프로세스를 강제 종료하지 못했습니다.")
         except Exception:
             try:
                 proc.kill()
             except Exception:
-                pass
+                raise ProcessStopError("프로세스를 종료하지 못했습니다.")
 
     def _join_thread(self, thread: Optional[threading.Thread]) -> None:
         if not thread or thread is threading.current_thread():

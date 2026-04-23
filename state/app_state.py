@@ -46,7 +46,10 @@ class AppLogger:
 
     def log(self, event: LogEvent) -> None:
         for callback in list(self._subscribers):
-            callback(event)
+            try:
+                callback(event)
+            except Exception:
+                pass
 
     def emit(self, message: str, *, level: str = "INFO", category: str = "app") -> None:
         self.log(LogEvent(level=level, category=category, message=message))
@@ -119,6 +122,13 @@ class AppState:
     today_processed: int = 0
     today_success: int = 0
     today_fail: int = 0
+    team_watch_failures: Dict[str, int] = field(
+        default_factory=lambda: {
+            "assets": 0,
+            "design": 0,
+            "sales": 0,
+        }
+    )
     pipeline_steps: List[PipelineStep] = field(
         default_factory=lambda: [
             PipelineStep("scout", "정찰", "142 / 156", 0.91, "blue"),
@@ -197,9 +207,53 @@ class AppState:
             self.today_fail += 1
             self.notify("today_fail", self.today_fail)
 
+    def record_team_watch_failure(self, key: str) -> int:
+        count = self.team_watch_failures.get(key, 0) + 1
+        self.team_watch_failures[key] = count
+        self.notify(f"team_watch_failures.{key}", count)
+        return count
+
+    def reset_team_watch_failures(self, key: str) -> None:
+        if self.team_watch_failures.get(key, 0) == 0:
+            return
+        self.team_watch_failures[key] = 0
+        self.notify(f"team_watch_failures.{key}", 0)
+
     def set_system_status(self, values: Dict[str, str]) -> None:
         for key, value in values.items():
             if self.system_status.get(key) == value:
                 continue
             self.system_status[key] = value
             self.notify(f"system_status.{key}", value)
+
+    def to_snapshot(self) -> dict:
+        """Return a minimal restart snapshot without transient subprocess state."""
+        return {
+            "status_text": self.status_text,
+            "pipeline_status": dict(self.pipeline_status),
+            "team_watch_enabled": dict(self.team_watch_enabled),
+            "team_watch_failures": dict(self.team_watch_failures),
+            "system_status": dict(self.system_status),
+            "today_processed": self.today_processed,
+            "today_success": self.today_success,
+            "today_fail": self.today_fail,
+        }
+
+    def apply_snapshot(self, data: dict) -> None:
+        """Restore minimal state silently during startup."""
+        if not isinstance(data, dict):
+            return
+        if isinstance(data.get("pipeline_status"), dict):
+            self.pipeline_status.update({str(k): str(v) for k, v in data["pipeline_status"].items()})
+        if isinstance(data.get("team_watch_enabled"), dict):
+            self.team_watch_enabled.update({str(k): bool(v) for k, v in data["team_watch_enabled"].items()})
+        if isinstance(data.get("team_watch_failures"), dict):
+            self.team_watch_failures.update({str(k): int(v) for k, v in data["team_watch_failures"].items() if str(v).isdigit()})
+        if isinstance(data.get("system_status"), dict):
+            self.system_status.update({str(k): str(v) for k, v in data["system_status"].items()})
+        self.today_processed = int(data.get("today_processed") or 0)
+        self.today_success = int(data.get("today_success") or 0)
+        self.today_fail = int(data.get("today_fail") or 0)
+        self.status_text = str(data.get("status_text") or "대기중")
+        self.current_action = ""
+        self.current_stage_key = ""
