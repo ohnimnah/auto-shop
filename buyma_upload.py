@@ -95,6 +95,44 @@ CATEGORY_MAPPING_CANDIDATES_COLUMNS = [
     "reviewer_note",
 ]
 
+DEFAULT_UPLOAD_COLUMNS = {
+    "url": "B",
+    "brand": "C",
+    "brand_en": "D",
+    "product_name_kr": "E",
+    "product_name_en": "F",
+    "musinsa_sku": "G",
+    "color_kr": "H",
+    "color_en": "I",
+    "size": "J",
+    "actual_size": "K",
+    "price_krw": "L",
+    "buyma_price": "M",
+    "image_paths": "N",
+    "shipping_cost": "O",
+    "category_legacy_large": "V",
+    "category_legacy_middle": "W",
+    "category_legacy_small": "X",
+    "musinsa_category_large": "W",
+    "musinsa_category_middle": "X",
+    "musinsa_category_small": "Y",
+}
+UPLOAD_COLUMNS = dict(DEFAULT_UPLOAD_COLUMNS)
+UPLOAD_MAX_DATA_COLUMN = "Y"
+
+
+def _normalize_upload_columns(raw_columns: Any) -> Dict[str, str]:
+    if not isinstance(raw_columns, dict):
+        return {}
+    normalized: Dict[str, str] = {}
+    valid_keys = set(DEFAULT_UPLOAD_COLUMNS)
+    for key, value in raw_columns.items():
+        field = str(key or "").strip()
+        column = str(value or "").strip().upper()
+        if field in valid_keys and re.fullmatch(r"[A-Z]+", column):
+            normalized[field] = column
+    return normalized
+
 
 def get_runtime_data_dir() -> str:
     """런처/CLI가 지정한 런타임 데이터 폴더를 반환한다."""
@@ -109,7 +147,7 @@ def get_runtime_data_dir() -> str:
 
 def _load_sheet_runtime_config() -> None:
     """로컬에서 저장한 시트 설정파일을 읽어 기본값을 반영한다."""
-    global SPREADSHEET_ID, SHEET_GIDS, SHEET_NAME, ROW_START
+    global SPREADSHEET_ID, SHEET_GIDS, SHEET_NAME, ROW_START, UPLOAD_COLUMNS, UPLOAD_MAX_DATA_COLUMN
     data_dir = get_runtime_data_dir()
 
     cfg_path = os.path.join(data_dir, 'sheets_config.json')
@@ -139,6 +177,15 @@ def _load_sheet_runtime_config() -> None:
         rstart = cfg.get('row_start')
         if isinstance(rstart, int) and rstart >= 1:
             ROW_START = rstart
+
+        configured_columns = _normalize_upload_columns(cfg.get("upload_columns"))
+        if configured_columns:
+            UPLOAD_COLUMNS = {**DEFAULT_UPLOAD_COLUMNS, **configured_columns}
+            print(f"업로드 시트 열 설정 적용: {configured_columns}")
+
+        max_column = str(cfg.get("upload_max_data_column") or "").strip().upper()
+        if re.fullmatch(r"[A-Z]+", max_column):
+            UPLOAD_MAX_DATA_COLUMN = max_column
     except Exception as e:
         print(f"시트 설정 로드 실패: {e}")
 
@@ -173,16 +220,6 @@ BUYMA_COMMENT_TEMPLATE = """
 ・返品・交換に関する規定はBUYMA規定に準じます。お客様都合による返品はお受けできかねますので、ご購入は慎重にお願いいたします。
 ・不良品・誤配送は交換または返品が可能です。
 """.strip()
-
-# 시트 컬럼 인덱스(A=0, B=1, ..., M=12)
-COL = {
-    'A': 0, 'B': 1, 'C': 2, 'D': 3, 'E': 4, 'F': 5,
-    'G': 6, 'H': 7, 'I': 8, 'J': 9, 'K': 10, 'L': 11,
-    'M': 12, 'N': 13, 'O': 14, 'P': 15, 'Q': 16, 'R': 17,
-    'S': 18, 'T': 19, 'U': 20, 'V': 21, 'W': 22, 'X': 23,
-    'Y': 24, 'Z': 25,
-}
-
 
 def scan_form_structure(driver):
     """Scan and print BUYMA form structure (debug)."""
@@ -733,7 +770,8 @@ def read_upload_rows(service, sheet_name: str, specific_row: int = 0) -> List[Di
         sheet_name=sheet_name,
         row_start=ROW_START,
         header_row=HEADER_ROW,
-        col_map=COL,
+        max_data_column=UPLOAD_MAX_DATA_COLUMN,
+        upload_columns=UPLOAD_COLUMNS,
         progress_status_header=PROGRESS_STATUS_HEADER,
         status_completed=STATUS_COMPLETED,
         status_upload_ready=STATUS_UPLOAD_READY,
