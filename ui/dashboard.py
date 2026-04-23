@@ -17,6 +17,7 @@ from core.action_runner import ActionRunner
 from core.command_builder import CommandBuilder
 from core.process_manager import ProcessManager, build_default_env
 from services.buyma_service import BuymaCredentialService
+from services.dashboard_data_service import DashboardDataService
 from services.log_store import FileLogWriter
 from services.system_checker import SystemChecker
 from state.app_state import AppLogger, AppState, AppStateChange, LogEvent
@@ -110,9 +111,20 @@ class AutoShopLauncher(tk.Tk):
             command_builder=self.command_builder.build,
             ensure_ready=self._ensure_sheet_config_before_action,
         )
+        self.dashboard_data = DashboardDataService(
+            data_dir=self.data_dir,
+            script_dir=SCRIPT_DIR,
+            state=self.state,
+            process_manager=self.process_manager,
+            system_checker=self.system_checker,
+            pipeline_service=self.action_runner.pipeline_service,
+        )
+        self.dashboard_data.refresh()
         self.logger.subscribe(self._enqueue_log)
         self.logger.subscribe(self.file_log_writer.handle)
+        self.logger.subscribe(self.dashboard_data.update_state_from_log)
         self.state.subscribe(self._enqueue_state)
+        self.state.subscribe(self.dashboard_data.update_state_from_change)
         self.state.subscribe(lambda change: self.snapshot_store.handle_change(self.state, change))
         self.today_processed = 0
         self.today_success = 0
@@ -125,6 +137,21 @@ class AutoShopLauncher(tk.Tk):
         self.kpi_waiting_var = tk.StringVar(value=f"{self.state.metrics.waiting:,}")
         self.kpi_done_var = tk.StringVar(value=f"{self.state.metrics.done:,}")
         self.kpi_error_var = tk.StringVar(value=f"{self.state.metrics.error:,}")
+        self.kpi_total_sub_var = tk.StringVar(value="데이터 동기화 대기")
+        self.kpi_running_sub_var = tk.StringVar(value="실행 중인 작업 없음")
+        self.kpi_waiting_sub_var = tk.StringVar(value="대기 상품 없음")
+        self.kpi_done_sub_var = tk.StringVar(value="오늘 완료 없음")
+        self.kpi_error_sub_var = tk.StringVar(value="오류 없음")
+        self.data_source_var = tk.StringVar(value=self.state.data_source.label)
+        self.last_sync_var = tk.StringVar(value=f"마지막 동기화 {self.state.data_source.last_sync}")
+        self.data_source_detail_var = tk.StringVar(value=self.state.data_source.detail)
+        self.auto_refresh_var = tk.BooleanVar(value=False)
+        self.auto_refresh_job: str | None = None
+        self.summary_date_var = tk.StringVar(value=datetime.now().strftime("%Y-%m-%d"))
+        self.summary_done_var = tk.StringVar(value="0건")
+        self.summary_running_var = tk.StringVar(value="0건")
+        self.summary_waiting_var = tk.StringVar(value="0건")
+        self.summary_error_var = tk.StringVar(value="0건")
         self.clock_var = tk.StringVar(value="")
         self.sheet_status_var = tk.StringVar(value=self.state.system_status.get("sheet", "점검 전"))
         self.credentials_status_var = tk.StringVar(value=self.state.system_status.get("credentials", "점검 전"))
@@ -134,6 +161,8 @@ class AutoShopLauncher(tk.Tk):
         self.last_check_var = tk.StringVar(value=self.state.system_status.get("last_check", "--:--:--"))
         self.pipeline_progress_vars: dict[str, tk.StringVar] = {}
         self.pipeline_canvas_widgets: dict[str, tk.Canvas] = {}
+        self.pipeline_ratios: dict[str, float] = {}
+        self.pipeline_colors: dict[str, str] = {}
         self.quick_action_buttons: list[ColorButton] = []
         self.wizard_summary_var = tk.StringVar(value="첫 실행 준비를 확인하세요.")
         self.wizard_status_vars: dict[str, tk.StringVar] = {
@@ -180,6 +209,14 @@ class AutoShopLauncher(tk.Tk):
             self.today_success_var.set(str(value))
         elif key == "today_fail":
             self.today_fail_var.set(str(value))
+        elif key == "metrics":
+            self._render_metrics()
+        elif key == "pipeline_steps":
+            self._render_pipeline_steps()
+        elif key == "product_rows":
+            self._refresh_product_table()
+        elif key == "data_source":
+            self._render_data_source()
         elif key.startswith("system_status."):
             self._render_system_status(key.split(".", 1)[1], str(value))
         elif key.startswith("pipeline_status."):
@@ -202,6 +239,43 @@ class AutoShopLauncher(tk.Tk):
         var = target_vars.get(key)
         if var is not None:
             var.set(value)
+
+    def _render_metrics(self) -> None:
+        self.kpi_total_var.set(f"{self.state.metrics.total:,}")
+        self.kpi_running_var.set(f"{self.state.metrics.running:,}")
+        self.kpi_waiting_var.set(f"{self.state.metrics.waiting:,}")
+        self.kpi_done_var.set(f"{self.state.metrics.done:,}")
+        self.kpi_error_var.set(f"{self.state.metrics.error:,}")
+        self.kpi_total_sub_var.set("동기화된 전체 상품" if self.state.metrics.total else "연결된 상품 데이터 없음")
+        self.kpi_running_sub_var.set("현재 처리 중" if self.state.metrics.running else "실행 중인 작업 없음")
+        self.kpi_waiting_sub_var.set("다음 처리 대기" if self.state.metrics.waiting else "대기 상품 없음")
+        self.kpi_done_sub_var.set("오늘 정상 완료" if self.state.metrics.done else "오늘 완료 없음")
+        self.kpi_error_sub_var.set("확인 필요한 항목" if self.state.metrics.error else "오류 없음")
+        total = max(1, self.state.metrics.done + self.state.metrics.running + self.state.metrics.waiting + self.state.metrics.error)
+        self.summary_date_var.set(datetime.now().strftime("%Y-%m-%d"))
+        self.summary_done_var.set(f"{self.state.metrics.done:,}건 ({self.state.metrics.done * 100 // total}%)")
+        self.summary_running_var.set(f"{self.state.metrics.running:,}건 ({self.state.metrics.running * 100 // total}%)")
+        self.summary_waiting_var.set(f"{self.state.metrics.waiting:,}건 ({self.state.metrics.waiting * 100 // total}%)")
+        self.summary_error_var.set(f"{self.state.metrics.error:,}건 ({self.state.metrics.error * 100 // total}%)")
+        self._draw_summary_donut()
+
+    def _render_data_source(self) -> None:
+        self.data_source_var.set(self.state.data_source.label)
+        self.last_sync_var.set(f"마지막 동기화 {self.state.data_source.last_sync}")
+        self.data_source_detail_var.set(self.state.data_source.detail)
+        if hasattr(self, "empty_products_label") and not self.state.product_rows:
+            self.empty_products_label.configure(text=self.state.data_source.detail or "표시할 상품이 없습니다.")
+            self.empty_products_label.grid()
+
+    def _render_pipeline_steps(self) -> None:
+        for step in self.state.pipeline_steps:
+            var = self.pipeline_progress_vars.get(step.key)
+            if var is not None:
+                var.set(f"{step.metric}    {int(step.ratio * 100)}%")
+            self.pipeline_ratios[step.key] = step.ratio
+            color = self.theme.get(step.color_key, self.theme["blue"]) if hasattr(self, "theme") else "#2563eb"
+            self.pipeline_colors[step.key] = color
+            self._draw_progress(step.key, step.ratio, color)
 
     def _set_window_icon(self) -> None:
         """Create and apply a simple built-in icon without external files."""
@@ -274,7 +348,7 @@ class AutoShopLauncher(tk.Tk):
 
         self.protocol("WM_DELETE_WINDOW", self.on_close)
         self._refresh_system_status_labels()
-        self._draw_summary_donut()
+        self._render_metrics()
         self._update_clock()
 
     def _configure_tree_style(self) -> None:
@@ -317,7 +391,7 @@ class AutoShopLauncher(tk.Tk):
         nav = tk.Frame(parent, bg=self.theme["sidebar"])
         nav.pack(fill=tk.X)
         for label, active in NAV_ITEMS:
-            self._sidebar_button(nav, label, active)
+            self._sidebar_button(nav, label, active, lambda name=label: self.on_menu_click(name))
 
         quick = self._card(parent, "빠른 바로가기", pady=(18, 0))
         for label, action, color_key in SHORTCUTS:
@@ -347,8 +421,10 @@ class AutoShopLauncher(tk.Tk):
         top.grid_columnconfigure(0, weight=1)
         tk.Label(top, text="대시보드", bg=self.theme["bg"], fg=self.theme["text"], font=("Segoe UI", 20, "bold")).grid(row=0, column=0, sticky="w")
         tk.Label(top, text="전체 자동화 시스템의 실시간 현황을 확인할 수 있습니다.", bg=self.theme["bg"], fg=self.theme["muted"], font=("Segoe UI", 9)).grid(row=1, column=0, sticky="w", pady=(2, 0))
-        tk.Label(top, text="버전 1.0.0", bg=self.theme["bg"], fg="#c7d2e4", font=("Segoe UI", 8)).grid(row=0, column=1, sticky="e", padx=(0, 18))
-        tk.Label(top, textvariable=self.clock_var, bg=self.theme["bg"], fg="#c7d2e4", font=("Segoe UI", 9)).grid(row=0, column=2, sticky="e")
+        tk.Label(top, textvariable=self.data_source_var, bg="#102033", fg="#93c5fd", font=("Segoe UI", 8, "bold"), padx=10, pady=4).grid(row=0, column=1, sticky="e", padx=(0, 8))
+        tk.Label(top, textvariable=self.last_sync_var, bg=self.theme["bg"], fg="#c7d2e4", font=("Segoe UI", 8)).grid(row=0, column=2, sticky="e", padx=(0, 18))
+        tk.Label(top, textvariable=self.clock_var, bg=self.theme["bg"], fg="#c7d2e4", font=("Segoe UI", 9)).grid(row=0, column=3, sticky="e")
+        tk.Label(top, textvariable=self.data_source_detail_var, bg=self.theme["bg"], fg=self.theme["muted"], font=("Segoe UI", 8)).grid(row=1, column=1, columnspan=3, sticky="e")
 
     def _build_kpi_section(self, parent: tk.Frame) -> None:
         wrap = tk.Frame(parent, bg=self.theme["bg"])
@@ -356,11 +432,11 @@ class AutoShopLauncher(tk.Tk):
         for idx in range(5):
             wrap.grid_columnconfigure(idx, weight=1)
         cards = [
-            ("전체 상품", self.kpi_total_var, "전체 처리 대상", self.theme["blue"]),
-            ("진행 중", self.kpi_running_var, "현재 처리 중", self.theme["green"]),
-            ("대기 중", self.kpi_waiting_var, "다음 처리 대기", self.theme["yellow"]),
-            ("완료", self.kpi_done_var, "정상 완료", self.theme["green"]),
-            ("오류 / 보류", self.kpi_error_var, "오류 12 / 보류 33", self.theme["red"]),
+            ("전체 상품", self.kpi_total_var, self.kpi_total_sub_var, self.theme["blue"]),
+            ("진행 중", self.kpi_running_var, self.kpi_running_sub_var, self.theme["green"]),
+            ("대기 중", self.kpi_waiting_var, self.kpi_waiting_sub_var, self.theme["yellow"]),
+            ("완료", self.kpi_done_var, self.kpi_done_sub_var, self.theme["green"]),
+            ("오류 / 보류", self.kpi_error_var, self.kpi_error_sub_var, self.theme["red"]),
         ]
         for col, (title, value_var, sub, accent) in enumerate(cards):
             self._kpi_card(wrap, col, title, value_var, sub, accent)
@@ -399,28 +475,23 @@ class AutoShopLauncher(tk.Tk):
             height=9,
         )
         self.log.grid(row=1, column=0, sticky="nsew")
-        self.logger.emit("1248번 상품 업로드 시작 - MAISON KITSUNE 더블 폭스 헤드 맨투맨\n", category="업로드")
-        self.logger.emit("1247번 썸네일 생성 완료\n", category="썸네일")
-        self.logger.emit("1247번 이미지 저장 완료 (8/8)\n", category="이미지")
-        self.logger.emit("1247번 상품 정찰 완료\n", category="정찰")
-        self.logger.emit("1245번 상품 업로드 실패 - 카테고리 미칭 없음\n", level="ERROR", category="업로드")
         self.log.bind("<Key>", lambda _e: "break")
 
         summary = self._panel(wrap, padx=12, pady=10)
         summary.grid(row=0, column=1, sticky="nsew")
         summary.grid_columnconfigure(0, weight=1)
         tk.Label(summary, text="오늘의 요약", bg=self.theme["panel"], fg=self.theme["text"], font=("Segoe UI", 10, "bold")).grid(row=0, column=0, sticky="w")
-        tk.Label(summary, text="2025-05-23", bg="#102033", fg="#cbd5e1", font=("Segoe UI", 8), padx=10, pady=4).grid(row=0, column=1, sticky="e")
+        tk.Label(summary, textvariable=self.summary_date_var, bg="#102033", fg="#cbd5e1", font=("Segoe UI", 8), padx=10, pady=4).grid(row=0, column=1, sticky="e")
         body = tk.Frame(summary, bg=self.theme["panel"])
         body.grid(row=1, column=0, columnspan=2, sticky="nsew", pady=(10, 0))
         self.summary_canvas = tk.Canvas(body, width=142, height=142, bg=self.theme["panel"], highlightthickness=0)
         self.summary_canvas.pack(side=tk.LEFT, padx=(0, 12))
         legend = tk.Frame(body, bg=self.theme["panel"])
         legend.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
-        self._legend_row(legend, "정상 완료", "152건 (72%)", self.theme["green"])
-        self._legend_row(legend, "진행 중", "18건 (9%)", self.theme["blue"])
-        self._legend_row(legend, "대기 중", "23건 (11%)", self.theme["yellow"])
-        self._legend_row(legend, "오류 / 보류", "17건 (8%)", self.theme["red"])
+        self._legend_row(legend, "정상 완료", self.summary_done_var, self.theme["green"])
+        self._legend_row(legend, "진행 중", self.summary_running_var, self.theme["blue"])
+        self._legend_row(legend, "대기 중", self.summary_waiting_var, self.theme["yellow"])
+        self._legend_row(legend, "오류 / 보류", self.summary_error_var, self.theme["red"])
 
     def _build_table_section(self, parent: tk.Frame) -> None:
         card = self._grid_card(parent, "상품 관리  (관리자 페이지)", row=4, pady=(0, 0))
@@ -433,7 +504,19 @@ class AutoShopLauncher(tk.Tk):
         search = tk.Entry(toolbar, bg="#091626", fg="#dbeafe", insertbackground="#dbeafe", relief=tk.FLAT, width=26)
         search.insert(0, "상품명, 상품코드 검색...")
         search.pack(side=tk.LEFT, fill=tk.X, expand=True, ipady=5, padx=(0, 8))
-        self._mini_button(toolbar, "바로고침", self._refresh_dummy_table, "#1e3350", "#294565").pack(side=tk.LEFT)
+        tk.Checkbutton(
+            toolbar,
+            text="자동 새로고침",
+            variable=self.auto_refresh_var,
+            command=self.toggle_auto_refresh,
+            bg=self.theme["panel"],
+            fg="#cbd5e1",
+            selectcolor="#102033",
+            activebackground=self.theme["panel"],
+            activeforeground="#ffffff",
+            font=("Segoe UI", 9, "bold"),
+        ).pack(side=tk.LEFT, padx=(0, 8))
+        self._mini_button(toolbar, "바로고침", self.refresh_dashboard_data, "#1e3350", "#294565").pack(side=tk.LEFT)
 
         columns = ("no", "state", "name", "brand", "category", "price", "sheet", "updated", "action")
         self.product_table = ttk.Treeview(card, columns=columns, show="headings", style="Ops.Treeview", height=6)
@@ -456,7 +539,16 @@ class AutoShopLauncher(tk.Tk):
         scrollbar = ttk.Scrollbar(card, orient=tk.VERTICAL, command=self.product_table.yview)
         self.product_table.configure(yscrollcommand=scrollbar.set)
         scrollbar.grid(row=1, column=1, sticky="ns")
-        self._refresh_dummy_table()
+        self.empty_products_label = tk.Label(
+            card,
+            text="표시할 상품이 없습니다. Google Sheet를 연결하거나 로컬 products.json을 추가하면 여기에 표시됩니다.",
+            bg=self.theme["panel"],
+            fg=self.theme["muted"],
+            font=("Segoe UI", 9, "bold"),
+            pady=8,
+        )
+        self.empty_products_label.grid(row=2, column=0, columnspan=2, sticky="ew", pady=(8, 0))
+        self._refresh_product_table()
 
     def _build_quick_actions_panel(self, parent: tk.Frame) -> None:
         card = self._grid_card(parent, "빠른 실행", row=0, pady=(0, 12))
@@ -500,10 +592,13 @@ class AutoShopLauncher(tk.Tk):
         body.pack(fill=tk.BOTH, expand=True)
         return body
 
-    def _sidebar_button(self, parent: tk.Widget, text: str, active: bool) -> None:
+    def _sidebar_button(self, parent: tk.Widget, text: str, active: bool, command=None) -> None:
         bg = self.theme["blue_2"] if active else self.theme["sidebar"]
         fg = "#ffffff" if active else "#d5e0ee"
-        tk.Label(parent, text=text, bg=bg, fg=fg, font=("Segoe UI", 10, "bold"), anchor="w", padx=14, pady=10).pack(fill=tk.X, pady=2)
+        label = tk.Label(parent, text=text, bg=bg, fg=fg, font=("Segoe UI", 10, "bold"), anchor="w", padx=14, pady=10, cursor="hand2")
+        label.pack(fill=tk.X, pady=2)
+        if command:
+            label.bind("<Button-1>", lambda _event: command())
 
     def _link_button(self, parent: tk.Widget, text: str, command, color: str) -> None:
         ColorButton(
@@ -533,7 +628,7 @@ class AutoShopLauncher(tk.Tk):
             font=("Segoe UI", 9, "bold"),
         )
 
-    def _kpi_card(self, parent: tk.Widget, col: int, title: str, value_var: tk.StringVar, sub: str, accent: str) -> None:
+    def _kpi_card(self, parent: tk.Widget, col: int, title: str, value_var: tk.StringVar, sub: str | tk.StringVar, accent: str) -> None:
         card = self._panel(parent, padx=12, pady=12)
         card.grid(row=0, column=col, sticky="ew", padx=(0 if col == 0 else 5, 0 if col == 4 else 5))
         tk.Label(card, text=title, bg=self.theme["panel"], fg=accent, font=("Segoe UI", 9, "bold")).pack(anchor="w")
@@ -541,7 +636,10 @@ class AutoShopLauncher(tk.Tk):
         row.pack(fill=tk.X, pady=(6, 0))
         tk.Label(row, textvariable=value_var, bg=self.theme["panel"], fg=self.theme["text"], font=("Segoe UI", 22, "bold")).pack(side=tk.LEFT)
         tk.Label(row, text="건", bg=self.theme["panel"], fg="#cbd5e1", font=("Segoe UI", 11, "bold")).pack(side=tk.LEFT, padx=(4, 0), pady=(8, 0))
-        tk.Label(card, text=sub, bg=self.theme["panel"], fg=self.theme["muted"], font=("Segoe UI", 8)).pack(anchor="w", pady=(5, 0))
+        if isinstance(sub, tk.StringVar):
+            tk.Label(card, textvariable=sub, bg=self.theme["panel"], fg=self.theme["muted"], font=("Segoe UI", 8)).pack(anchor="w", pady=(5, 0))
+        else:
+            tk.Label(card, text=sub, bg=self.theme["panel"], fg=self.theme["muted"], font=("Segoe UI", 8)).pack(anchor="w", pady=(5, 0))
 
     def _pipeline_step(self, parent: tk.Widget, col: int, key: str, title: str, metric: str, ratio: float, accent: str) -> None:
         bg = "#112b4f" if key == "scout" else self.theme["panel_2"]
@@ -549,12 +647,14 @@ class AutoShopLauncher(tk.Tk):
         box.pack(side=tk.LEFT, fill=tk.BOTH, expand=True, padx=(0 if col == 0 else 5, 0 if col == 5 else 5))
         tk.Label(box, text=title, bg=bg, fg=accent, font=("Segoe UI", 9, "bold")).pack(anchor="w")
         self.pipeline_progress_vars[key] = tk.StringVar(value=f"{metric}    {int(ratio * 100)}%")
+        self.pipeline_ratios[key] = ratio
+        self.pipeline_colors[key] = accent
         tk.Label(box, textvariable=self.pipeline_progress_vars[key], bg=bg, fg="#f8fbff", font=("Segoe UI", 10, "bold")).pack(anchor="w", pady=(12, 6))
         canvas = tk.Canvas(box, height=5, bg=bg, highlightthickness=0)
         canvas.pack(fill=tk.X)
         self.pipeline_canvas_widgets[key] = canvas
-        canvas.bind("<Configure>", lambda _e, k=key, r=ratio, a=accent: self._draw_progress(k, r, a))
-        self.after(50, lambda k=key, r=ratio, a=accent: self._draw_progress(k, r, a))
+        canvas.bind("<Configure>", lambda _e, k=key: self._draw_progress(k, self.pipeline_ratios.get(k, 0.0), self.pipeline_colors.get(k, self.theme["blue"])))
+        self.after(50, lambda k=key: self._draw_progress(k, self.pipeline_ratios.get(k, 0.0), self.pipeline_colors.get(k, self.theme["blue"])))
 
     def _draw_progress(self, key: str, ratio: float, accent: str) -> None:
         canvas = self.pipeline_canvas_widgets.get(key)
@@ -565,19 +665,29 @@ class AutoShopLauncher(tk.Tk):
         canvas.create_rectangle(0, 0, width, 5, fill="#21334d", outline="")
         canvas.create_rectangle(0, 0, int(width * max(0.0, min(1.0, ratio))), 5, fill=accent, outline="")
 
-    def _legend_row(self, parent: tk.Widget, label: str, value: str, color: str) -> None:
+    def _legend_row(self, parent: tk.Widget, label: str, value: str | tk.StringVar, color: str) -> None:
         row = tk.Frame(parent, bg=self.theme["panel"])
         row.pack(fill=tk.X, pady=5)
         tk.Label(row, text="■", bg=self.theme["panel"], fg=color, font=("Segoe UI", 10)).pack(side=tk.LEFT)
         tk.Label(row, text=label, bg=self.theme["panel"], fg="#dbeafe", font=("Segoe UI", 9)).pack(side=tk.LEFT, padx=(6, 0))
-        tk.Label(row, text=value, bg=self.theme["panel"], fg="#f8fbff", font=("Segoe UI", 9, "bold")).pack(side=tk.RIGHT)
+        if isinstance(value, tk.StringVar):
+            tk.Label(row, textvariable=value, bg=self.theme["panel"], fg="#f8fbff", font=("Segoe UI", 9, "bold")).pack(side=tk.RIGHT)
+        else:
+            tk.Label(row, text=value, bg=self.theme["panel"], fg="#f8fbff", font=("Segoe UI", 9, "bold")).pack(side=tk.RIGHT)
 
     def _draw_summary_donut(self) -> None:
         canvas = getattr(self, "summary_canvas", None)
         if not canvas:
             return
         canvas.delete("all")
-        values = [(72, self.theme["green"]), (9, self.theme["blue"]), (11, self.theme["yellow"]), (8, self.theme["red"])]
+        metrics = self.state.metrics
+        total = max(1, metrics.done + metrics.running + metrics.waiting + metrics.error)
+        values = [
+            (metrics.done * 100 / total, self.theme["green"]),
+            (metrics.running * 100 / total, self.theme["blue"]),
+            (metrics.waiting * 100 / total, self.theme["yellow"]),
+            (metrics.error * 100 / total, self.theme["red"]),
+        ]
         start = 90
         for value, color in values:
             extent = -360 * value / 100
@@ -609,7 +719,7 @@ class AutoShopLauncher(tk.Tk):
         tk.Label(row, text=label, bg=self.theme["panel"], fg="#c9d7e8", font=("Segoe UI", 9)).pack(side=tk.LEFT)
         tk.Label(row, textvariable=value_var, bg=self.theme["panel"], fg=value_color or self.theme["green"], font=("Segoe UI", 9, "bold")).pack(side=tk.RIGHT)
 
-    def _refresh_dummy_table(self) -> None:
+    def _refresh_product_table(self) -> None:
         if not hasattr(self, "product_table"):
             return
         for item in self.product_table.get_children():
@@ -620,9 +730,45 @@ class AutoShopLauncher(tk.Tk):
                 tk.END,
                 values=(row.no, row.state, row.name, row.brand, row.category, row.price, row.sheet, row.updated, row.action),
             )
+        if hasattr(self, "empty_products_label"):
+            if self.state.product_rows:
+                self.empty_products_label.configure(text="")
+                self.empty_products_label.grid_remove()
+            else:
+                self.empty_products_label.configure(text=self.state.data_source.detail or "표시할 상품이 없습니다.")
+                self.empty_products_label.grid()
+
+    def refresh_dashboard_data(self) -> None:
+        self.dashboard_data.refresh()
+
+    def toggle_auto_refresh(self) -> None:
+        if self.auto_refresh_var.get():
+            self._schedule_auto_refresh(delay_ms=1000)
+        elif self.auto_refresh_job:
+            try:
+                self.after_cancel(self.auto_refresh_job)
+            except Exception:
+                pass
+            self.auto_refresh_job = None
+
+    def _schedule_auto_refresh(self, delay_ms: int = 60000) -> None:
+        if self.auto_refresh_job:
+            try:
+                self.after_cancel(self.auto_refresh_job)
+            except Exception:
+                pass
+        self.auto_refresh_job = self.after(delay_ms, self._auto_refresh_tick)
+
+    def _auto_refresh_tick(self) -> None:
+        self.auto_refresh_job = None
+        if not self.auto_refresh_var.get():
+            return
+        self.refresh_dashboard_data()
+        self._schedule_auto_refresh()
 
     def _refresh_system_status_labels(self) -> None:
         self.state.set_system_status(self.system_checker.collect_status())
+        self.refresh_dashboard_data()
         self.refresh_first_run_wizard()
 
     def _update_clock(self) -> None:
@@ -634,6 +780,16 @@ class AutoShopLauncher(tk.Tk):
 
     def _show_program_info(self) -> None:
         messagebox.showinfo("프로그램 정보", "물류 자동화 런처 1.0.0\nPython 기반 운영 대시보드")
+
+    def on_menu_click(self, menu_name: str) -> None:
+        self.state.notify("active_view", menu_name)
+        if menu_name == "대시보드":
+            self.refresh_dashboard_data()
+        elif "로그" in menu_name:
+            self.log.see(tk.END)
+        elif "상품" in menu_name or "BUYMA" in menu_name:
+            self._refresh_product_table()
+        self.logger.emit(f"메뉴 선택: {menu_name}\n", category="navigation")
 
     def _build_stat_card(self, parent: tk.Frame, col: int, title: str, value_var: tk.StringVar, accent: str) -> None:
         card = tk.Frame(parent, bg="#161f3e", padx=12, pady=10, highlightbackground=accent, highlightthickness=1)
@@ -1521,6 +1677,12 @@ class AutoShopLauncher(tk.Tk):
 
     def on_close(self) -> None:
         self._close_action_bubble()
+        if self.auto_refresh_job:
+            try:
+                self.after_cancel(self.auto_refresh_job)
+            except Exception:
+                pass
+            self.auto_refresh_job = None
         if self.process_manager.is_running():
             if not messagebox.askyesno("醫낅즺", "?ㅽ뻾 以묒씤 ?묒뾽??以묒??섍퀬 醫낅즺?좉퉴??"):
                 return

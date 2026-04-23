@@ -57,11 +57,11 @@ class AppLogger:
 
 @dataclass
 class DashboardMetrics:
-    total: int = 1248
-    running: int = 8
-    waiting: int = 23
-    done: int = 1172
-    error: int = 45
+    total: int = 0
+    running: int = 0
+    waiting: int = 0
+    done: int = 0
+    error: int = 0
 
 
 @dataclass
@@ -84,6 +84,13 @@ class ProductRow:
     sheet: str
     updated: str
     action: str
+
+
+@dataclass
+class DataSourceStatus:
+    label: str = "데이터 없음"
+    last_sync: str = "--:--:--"
+    detail: str = "연결된 상품 데이터가 없습니다."
 
 
 @dataclass
@@ -119,6 +126,7 @@ class AppState:
         }
     )
     metrics: DashboardMetrics = field(default_factory=DashboardMetrics)
+    data_source: DataSourceStatus = field(default_factory=DataSourceStatus)
     today_processed: int = 0
     today_success: int = 0
     today_fail: int = 0
@@ -129,25 +137,8 @@ class AppState:
             "sales": 0,
         }
     )
-    pipeline_steps: List[PipelineStep] = field(
-        default_factory=lambda: [
-            PipelineStep("scout", "정찰", "142 / 156", 0.91, "blue"),
-            PipelineStep("assets", "이미지 저장", "128 / 142", 0.90, "green"),
-            PipelineStep("design", "썸네일 생성", "115 / 128", 0.89, "purple"),
-            PipelineStep("review", "업로드 대기", "47 / 115", 0.41, "yellow"),
-            PipelineStep("sales", "업로드 중", "8 / 47", 0.17, "orange"),
-            PipelineStep("done", "출품 완료", "1,172", 1.0, "green"),
-        ]
-    )
-    product_rows: List[ProductRow] = field(
-        default_factory=lambda: [
-            ProductRow("1248", "업로드 중", "MAISON KITSUNE 더블 폭스 헤드 맨투맨 (블랙)", "MAISON KITSUNE", "맨투맨", "29,800", "collection", "14:30:21", "실행 / 열기"),
-            ProductRow("1247", "썸네일 완료", "AMI 하트 로고 스웨트 셔츠 (네이비)", "AMI", "맨투맨", "31,500", "collection", "14:30:18", "실행 / 열기"),
-            ProductRow("1246", "출품 완료", "STONE ISLAND 와펜 후드티 (블랙)", "STONE ISLAND", "후드티", "45,000", "collection", "14:30:10", "실행 / 열기"),
-            ProductRow("1245", "업로드 실패", "MONCLER 패딩 자켓 (네이비)", "MONCLER", "패딩", "158,000", "collection", "14:30:07", "재실행 / 열기"),
-            ProductRow("1244", "이미지저장 중", "CP COMPANY 고글 후드 (그레이)", "CP COMPANY", "후드티", "42,000", "collection", "14:30:03", "실행 / 열기"),
-        ]
-    )
+    pipeline_steps: List[PipelineStep] = field(default_factory=list)
+    product_rows: List[ProductRow] = field(default_factory=list)
     _subscribers: List[StateSubscriber] = field(default_factory=list, init=False, repr=False)
 
     def subscribe(self, callback: StateSubscriber) -> None:
@@ -207,6 +198,27 @@ class AppState:
             self.today_fail += 1
             self.notify("today_fail", self.today_fail)
 
+    def set_metrics(self, metrics: DashboardMetrics) -> None:
+        if self.metrics == metrics:
+            return
+        self.metrics = metrics
+        self.notify("metrics", metrics)
+
+    def set_pipeline_steps(self, steps: List[PipelineStep]) -> None:
+        self.pipeline_steps = list(steps)
+        self.notify("pipeline_steps", self.pipeline_steps)
+
+    def set_product_rows(self, rows: List[ProductRow]) -> None:
+        self.product_rows = list(rows)
+        self.notify("product_rows", self.product_rows)
+
+    def set_data_source_status(self, label: str, last_sync: str, detail: str = "") -> None:
+        next_status = DataSourceStatus(label=label, last_sync=last_sync, detail=detail)
+        if self.data_source == next_status:
+            return
+        self.data_source = next_status
+        self.notify("data_source", self.data_source)
+
     def record_team_watch_failure(self, key: str) -> int:
         count = self.team_watch_failures.get(key, 0) + 1
         self.team_watch_failures[key] = count
@@ -234,6 +246,11 @@ class AppState:
             "team_watch_enabled": dict(self.team_watch_enabled),
             "team_watch_failures": dict(self.team_watch_failures),
             "system_status": dict(self.system_status),
+            "data_source": {
+                "label": self.data_source.label,
+                "last_sync": self.data_source.last_sync,
+                "detail": self.data_source.detail,
+            },
             "today_processed": self.today_processed,
             "today_success": self.today_success,
             "today_fail": self.today_fail,
@@ -251,6 +268,13 @@ class AppState:
             self.team_watch_failures.update({str(k): int(v) for k, v in data["team_watch_failures"].items() if str(v).isdigit()})
         if isinstance(data.get("system_status"), dict):
             self.system_status.update({str(k): str(v) for k, v in data["system_status"].items()})
+        if isinstance(data.get("data_source"), dict):
+            source = data["data_source"]
+            self.data_source = DataSourceStatus(
+                label=str(source.get("label") or "데이터 없음"),
+                last_sync=str(source.get("last_sync") or "--:--:--"),
+                detail=str(source.get("detail") or ""),
+            )
         self.today_processed = int(data.get("today_processed") or 0)
         self.today_success = int(data.get("today_success") or 0)
         self.today_fail = int(data.get("today_fail") or 0)
