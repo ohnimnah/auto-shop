@@ -8,8 +8,10 @@ import sys
 from typing import Callable, Dict, List, Tuple
 from marketplace.buyma.standard_category import (
     StandardCategory,
+    explain_standard_category_mapping,
     map_standard_to_buyma_middle_and_subcategory,
     resolve_standard_category,
+    validate_buyma_category_path,
 )
 import standard_category_map as standard_category_map_mod
 
@@ -233,7 +235,8 @@ def build_buyma_category_plan(
         is_mens=is_mens_category,
         combined_text=combined_text,
     )
-    mapping_table_used = standard_category != StandardCategory.ETC and bool(mapped_cat2)
+    mapping_valid = validate_buyma_category_path(mapped_parent, mapped_cat2, mapped_cat3)
+    mapping_table_used = standard_category != StandardCategory.ETC and bool(mapped_cat2) and mapping_valid
 
     legacy_cat2, legacy_cat3 = "", ""
     if not mapping_table_used:
@@ -242,7 +245,8 @@ def build_buyma_category_plan(
             combined_text,
             is_mens=is_mens_category,
         )
-    legacy_used = standard_category != StandardCategory.ETC and bool(legacy_cat2)
+    legacy_valid = validate_buyma_category_path(cat1, legacy_cat2, legacy_cat3)
+    legacy_used = standard_category != StandardCategory.ETC and bool(legacy_cat2) and legacy_valid
     semantic_fallback_used = not mapping_table_used
 
     if mapping_table_used:
@@ -263,12 +267,16 @@ def build_buyma_category_plan(
         source_product_name,
         musinsa_category_text,
     )
+    final_path_valid = validate_buyma_category_path(cat1, corrected_cat2, cat3)
+    mapping_diag = explain_standard_category_mapping(standard_category, is_mens=is_mens_category)
 
     _safe_log(f"  [category][semantic] musinsa={sheet_cat1} / {sheet_cat2} / {sheet_cat3}")
     _safe_log(f"  [category][semantic] product_name={source_product_name}")
     _safe_log(f"  [category][semantic] combined_text={combined_text}")
     _safe_log(f"  [category][semantic] standard_category={standard_category.value}")
     _safe_log(f"  [category][semantic] mapped_buyma={cat1} > {corrected_cat2} > {cat3}")
+    _safe_log(f"  [category][semantic] spec_buyma={mapping_diag.get('buyma_parent')} > {mapping_diag.get('buyma_middle')} > {mapping_diag.get('buyma_child')}")
+    _safe_log(f"  [category][semantic] validator_passed={final_path_valid}")
     _safe_log(f"  [category][semantic] mapping_table_used={mapping_table_used}")
     _safe_log(f"  [category][semantic] legacy_used={legacy_used}")
     _safe_log(f"  [category][semantic] fallback_used={semantic_fallback_used}")
@@ -288,6 +296,8 @@ def build_buyma_category_plan(
         "mapping_table_used": mapping_table_used,
         "legacy_used": legacy_used,
         "semantic_fallback_used": semantic_fallback_used,
+        "category_path_valid": final_path_valid,
+        "mapping_validator_passed": mapping_valid,
         "fallback_cat1": fallback_cat1,
         "fallback_cat2": corrected_fallback_cat2,
         "fallback_cat3": fallback_cat3,
@@ -323,6 +333,8 @@ def apply_buyma_category_selection(
         "actual_selected_child_category": "",
         "mapping_table_used": bool(category_plan.get("mapping_table_used", False)),
         "legacy_used": bool(category_plan.get("legacy_used", False)),
+        "category_path_valid": bool(category_plan.get("category_path_valid", False)),
+        "mapping_validator_passed": bool(category_plan.get("mapping_validator_passed", False)),
     }
 
     if not cat1 or not cat2:
