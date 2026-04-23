@@ -3,9 +3,10 @@
 The upload flow resolves StandardCategory through this module. Runtime mapping
 rows are loaded once in this priority order:
 
-1. Google Sheet tab `category_mapping`
+1. Google Sheet tab `category_mapping` rows with source `manual` or `verified`
 2. local `_debug/category_mapping.json`
-3. built-in default mapping rows
+3. Google Sheet tab `category_mapping` rows with source `auto_seed`
+4. built-in default mapping rows
 """
 
 from __future__ import annotations
@@ -14,7 +15,7 @@ from dataclasses import dataclass, asdict
 from datetime import datetime
 import json
 import os
-from typing import Dict, Iterable, List, Optional, Sequence, Tuple
+from typing import Dict, Iterable, List, Optional, Tuple
 
 from marketplace.buyma.standard_category import (
     PARENT_MEN,
@@ -26,32 +27,6 @@ from marketplace.buyma.standard_category import (
     resolve_standard_category,
     validate_buyma_category_path,
 )
-
-
-# BUYMA labels (use unicode escapes to avoid terminal/font encoding issues)
-
-MIDDLE_TOPS = "\u30c8\u30c3\u30d7\u30b9"
-MIDDLE_INNER_ROOM = "\u30a4\u30f3\u30ca\u30fc\u30fb\u30eb\u30fc\u30e0\u30a6\u30a7\u30a2"
-MIDDLE_OUTER_WOMEN = "\u30a2\u30a6\u30bf\u30fc"
-MIDDLE_OUTER_MEN = "\u30a2\u30a6\u30bf\u30fc\u30fb\u30b8\u30e3\u30b1\u30c3\u30c8"
-MIDDLE_BOTTOMS_WOMEN = "\u30dc\u30c8\u30e0\u30b9"
-MIDDLE_BOTTOMS_MEN = "\u30d1\u30f3\u30c4\u30fb\u30dc\u30c8\u30e0\u30b9"
-MIDDLE_SHOES_WOMEN = "\u9774\u30fb\u30b7\u30e5\u30fc\u30ba"
-MIDDLE_SHOES_MEN = "\u9774\u30fb\u30d6\u30fc\u30c4\u30fb\u30b5\u30f3\u30c0\u30eb"
-MIDDLE_DRESS_WOMEN = "\u30ef\u30f3\u30d4\u30fc\u30b9\u30fb\u30aa\u30fc\u30eb\u30a4\u30f3\u30ef\u30f3"
-MIDDLE_OTHER_FASHION_MEN = "\u305d\u306e\u4ed6\u30d5\u30a1\u30c3\u30b7\u30e7\u30f3"
-
-CHILD_HOODIE = "\u30d1\u30fc\u30ab\u30fc\u30fb\u30d5\u30fc\u30c7\u30a3"
-CHILD_SWEAT = "\u30b9\u30a6\u30a7\u30c3\u30c8\u30fb\u30c8\u30ec\u30fc\u30ca\u30fc"
-CHILD_TSHIRT = "T\u30b7\u30e3\u30c4\u30fb\u30ab\u30c3\u30c8\u30bd\u30fc"
-CHILD_KNIT = "\u30cb\u30c3\u30c8\u30fb\u30bb\u30fc\u30bf\u30fc"
-CHILD_PAJAMA = "\u30eb\u30fc\u30e0\u30a6\u30a7\u30a2\u30fb\u30d1\u30b8\u30e3\u30de"
-CHILD_SHIRT = "\u30b7\u30e3\u30c4"
-CHILD_CARDIGAN = "\u30ab\u30fc\u30c7\u30a3\u30ac\u30f3"
-CHILD_OUTER_JACKET = "\u30b8\u30e3\u30b1\u30c3\u30c8"
-CHILD_PANTS = "\u30d1\u30f3\u30c4"
-CHILD_SNEAKER = "\u30b9\u30cb\u30fc\u30ab\u30fc"
-CHILD_DRESS = ""
 
 
 MAPPING_HEADERS: List[str] = [
@@ -68,6 +43,8 @@ MAPPING_HEADERS: List[str] = [
 ]
 
 CATEGORY_MAPPING_SHEET_NAME = "category_mapping"
+SHEET_VERIFIED_SOURCES = {"manual", "verified"}
+SHEET_AUTO_SEED_SOURCE = "auto_seed"
 _RUNTIME_MAPPING_CACHE: Optional[Tuple[List["CategoryMappingRow"], str]] = None
 _RUNTIME_MAPPING_LOGGED_SOURCE = ""
 
@@ -95,11 +72,6 @@ def _now_iso() -> str:
 
 def _norm(v: str) -> str:
     return (v or "").strip()
-
-
-def _contains(text: str, keywords: Sequence[str]) -> bool:
-    t = text.lower()
-    return any(k.lower() in t for k in keywords)
 
 
 def normalize_gender(value: str) -> str:
@@ -265,7 +237,7 @@ def load_mapping_rows_from_json(path: str) -> List[CategoryMappingRow]:
                     buyma_child_category=str(item.get("buyma_child_category", "") or ""),
                     category_url=str(item.get("category_url", "") or ""),
                     category_id=str(item.get("category_id", "") or ""),
-                    source=str(item.get("source", "") or "json"),
+                    source=_normalize_mapping_source(str(item.get("source", "") or "json")),
                     note=str(item.get("note", "") or ""),
                     updated_at=str(item.get("updated_at", "") or ""),
                 )
@@ -292,6 +264,19 @@ def _log_mapping_source(source: str, count: int, detail: str = "") -> None:
     _safe_log(f"  [category][mapping] mapping_source={source} rows={count}{suffix}")
 
 
+def _normalize_mapping_source(value: str) -> str:
+    source = (value or "").strip().lower()
+    if source in {"manual", "verified", "auto_seed"}:
+        return source
+    if source in {"google_sheet", "sheet"}:
+        return "auto_seed"
+    if source in {"json", "local", "local_json"}:
+        return "local_json"
+    if source == "default":
+        return "default"
+    return source or "auto_seed"
+
+
 def reset_runtime_mapping_cache() -> None:
     """Clear runtime mapping cache. Intended for tests and explicit reload tools."""
     global _RUNTIME_MAPPING_CACHE, _RUNTIME_MAPPING_LOGGED_SOURCE
@@ -308,7 +293,7 @@ def _mapping_row_from_dict(item: Dict[str, str], *, source: str) -> CategoryMapp
         buyma_child_category=str(item.get("buyma_child_category", "") or "").strip(),
         category_url=str(item.get("category_url", "") or "").strip(),
         category_id=str(item.get("category_id", "") or "").strip(),
-        source=str(item.get("source", "") or source).strip() or source,
+        source=_normalize_mapping_source(str(item.get("source", "") or source)),
         note=str(item.get("note", "") or "").strip(),
         updated_at=str(item.get("updated_at", "") or "").strip(),
     )
@@ -343,7 +328,7 @@ def _filter_valid_mapping_rows(rows: Iterable[CategoryMappingRow]) -> List[Categ
                     buyma_child_category=row.buyma_child_category,
                     category_url=row.category_url,
                     category_id=row.category_id,
-                    source=row.source,
+                    source=_normalize_mapping_source(row.source),
                     note=row.note,
                     updated_at=row.updated_at,
                 )
@@ -412,13 +397,69 @@ def load_mapping_rows_from_google_sheet() -> List[CategoryMappingRow]:
     return _filter_valid_mapping_rows(rows)
 
 
-def _merge_with_defaults(rows: List[CategoryMappingRow]) -> List[CategoryMappingRow]:
-    defaults = build_default_mapping_rows()
-    if not rows:
-        return defaults
-    by_key = {(row.standard_category, row.gender): row for row in defaults}
-    by_key.update({(row.standard_category, row.gender): row for row in rows if row.standard_category})
+def _mapping_key(row: CategoryMappingRow) -> Tuple[str, str]:
+    return (row.standard_category, normalize_gender(row.gender))
+
+
+def _split_sheet_mapping_rows(rows: Iterable[CategoryMappingRow]) -> Tuple[List[CategoryMappingRow], List[CategoryMappingRow]]:
+    verified: List[CategoryMappingRow] = []
+    auto_seed: List[CategoryMappingRow] = []
+    for row in rows:
+        source = _normalize_mapping_source(row.source)
+        if source in SHEET_VERIFIED_SOURCES:
+            verified.append(row)
+        elif source == SHEET_AUTO_SEED_SOURCE:
+            auto_seed.append(row)
+    return verified, auto_seed
+
+
+def _merge_mapping_layers(
+    *,
+    default_rows: List[CategoryMappingRow],
+    auto_seed_rows: List[CategoryMappingRow],
+    local_rows: List[CategoryMappingRow],
+    verified_rows: List[CategoryMappingRow],
+) -> List[CategoryMappingRow]:
+    by_key = {_mapping_key(row): row for row in default_rows}
+    for layer in (auto_seed_rows, local_rows, verified_rows):
+        by_key.update({_mapping_key(row): row for row in layer if row.standard_category})
     return list(by_key.values())
+
+
+def _mapping_source_label(
+    *,
+    verified_rows: List[CategoryMappingRow],
+    local_rows: List[CategoryMappingRow],
+    auto_seed_rows: List[CategoryMappingRow],
+) -> str:
+    parts: List[str] = []
+    if verified_rows:
+        parts.append("google_sheet_verified")
+    if local_rows:
+        parts.append("local_json")
+    if auto_seed_rows:
+        parts.append("google_sheet_auto_seed")
+    parts.append("default")
+    return "+".join(parts)
+
+
+def _mapping_source_detail(
+    *,
+    verified_rows: List[CategoryMappingRow],
+    local_rows: List[CategoryMappingRow],
+    auto_seed_rows: List[CategoryMappingRow],
+    default_rows: List[CategoryMappingRow],
+) -> str:
+    verified_counts: Dict[str, int] = {}
+    for row in verified_rows:
+        verified_counts[row.source] = verified_counts.get(row.source, 0) + 1
+    verified_detail = ", ".join(f"{source}={count}" for source, count in sorted(verified_counts.items())) or "manual=0, verified=0"
+    return (
+        f"{verified_detail}, "
+        f"local_json={len(local_rows)}, "
+        f"auto_seed={len(auto_seed_rows)}, "
+        f"default={len(default_rows)}"
+    )
 
 
 def get_runtime_mapping_source() -> str:
@@ -428,31 +469,57 @@ def get_runtime_mapping_source() -> str:
     return _RUNTIME_MAPPING_CACHE[1] if _RUNTIME_MAPPING_CACHE else "default"
 
 
+def get_resolved_mapping_row_source(
+    standard_category: StandardCategory,
+    *,
+    is_mens: bool,
+) -> str:
+    """Return the source label of the row that will resolve a standard category."""
+    gender = "men" if is_mens else "women"
+    standard_category = normalize_standard_category(standard_category)
+    match = resolve_buyma_category_from_mapping(
+        get_runtime_mapping_rows(),
+        standard_category=standard_category,
+        gender=gender,
+    )
+    return match.source if match else ""
+
+
 def get_runtime_mapping_rows() -> List[CategoryMappingRow]:
-    """Load mapping once from Google Sheet, local JSON, then defaults."""
+    """Load mapping once with verified sheet rows before local and auto-seed rows."""
     global _RUNTIME_MAPPING_CACHE
     if _RUNTIME_MAPPING_CACHE is not None:
         return list(_RUNTIME_MAPPING_CACHE[0])
 
     sheet_rows = _filter_valid_mapping_rows(load_mapping_rows_from_google_sheet())
-    if sheet_rows:
-        rows = _merge_with_defaults(sheet_rows)
-        _RUNTIME_MAPPING_CACHE = (rows, "google_sheet")
-        _log_mapping_source("google_sheet", len(sheet_rows), "validator-passing sheet rows")
-        return list(rows)
+    verified_rows, auto_seed_rows = _split_sheet_mapping_rows(sheet_rows)
 
     here = os.path.dirname(os.path.abspath(__file__))
     json_path = os.path.join(here, "_debug", "category_mapping.json")
     local_rows = _filter_valid_mapping_rows(load_mapping_rows_from_json(json_path))
-    if local_rows:
-        rows = _merge_with_defaults(local_rows)
-        _RUNTIME_MAPPING_CACHE = (rows, "local_json")
-        _log_mapping_source("local_json", len(local_rows), "_debug/category_mapping.json")
-        return list(rows)
-
-    rows = build_default_mapping_rows()
-    _RUNTIME_MAPPING_CACHE = (rows, "default")
-    _log_mapping_source("default", len(rows))
+    default_rows = build_default_mapping_rows()
+    rows = _merge_mapping_layers(
+        default_rows=default_rows,
+        auto_seed_rows=auto_seed_rows,
+        local_rows=local_rows,
+        verified_rows=verified_rows,
+    )
+    mapping_source = _mapping_source_label(
+        verified_rows=verified_rows,
+        local_rows=local_rows,
+        auto_seed_rows=auto_seed_rows,
+    )
+    _RUNTIME_MAPPING_CACHE = (rows, mapping_source)
+    _log_mapping_source(
+        mapping_source,
+        len(rows),
+        _mapping_source_detail(
+            verified_rows=verified_rows,
+            local_rows=local_rows,
+            auto_seed_rows=auto_seed_rows,
+            default_rows=default_rows,
+        ),
+    )
     return list(rows)
 
 

@@ -268,6 +268,10 @@ def build_buyma_category_plan(
         combined_text=combined_text,
     )
     mapping_source = standard_category_map_mod.get_runtime_mapping_source()
+    mapping_row_source = standard_category_map_mod.get_resolved_mapping_row_source(
+        standard_category,
+        is_mens=is_mens_category,
+    )
     mapping_valid = validate_buyma_category_path(mapped_parent, mapped_cat2, mapped_cat3)
     mapping_table_used = standard_category != StandardCategory.ETC and bool(mapped_cat2) and mapping_valid
 
@@ -312,6 +316,7 @@ def build_buyma_category_plan(
     _safe_log(f"  [category][semantic] validator_passed={final_path_valid}")
     _safe_log(f"  [category][semantic] mapping_table_used={mapping_table_used}")
     _safe_log(f"  [category][semantic] mapping_source={mapping_source}")
+    _safe_log(f"  [category][semantic] mapping_row_source={mapping_row_source}")
     _safe_log(f"  [category][semantic] legacy_used={legacy_used}")
     _safe_log(f"  [category][semantic] fallback_used={semantic_fallback_used}")
 
@@ -329,6 +334,7 @@ def build_buyma_category_plan(
         "standard_category": standard_category.value,
         "mapping_table_used": mapping_table_used,
         "mapping_source": mapping_source,
+        "mapping_row_source": mapping_row_source,
         "legacy_used": legacy_used,
         "semantic_fallback_used": semantic_fallback_used,
         "category_path_valid": final_path_valid,
