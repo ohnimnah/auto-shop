@@ -13,6 +13,12 @@ import sys
 import time
 from typing import Dict, List, Tuple
 from services.runtime_environment import check_runtime_environment
+from services.category_analysis_service import (
+    analyze_unresolved_categories,
+    category_health,
+    generate_category_sample_csv,
+    suggest_category_rules,
+)
 
 __version__ = "0.4.0-rc1"
 from config.app_config import (
@@ -816,6 +822,31 @@ def parse_args():
         action="store_true",
         help="버전 정보를 출력",
     )
+    parser.add_argument(
+        "--analyze-unresolved-categories",
+        action="store_true",
+        help="미분류 카테고리(ETC/기타/미분류) 분석 리포트 및 CSV를 생성",
+    )
+    parser.add_argument(
+        "--category-health",
+        action="store_true",
+        help="카테고리 미분류율을 실측해 건강 상태를 출력",
+    )
+    parser.add_argument(
+        "--suggest-category-rules",
+        action="store_true",
+        help="unresolved CSV 기반 fallback rule 후보를 출력",
+    )
+    parser.add_argument(
+        "--input-csv",
+        default="",
+        help="시트 대신 사용할 CSV 경로(row/product_name/brand/category 또는 한글 컬럼 자동 감지)",
+    )
+    parser.add_argument(
+        "--generate-category-sample",
+        action="store_true",
+        help="카테고리 튜닝용 샘플 CSV(logs/sample_category_rows.csv)를 생성",
+    )
     return parser.parse_args()
 
 
@@ -880,6 +911,55 @@ def main():
             ]
             for key, ok in rows:
                 print(f"{key:<18} {'OK' if ok else 'MISSING'}")
+        return
+
+    if args.analyze_unresolved_categories:
+        report = analyze_unresolved_categories(logs_dir=os.path.join(os.getcwd(), "logs"), input_csv=args.input_csv)
+        print("Unresolved Category Report")
+        print("--------------------------")
+        if not report.get("ok", False):
+            print(f"분석 실패: {report.get('reason', 'unknown')}")
+            print(f"CSV: {report.get('csv_path', os.path.join('logs', 'unresolved_categories.csv'))}")
+            return
+        rows = report.get("rows", [])
+        print(f"총 미분류: {len(rows)}")
+        print("")
+        print("상위 키워드:")
+        for keyword, count in report.get("top_keywords", [])[:20]:
+            print(f"{keyword:<12} {count}")
+        print("")
+        print(f"CSV 저장: {report.get('csv_path', os.path.join('logs', 'unresolved_categories.csv'))}")
+        return
+
+    if args.category_health:
+        health = category_health(logs_dir=os.path.join(os.getcwd(), "logs"), input_csv=args.input_csv)
+        print("Category Health")
+        print("---------------")
+        print(f"Total rows        {health['total_rows']}")
+        print(f"Classified        {health['classified']}")
+        print(f"Unresolved        {health['unresolved']}")
+        print(f"Unresolved rate   {health['unresolved_rate']:.1f}%")
+        print(f"Status            {health['status']}")
+        return
+
+    if args.suggest_category_rules:
+        result = suggest_category_rules(logs_dir=os.path.join(os.getcwd(), "logs"), input_csv=args.input_csv, top_n=10)
+        print("Top unresolved tokens")
+        print("---------------------")
+        for token, count in result.get("top_tokens", []):
+            print(f"{token:<10} {count}")
+        print("")
+        print("Suggested rules")
+        print("---------------")
+        for line in result.get("candidates", []):
+            print(line)
+        if not result.get("candidates"):
+            print("# no candidates")
+        return
+
+    if args.generate_category_sample:
+        path = generate_category_sample_csv(logs_dir=os.path.join(os.getcwd(), "logs"))
+        print(path)
         return
 
     # 바이마 출품 모드

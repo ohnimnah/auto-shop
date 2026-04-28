@@ -1,4 +1,4 @@
-"""Real dashboard data loading and runtime aggregation."""
+﻿"""Real dashboard data loading and runtime aggregation."""
 
 from __future__ import annotations
 
@@ -18,6 +18,10 @@ from state.app_state import AppState, AppStateChange, DashboardMetrics, LogEvent
 DONE_WORDS = ("완료", "성공", "출품", "업로드 완료", "정상")
 ERROR_WORDS = ("실패", "오류", "error", "보류", "미칭", "exception")
 WAITING_WORDS = ("대기", "준비", "미처리", "pending", "")
+SHEET_COL_NAME_KR = 4  # E열 (0-based)
+SHEET_COL_PRICE_BUYMA = 12  # M열 (0-based)
+SHEET_COL_MUSINSA_SUBCATEGORY = 24  # Y열 (0-based, 무신사 소분류)
+SHEET_COL_CATEGORY_BUYMA = 11  # L열 (0-based, 보조)
 
 
 @lru_cache(maxsize=16)
@@ -78,6 +82,18 @@ class DashboardDataService:
         failed = sum(1 for row in products if self._matches_words(row.state, ("수집 실패", "정찰 실패", "실패", "오류")))
         running = 1 if self.state.current_action in {"run", "collect-listings", "watch"} else 0
         categories = self._group_count(products, lambda row: row.category or "미분류")
+        unresolved = sum(
+            1
+            for row in products
+            if str((row.category or "")).strip().lower() in {"", "미분류", "기타", "etc", "その他"}
+        )
+        unresolved_ratio = unresolved / max(1, len(products))
+        if unresolved_ratio <= 0.10:
+            unresolved_status = "OK"
+        elif unresolved_ratio <= 0.20:
+            unresolved_status = "WARNING"
+        else:
+            unresolved_status = "NEEDS_TUNING"
         return {
             "metrics": [
                 ("수집 대상", len(products), "연결된 전체 상품"),
@@ -88,6 +104,10 @@ class DashboardDataService:
             "recent_rows": products[:10],
             "category_rows": categories[:6],
             "ratio": min(1.0, collected / max(1, len(products))),
+            "unresolved_count": unresolved,
+            "unresolved_ratio": unresolved_ratio,
+            "category_tuning_required": unresolved_ratio > 0.10,
+            "unresolved_status": unresolved_status,
         }
 
     def get_image_overview(self) -> dict:
@@ -338,12 +358,12 @@ class DashboardDataService:
                 continue
             if has_header:
                 record = {header[col]: row[col] if col < len(row) else "" for col in range(len(header))}
-                result.append(self._product_from_mapping(record, str(idx), sheet_name))
+                result.append(self._product_from_mapping(record, str(idx), sheet_name, row))
             else:
                 result.append(self._product_from_sequence(row, str(idx), sheet_name))
         return result
 
-    def _product_from_mapping(self, record: dict, fallback_no: str, sheet: str) -> ProductRow:
+    def _product_from_mapping(self, record: dict, fallback_no: str, sheet: str, row: list[str] | None = None) -> ProductRow:
         def pick(*keys: str) -> str:
             lowered = {str(k).strip().lower(): v for k, v in record.items()}
             for key in keys:
@@ -358,14 +378,24 @@ class DashboardDataService:
                     return str(value).strip()
             return ""
 
+        cells = [str(cell).strip() for cell in (row or [])]
+        get = lambda idx, default="": cells[idx] if idx < len(cells) else default
         state = pick("state", "status", "상태", "작업상태", "진행상태")
+        name = get(SHEET_COL_NAME_KR) or pick("name", "상품명", "product_name", "product_name_kr", "title")
+        category = (
+            get(SHEET_COL_MUSINSA_SUBCATEGORY)
+            or pick("무신사소분류", "musinsa_subcategory", "musinsa_small_category", "소분류")
+            or get(SHEET_COL_CATEGORY_BUYMA)
+            or pick("category", "카테고리", "buyma_category", "buyma_cat", "category_name")
+        )
+        price = get(SHEET_COL_PRICE_BUYMA) or pick("price", "가격", "buyma_price", "판매가", "price_yen", "yen_price")
         return ProductRow(
             no=pick("no", "번호", "id", "상품코드") or fallback_no,
             state=state or "대기",
-            name=pick("name", "상품명", "product_name", "product_name_kr", "title"),
-            brand=pick("brand", "브랜드", "brand_en"),
-            category=pick("category", "카테고리", "buyma_category"),
-            price=pick("price", "가격", "buyma_price"),
+            name=name,
+            brand=get(3) or pick("brand", "브랜드", "brand_en"),
+            category=category,
+            price=price,
             sheet=sheet,
             updated=pick("updated", "최종 업데이트", "updated_at", "timestamp") or datetime.now().strftime("%H:%M:%S"),
             action="재실행 / 열기" if self._is_error(state) else "실행 / 열기",
@@ -375,13 +405,17 @@ class DashboardDataService:
         cells = [str(cell).strip() for cell in row]
         get = lambda idx, default="": cells[idx] if idx < len(cells) else default
         state = get(0) or "대기"
+        name = get(SHEET_COL_NAME_KR) or get(1)
+        brand = get(3)
+        category = get(SHEET_COL_MUSINSA_SUBCATEGORY) or get(4)
+        price = get(SHEET_COL_PRICE_BUYMA) or get(5)
         return ProductRow(
             no=fallback_no,
             state=state,
-            name=get(1),
-            brand=get(3),
-            category=get(4),
-            price=get(5),
+            name=name,
+            brand=brand,
+            category=category,
+            price=price,
             sheet=sheet,
             updated=get(6) or datetime.now().strftime("%H:%M:%S"),
             action="재실행 / 열기" if self._is_error(state) else "실행 / 열기",
@@ -437,6 +471,10 @@ class DashboardDataService:
             if any(word.lower() in haystack for word in words if word):
                 count += 1
         return count
+
+    def _matches_words(self, text: str, words: Iterable[str]) -> bool:
+        haystack = str(text or "").lower()
+        return any(str(word or "").lower() in haystack for word in words if str(word or ""))
 
     def _group_count(self, rows: Iterable[ProductRow], key_fn) -> list[tuple[str, int]]:
         counts: dict[str, int] = {}

@@ -50,7 +50,12 @@ class SystemChecker:
                 return {}
             with open(self.sheet_config_path, "r", encoding="utf-8") as file:
                 data = json.load(file)
-            return data if isinstance(data, dict) else {}
+            if not isinstance(data, dict):
+                return {}
+            sheet_name = str(data.get("sheet_name") or "").strip()
+            if sheet_name and self.looks_like_mojibake(sheet_name):
+                data["_sheet_name_warning"] = "sheet_name_mojibake"
+            return data
         except Exception:
             return {}
 
@@ -81,7 +86,17 @@ class SystemChecker:
     def has_valid_sheet_config(self) -> bool:
         config = self.load_sheet_config()
         sid = self.normalize_spreadsheet_id(config.get("spreadsheet_id", ""))
-        return self.is_valid_spreadsheet_id(sid) and bool((config.get("sheet_name") or "").strip())
+        sheet_name = str(config.get("sheet_name") or "").strip()
+        if self.looks_like_mojibake(sheet_name):
+            return False
+        return self.is_valid_spreadsheet_id(sid) and bool(sheet_name)
+
+    @staticmethod
+    def looks_like_mojibake(text: str) -> bool:
+        value = (text or "").strip()
+        if not value:
+            return False
+        return "?" in value
 
     def has_buyma_credentials(self) -> bool:
         path = self.get_buyma_credentials_target_path()

@@ -267,6 +267,7 @@ def build_buyma_category_plan(
         musinsa_middle=sheet_cat2,
         musinsa_small=sheet_cat3,
         product_name=source_product_name,
+        brand=brand,
     )
     if classifier_std is not None:
         standard_category = classifier_std

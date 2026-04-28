@@ -1,4 +1,4 @@
-from __future__ import annotations
+﻿from __future__ import annotations
 
 import tkinter as tk
 
@@ -25,6 +25,7 @@ class ScoutPage(BasePage):
         if not chart_values:
             chart_values = [overview["metrics"][1][1], overview["metrics"][2][1], overview["metrics"][3][1], max(overview["metrics"][0][1], 1)]
             chart_labels = ["수집", "실패", "진행", "전체"]
+
         progress_card, progress_body = self.build_chart_panel(
             left,
             "수집 추이 / 분포",
@@ -35,12 +36,58 @@ class ScoutPage(BasePage):
             subtitle="최근 수집 결과를 기준으로 카테고리별 분포를 요약합니다.",
         )
         progress_card.grid(row=0, column=0, sticky="ew", pady=(0, SECTION_GAP))
+
         summary = tk.Frame(progress_body, bg=self.controller.theme["panel"])
         summary.grid(row=2, column=0, sticky="ew", pady=(8, 0))
         summary.grid_columnconfigure(0, weight=1)
         summary.grid_columnconfigure(1, weight=1)
-        tk.Label(summary, text=f"수집 비율 {int(overview['ratio'] * 100)}%", bg=self.controller.theme["panel"], fg=self.controller.theme["green"], font=("Segoe UI", 8, "bold")).grid(row=0, column=0, sticky="w")
-        tk.Label(summary, text=f"정찰 워커 {self.controller.state.pipeline_status.get('scout', '대기')}", bg=self.controller.theme["panel"], fg=self.controller.theme["muted"], font=("Segoe UI", 8)).grid(row=0, column=1, sticky="e")
+
+        tk.Label(
+            summary,
+            text=f"수집 비율 {int(overview['ratio'] * 100)}%",
+            bg=self.controller.theme["panel"],
+            fg=self.controller.theme["green"],
+            font=("Segoe UI", 8, "bold"),
+        ).grid(row=0, column=0, sticky="w")
+        tk.Label(
+            summary,
+            text=f"정찰 단계 {self.controller.state.pipeline_status.get('scout', '대기')}",
+            bg=self.controller.theme["panel"],
+            fg=self.controller.theme["muted"],
+            font=("Segoe UI", 8),
+        ).grid(row=0, column=1, sticky="e")
+
+        unresolved_ratio_text = f"미분류 비율: {overview.get('unresolved_ratio', 0.0) * 100:.1f}%"
+        unresolved_color = self.controller.theme["red"] if overview.get("category_tuning_required", False) else self.controller.theme["muted"]
+        tk.Label(
+            summary,
+            text=unresolved_ratio_text,
+            bg=self.controller.theme["panel"],
+            fg=unresolved_color,
+            font=("Segoe UI", 8, "bold"),
+        ).grid(row=1, column=0, sticky="w", pady=(4, 0))
+        status = overview.get("unresolved_status", "OK")
+        if status == "OK":
+            status_color = self.controller.theme["green"]
+        elif status == "WARNING":
+            status_color = self.controller.theme["yellow"]
+        else:
+            status_color = self.controller.theme["red"]
+        tk.Label(
+            summary,
+            text=f"상태: {status}",
+            bg=self.controller.theme["panel"],
+            fg=status_color,
+            font=("Segoe UI", 8, "bold"),
+        ).grid(row=1, column=1, sticky="e", pady=(4, 0))
+        if overview.get("category_tuning_required", False):
+            tk.Label(
+                summary,
+                text="카테고리 튜닝 필요",
+                bg=self.controller.theme["panel"],
+                fg=self.controller.theme["red"],
+                font=("Segoe UI", 8, "bold"),
+            ).grid(row=2, column=1, sticky="e", pady=(2, 0))
 
         recent_rows = [(row.no, row.name, row.brand, row.category, row.updated, row.state) for row in overview["recent_rows"]]
         recent_card, _ = self.build_simple_table(
@@ -50,7 +97,7 @@ class ScoutPage(BasePage):
             recent_rows,
             level="bottom",
             min_height=BOTTOM_TABLE_HEIGHT,
-            empty_message="최근 수집 상품이 아직 없습니다.\n수집을 시작하면 최신 정찰 결과가 여기에 쌓입니다.",
+            empty_message="최근 수집 상품이 없습니다.\n수집을 시작하면 최신 결과가 여기에 표시됩니다.",
             empty_action=self.get_empty_table_action("scout"),
         )
         recent_card.grid(row=1, column=0, sticky="nsew")
@@ -58,50 +105,16 @@ class ScoutPage(BasePage):
         filter_card, filter_body = self.build_panel_card(right, "필터 / 실행", level="mid", min_height=ACTION_PANEL_HEIGHT)
         filter_card.grid(row=0, column=0, sticky="ew", pady=(0, SECTION_GAP))
         filter_body.grid_columnconfigure(0, weight=1)
-        filters = tk.Frame(filter_body, bg=self.controller.theme["panel"])
-        filters.grid(row=0, column=0, sticky="ew", pady=(0, 10))
-        filters.grid_columnconfigure(0, weight=1)
-        filters.grid_columnconfigure(1, weight=1)
-        for idx, label in enumerate(("작업 일자", "상태", "브랜드", "카테고리")):
-            col = idx % 2
-            row = (idx // 2) * 2
-            tk.Label(filters, text=label, bg=self.controller.theme["panel"], fg=self.controller.theme["muted"], font=("Segoe UI", 8, "bold")).grid(row=row, column=col, sticky="w", padx=(0 if col == 0 else 6, 0), pady=(4 if row else 0, 2))
-            entry = tk.Entry(filters, bg="#091626", fg="#dbeafe", insertbackground="#dbeafe", relief=tk.FLAT)
-            entry.grid(row=row + 1, column=col, sticky="ew", padx=(0 if col == 0 else 6, 0), ipady=3)
-        button_stack = tk.Frame(filter_body, bg=self.controller.theme["panel"])
-        button_stack.grid(row=1, column=0, sticky="ew")
-        button_stack.grid_columnconfigure(0, weight=1)
-        button_stack.grid_columnconfigure(1, weight=1)
-        self.controller._quick_button(
-            button_stack,
-            "수집 시작",
-            "상품 정찰 실행",
-            self.controller.theme["green"],
-            lambda: self.controller.dispatch_ui_action("수집/정찰 시작", lambda: self.controller.run_action("run"), category="scout"),
-            auto_pack=False,
-        ).grid(row=0, column=0, sticky="ew", padx=(0, 4), pady=(0, 6))
-        self.controller._mini_button(
-            button_stack,
-            "새로고침",
-            lambda: self.controller.dispatch_ui_action("수집/정찰 데이터 새로고침", self.controller.refresh_dashboard_data, category="scout"),
-            "#1e3350",
-            "#294565",
-        ).grid(row=0, column=1, sticky="ew", padx=(4, 0), pady=(0, 6))
-        self.controller._mini_button(
-            button_stack,
-            "수집 중지",
-            lambda: self.controller.dispatch_ui_action("수집/정찰 중지 요청", self.controller.stop_action, category="scout"),
-            "#334155",
-            "#475569",
-        ).grid(row=1, column=0, columnspan=2, sticky="ew")
+
         diagnostics = tk.Frame(filter_body, bg=self.controller.theme["panel"])
-        diagnostics.grid(row=2, column=0, sticky="ew", pady=(8, 0))
+        diagnostics.grid(row=0, column=0, sticky="ew", pady=(8, 0))
         self.build_dense_list(
             diagnostics,
             [
                 ("정찰 상태", self.controller.state.pipeline_status.get("scout", "대기")),
                 ("완료 건수", f"{overview['metrics'][1][1]}건"),
                 ("실패/대기", f"{overview['metrics'][2][1]} / {overview['metrics'][3][1]}"),
+                ("미분류", f"{overview.get('unresolved_count', 0)}건"),
             ],
         )
 

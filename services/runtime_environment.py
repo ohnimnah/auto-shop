@@ -58,8 +58,8 @@ def check_runtime_environment(credentials_path: str, logs_root: str = "logs") ->
     except Exception:
         screenshot_dir_writable = False
 
-    chrome_accessible = bool(shutil.which("chrome") or shutil.which("google-chrome") or shutil.which("msedge"))
-    chromedriver_accessible = bool(shutil.which("chromedriver"))
+    chrome_accessible = _is_chrome_accessible()
+    chromedriver_accessible = _is_chromedriver_accessible()
 
     return RuntimeCheckResult(
         selenium_available=selenium_available,
@@ -70,3 +70,37 @@ def check_runtime_environment(credentials_path: str, logs_root: str = "logs") ->
         chromedriver_accessible=chromedriver_accessible,
     )
 
+
+def _is_chrome_accessible() -> bool:
+    # PATH candidates first (cross-platform).
+    if shutil.which("chrome") or shutil.which("google-chrome") or shutil.which("msedge"):
+        return True
+
+    # Windows known install paths.
+    if os.name == "nt":
+        local_app_data = os.environ.get("LOCALAPPDATA", "")
+        program_files = os.environ.get("ProgramFiles", r"C:\Program Files")
+        program_files_x86 = os.environ.get("ProgramFiles(x86)", r"C:\Program Files (x86)")
+        candidates = [
+            os.path.join(local_app_data, r"Google\Chrome\Application\chrome.exe"),
+            os.path.join(program_files, r"Google\Chrome\Application\chrome.exe"),
+            os.path.join(program_files_x86, r"Google\Chrome\Application\chrome.exe"),
+            os.path.join(program_files, r"Microsoft\Edge\Application\msedge.exe"),
+            os.path.join(program_files_x86, r"Microsoft\Edge\Application\msedge.exe"),
+        ]
+        return any(os.path.exists(path) for path in candidates)
+    return False
+
+
+def _is_chromedriver_accessible() -> bool:
+    if shutil.which("chromedriver"):
+        return True
+    if os.name == "nt":
+        user_home = os.path.expanduser("~")
+        wdm_root = os.path.join(user_home, ".wdm", "drivers", "chromedriver")
+        if not os.path.isdir(wdm_root):
+            return False
+        for root, _dirs, files in os.walk(wdm_root):
+            if "chromedriver.exe" in files:
+                return True
+    return False

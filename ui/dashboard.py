@@ -627,9 +627,18 @@ class AutoShopLauncher(tk.Tk):
             self.product_table.heading(col, text=headings[col])
             self.product_table.column(col, width=widths[col], minwidth=widths[col], stretch=(col == "name"))
         self.product_table.grid(row=1, column=0, sticky="nsew")
-        scrollbar = ttk.Scrollbar(card, orient=tk.VERTICAL, command=self.product_table.yview)
-        self.product_table.configure(yscrollcommand=scrollbar.set)
-        scrollbar.grid(row=1, column=1, sticky="ns")
+        y_scrollbar = ttk.Scrollbar(card, orient=tk.VERTICAL, command=self.product_table.yview)
+        x_scrollbar = ttk.Scrollbar(card, orient=tk.HORIZONTAL, command=self.product_table.xview)
+        self.product_table.configure(yscrollcommand=y_scrollbar.set, xscrollcommand=x_scrollbar.set)
+        self.product_table.tag_configure("state_done", background="#153a2f", foreground="#d1fae5")
+        self.product_table.tag_configure("state_running", background="#1e3a5f", foreground="#dbeafe")
+        self.product_table.tag_configure("state_assets", background="#173e43", foreground="#ccfbf1")
+        self.product_table.tag_configure("state_design", background="#3b2a52", foreground="#ede9fe")
+        self.product_table.tag_configure("state_upload", background="#4a3318", foreground="#ffedd5")
+        self.product_table.tag_configure("state_error", background="#4b1f24", foreground="#fee2e2")
+        self.product_table.tag_configure("state_waiting", background="#2a3646", foreground="#e2e8f0")
+        y_scrollbar.grid(row=1, column=1, sticky="ns")
+        x_scrollbar.grid(row=2, column=0, sticky="ew", pady=(4, 0))
         self.empty_products_label = tk.Label(
             card,
             text="표시할 상품이 없습니다. Google Sheet를 연결하거나 로컬 products.json을 추가하면 여기에 표시됩니다.",
@@ -638,7 +647,7 @@ class AutoShopLauncher(tk.Tk):
             font=("Segoe UI", 9, "bold"),
             pady=8,
         )
-        self.empty_products_label.grid(row=2, column=0, columnspan=2, sticky="ew", pady=(8, 0))
+        self.empty_products_label.grid(row=3, column=0, columnspan=2, sticky="ew", pady=(8, 0))
         self._refresh_product_table()
 
     def _build_quick_actions_panel(self, parent: tk.Frame) -> None:
@@ -891,10 +900,12 @@ class AutoShopLauncher(tk.Tk):
         for item in self.product_table.get_children():
             self.product_table.delete(item)
         for row in self.state.product_rows:
+            tag = self._product_state_tag(row.state)
             self.product_table.insert(
                 "",
                 tk.END,
                 values=(row.no, row.state, row.name, row.brand, row.category, row.price, row.sheet, row.updated, row.action),
+                tags=(tag,),
             )
         if hasattr(self, "empty_products_label"):
             if self.state.product_rows:
@@ -903,6 +914,22 @@ class AutoShopLauncher(tk.Tk):
             else:
                 self.empty_products_label.configure(text=self.state.data_source.detail or "표시할 상품이 없습니다.")
                 self.empty_products_label.grid()
+
+    def _product_state_tag(self, state_text: str) -> str:
+        text = str(state_text or "").lower()
+        if any(word in text for word in ("완료", "성공", "출품완료", "업로드 완료")):
+            return "state_done"
+        if any(word in text for word in ("오류", "실패", "보류", "exception", "error")):
+            return "state_error"
+        if any(word in text for word in ("업로드", "출품")):
+            return "state_upload"
+        if any(word in text for word in ("썸네일", "디자인")):
+            return "state_design"
+        if any(word in text for word in ("이미지", "다운로드", "저장")):
+            return "state_assets"
+        if any(word in text for word in ("정찰", "수집", "진행")):
+            return "state_running"
+        return "state_waiting"
 
     def refresh_dashboard_data(self) -> None:
         self.dashboard_data.refresh()
