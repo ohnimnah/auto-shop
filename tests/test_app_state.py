@@ -1,5 +1,9 @@
 import tempfile
 import unittest
+from contextlib import contextmanager
+import shutil
+import os
+import uuid
 
 from services.log_store import FileLogWriter
 from state.app_state import AppLogger, AppState, LogEvent
@@ -7,6 +11,16 @@ from state.snapshot_store import StateSnapshotStore
 
 
 class AppStateTests(unittest.TestCase):
+    @contextmanager
+    def _workspace_tempdir(self):
+        os.makedirs("logs", exist_ok=True)
+        path = os.path.join("logs", f"test_app_state_{uuid.uuid4().hex}")
+        os.makedirs(path, exist_ok=True)
+        try:
+            yield path
+        finally:
+            shutil.rmtree(path, ignore_errors=True)
+
     def test_state_notifies_changed_key_only(self):
         state = AppState()
         changes = []
@@ -18,7 +32,7 @@ class AppStateTests(unittest.TestCase):
         self.assertEqual([change.key for change in changes], ["status_text", "pipeline_status.scout"])
 
     def test_snapshot_round_trip_restores_minimal_state(self):
-        with tempfile.TemporaryDirectory() as temp_dir:
+        with self._workspace_tempdir() as temp_dir:
             path = f"{temp_dir}/snapshot.json"
             state = AppState()
             state.set_status("대기중")
@@ -36,7 +50,7 @@ class AppStateTests(unittest.TestCase):
             self.assertEqual(restored.team_watch_failures["assets"], 1)
 
     def test_logger_emits_log_event_and_file_writer_persists_jsonl(self):
-        with tempfile.TemporaryDirectory() as temp_dir:
+        with self._workspace_tempdir() as temp_dir:
             logger = AppLogger()
             events = []
             writer = FileLogWriter(temp_dir)

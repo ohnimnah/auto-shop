@@ -1,6 +1,10 @@
 import json
 import tempfile
 import unittest
+from contextlib import contextmanager
+import shutil
+import os
+import uuid
 
 from services.dashboard_data_service import DashboardDataService
 from services.pipeline_service import LauncherPipelineService
@@ -45,6 +49,16 @@ class FakeSheetSystemChecker(FakeSystemChecker):
 
 
 class DashboardDataServiceTests(unittest.TestCase):
+    @contextmanager
+    def _workspace_tempdir(self):
+        os.makedirs("logs", exist_ok=True)
+        path = os.path.join("logs", f"test_dashboard_data_{uuid.uuid4().hex}")
+        os.makedirs(path, exist_ok=True)
+        try:
+            yield path
+        finally:
+            shutil.rmtree(path, ignore_errors=True)
+
     def _service(self, temp_dir, state=None, manager=None):
         return DashboardDataService(
             data_dir=temp_dir,
@@ -56,7 +70,7 @@ class DashboardDataServiceTests(unittest.TestCase):
         )
 
     def test_load_products_from_local_json(self):
-        with tempfile.TemporaryDirectory() as temp_dir:
+        with self._workspace_tempdir() as temp_dir:
             with open(f"{temp_dir}/products.json", "w", encoding="utf-8") as file:
                 json.dump(
                     {
@@ -75,7 +89,7 @@ class DashboardDataServiceTests(unittest.TestCase):
             self.assertEqual(rows[1].action, "재실행 / 열기")
 
     def test_load_products_reports_local_json_source(self):
-        with tempfile.TemporaryDirectory() as temp_dir:
+        with self._workspace_tempdir() as temp_dir:
             with open(f"{temp_dir}/products.json", "w", encoding="utf-8") as file:
                 json.dump({"products": [{"상품명": "A", "상태": "대기"}]}, file, ensure_ascii=False)
 
@@ -86,7 +100,7 @@ class DashboardDataServiceTests(unittest.TestCase):
             self.assertIn("로컬", detail)
 
     def test_load_products_reports_no_data_source(self):
-        with tempfile.TemporaryDirectory() as temp_dir:
+        with self._workspace_tempdir() as temp_dir:
             rows, source, detail = self._service(temp_dir).load_products_with_source()
 
             self.assertEqual(rows, [])
@@ -94,7 +108,7 @@ class DashboardDataServiceTests(unittest.TestCase):
             self.assertIn("Google Sheet", detail)
 
     def test_load_products_reports_empty_google_sheet_source(self):
-        with tempfile.TemporaryDirectory() as temp_dir:
+        with self._workspace_tempdir() as temp_dir:
             service = DashboardDataService(
                 data_dir=temp_dir,
                 script_dir=temp_dir,
@@ -111,7 +125,7 @@ class DashboardDataServiceTests(unittest.TestCase):
             self.assertIn("상품 행", detail)
 
     def test_metrics_use_products_and_runtime(self):
-        with tempfile.TemporaryDirectory() as temp_dir:
+        with self._workspace_tempdir() as temp_dir:
             manager = FakeProcessManager()
             manager.running = True
             manager.team_running.add("assets")
@@ -131,7 +145,7 @@ class DashboardDataServiceTests(unittest.TestCase):
             self.assertEqual(metrics.error, 1)
 
     def test_log_event_updates_state_and_pipeline(self):
-        with tempfile.TemporaryDirectory() as temp_dir:
+        with self._workspace_tempdir() as temp_dir:
             state = AppState()
             service = self._service(temp_dir, state=state)
 

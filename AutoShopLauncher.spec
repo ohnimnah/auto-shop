@@ -1,11 +1,18 @@
-# -*- mode: python ; coding: utf-8 -*-
+﻿# -*- mode: python ; coding: utf-8 -*-
 
 
 a = Analysis(
-    ['C:\\Users\\gksal\\iCloudDrive\\개발\\auto_shop\\launcher_gui.py'],
+    ['launcher_gui.py'],
     pathex=[],
     binaries=[],
-    datas=[],
+    datas=[
+        ('VERSION', '.'),
+        ('RELEASE_CHECKLIST.md', '.'),
+        ('OPERATIONS.md', '.'),
+        ('TROUBLESHOOTING.md', '.'),
+        ('app', 'app'),
+        ('services/crawler', 'services/crawler'),
+    ],
     hiddenimports=[],
     hookspath=[],
     hooksconfig={},
@@ -42,3 +49,4 @@ coll = COLLECT(
     upx_exclude=[],
     name='AutoShopLauncher',
 )
+

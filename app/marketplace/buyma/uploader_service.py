@@ -1,7 +1,20 @@
 from __future__ import annotations
 
 from typing import Protocol
-from tenacity import retry, stop_after_attempt, wait_fixed
+try:
+    from tenacity import retry, stop_after_attempt, wait_fixed
+except Exception:  # pragma: no cover
+    def retry(*_args, **_kwargs):
+        def _decorator(fn):
+            return fn
+
+        return _decorator
+
+    def stop_after_attempt(_n):
+        return None
+
+    def wait_fixed(_n):
+        return None
 
 
 class BuymaUploader(Protocol):

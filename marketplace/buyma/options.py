@@ -7,8 +7,12 @@ import re
 from datetime import datetime
 from typing import Dict, List
 
-from selenium.webdriver.common.keys import Keys
-from selenium.webdriver.common.by import By
+try:
+    from selenium.webdriver.common.keys import Keys
+    from selenium.webdriver.common.by import By
+except Exception:  # pragma: no cover
+    Keys = None  # type: ignore[assignment]
+    By = None  # type: ignore[assignment]
 
 from marketplace.buyma.retry_ops import safe_click
 from marketplace.buyma.selectors import JP_SHITEI_NASHI, JP_SIZE_SHITEI_NASHI

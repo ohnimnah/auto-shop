@@ -5,7 +5,21 @@ import os
 from dataclasses import dataclass
 from typing import Optional
 
-import keyring
+try:
+    import keyring  # type: ignore
+except Exception:  # pragma: no cover
+    class _FallbackKeyring:
+        _bag: dict[tuple[str, str], str] = {}
+
+        @classmethod
+        def set_password(cls, service: str, account: str, password: str) -> None:
+            cls._bag[(service, account)] = password
+
+        @classmethod
+        def get_password(cls, service: str, account: str) -> str | None:
+            return cls._bag.get((service, account))
+
+    keyring = _FallbackKeyring()  # type: ignore
 
 
 @dataclass
@@ -49,4 +63,3 @@ class KeyringCredentialStore:
 
     def exists(self) -> bool:
         return self.load() is not None
-

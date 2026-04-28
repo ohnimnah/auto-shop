@@ -10,13 +10,22 @@ import time
 from urllib.parse import urlparse
 from typing import Callable, Optional, Tuple
 
-from selenium import webdriver
-from selenium.common.exceptions import SessionNotCreatedException
-from selenium.webdriver.common.by import By
-from selenium.webdriver.support import expected_conditions as EC
-from selenium.webdriver.support.ui import WebDriverWait
-from selenium.webdriver.chrome.options import Options as ChromeOptions
-from selenium.webdriver.chrome.service import Service
+try:
+    from selenium import webdriver
+    from selenium.common.exceptions import SessionNotCreatedException
+    from selenium.webdriver.common.by import By
+    from selenium.webdriver.support import expected_conditions as EC
+    from selenium.webdriver.support.ui import WebDriverWait
+    from selenium.webdriver.chrome.options import Options as ChromeOptions
+    from selenium.webdriver.chrome.service import Service
+except Exception:  # pragma: no cover
+    webdriver = None  # type: ignore[assignment]
+    SessionNotCreatedException = Exception  # type: ignore[assignment]
+    By = None  # type: ignore[assignment]
+    EC = None  # type: ignore[assignment]
+    WebDriverWait = None  # type: ignore[assignment]
+    ChromeOptions = object  # type: ignore[assignment]
+    Service = object  # type: ignore[assignment]
 from webdriver_manager.chrome import ChromeDriverManager
 
 from app.security.credential_store import KeyringCredentialStore

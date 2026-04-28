@@ -10,6 +10,7 @@ import subprocess
 from datetime import datetime
 
 from app.security.credential_store import KeyringCredentialStore
+from services.runtime_environment import RuntimeCheckResult, check_runtime_environment
 
 
 class SystemChecker:
@@ -154,4 +155,9 @@ class SystemChecker:
             "runtime": "정상" if self.has_ready_runtime() else "필요",
             "last_check": datetime.now().strftime("%H:%M:%S"),
         }
+
+    def check_runtime_environment(self) -> RuntimeCheckResult:
+        credentials_path = self.get_available_credentials_path() or self.get_credentials_target_path()
+        logs_root = os.path.join(self.script_dir, "logs")
+        return check_runtime_environment(credentials_path=credentials_path, logs_root=logs_root)
 

@@ -75,6 +75,18 @@ def build() -> Path:
         "--windowed",
         "--name",
         APP_NAME,
+        "--add-data",
+        "VERSION;.",
+        "--add-data",
+        "RELEASE_CHECKLIST.md;.",
+        "--add-data",
+        "OPERATIONS.md;.",
+        "--add-data",
+        "TROUBLESHOOTING.md;.",
+        "--add-data",
+        "app;app",
+        "--add-data",
+        "services/crawler;services/crawler",
         str(ENTRY),
     ]
 

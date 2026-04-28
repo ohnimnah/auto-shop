@@ -12,6 +12,9 @@ import re
 import sys
 import time
 from typing import Dict, List, Tuple
+from services.runtime_environment import check_runtime_environment
+
+__version__ = "0.4.0-rc1"
 from config.app_config import (
     ACTUAL_SIZE_COLUMN,
     BAIMA_SELL_PRICE_COLUMN,
@@ -798,6 +801,21 @@ def parse_args():
         default=LISTING_SEED_SHEET_NAME,
         help="목록 수집 seed 전용 시트 이름(미지정 시 queue 시트와 동일)",
     )
+    parser.add_argument(
+        "--check-runtime",
+        action="store_true",
+        help="실행 전 런타임 환경(selenium/keyring/credentials/logs/chrome)을 점검",
+    )
+    parser.add_argument(
+        "--json",
+        action="store_true",
+        help="--check-runtime와 함께 사용 시 JSON 형식으로 출력",
+    )
+    parser.add_argument(
+        "--version",
+        action="store_true",
+        help="버전 정보를 출력",
+    )
     return parser.parse_args()
 
 
@@ -831,7 +849,38 @@ def scrape_musinsa_product(
 
 def main():
     args = parse_args()
+    if args.version:
+        print(__version__)
+        return
     initialize_runtime_paths(args.data_dir, args.credentials_file)
+    if args.check_runtime:
+        result = check_runtime_environment(credentials_path=CREDENTIALS_PATH, logs_root=os.path.join(os.getcwd(), "logs"))
+        payload = {
+            "ok": result.ok,
+            "selenium_available": result.selenium_available,
+            "keyring_available": result.keyring_available,
+            "credentials_exists": result.credentials_exists,
+            "screenshot_dir_writable": result.screenshot_dir_writable,
+            "chrome_accessible": result.chrome_accessible,
+            "chromedriver_accessible": result.chromedriver_accessible,
+        }
+        if args.json:
+            print(json.dumps(payload, ensure_ascii=False))
+        else:
+            print("Runtime Check")
+            print("-------------")
+            rows = [
+                ("selenium", payload["selenium_available"]),
+                ("keyring", payload["keyring_available"]),
+                ("google_credentials", payload["credentials_exists"]),
+                ("logs", payload["screenshot_dir_writable"]),
+                ("chrome", payload["chrome_accessible"]),
+                ("chrome_driver", payload["chromedriver_accessible"]),
+                ("overall", payload["ok"]),
+            ]
+            for key, ok in rows:
+                print(f"{key:<18} {'OK' if ok else 'MISSING'}")
+        return
 
     # 바이마 출품 모드
     if args.upload:

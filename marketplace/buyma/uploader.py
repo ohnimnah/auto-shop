@@ -16,11 +16,51 @@ from marketplace.buyma.failure_tracking import capture_failure_artifacts
 from marketplace.buyma.mapper import buyma_title_units
 from marketplace.buyma.retry_ops import safe_click
 from marketplace.common.interfaces import MarketplaceRow, MarketplaceUploader
-from selenium.webdriver.common.by import By
-from selenium.webdriver.common.keys import Keys
-from selenium.webdriver.support import expected_conditions as EC
-from selenium.webdriver.support.ui import WebDriverWait
-from tenacity import RetryError, Retrying, stop_after_attempt, wait_fixed
+try:
+    from selenium.webdriver.common.by import By
+    from selenium.webdriver.common.keys import Keys
+    from selenium.webdriver.support import expected_conditions as EC
+    from selenium.webdriver.support.ui import WebDriverWait
+except Exception:  # pragma: no cover
+    By = None  # type: ignore[assignment]
+    Keys = None  # type: ignore[assignment]
+    EC = None  # type: ignore[assignment]
+    WebDriverWait = None  # type: ignore[assignment]
+try:
+    from tenacity import RetryError, Retrying, stop_after_attempt, wait_fixed
+except Exception:  # pragma: no cover
+    class RetryError(Exception):
+        def __init__(self, exc: Exception | None = None):
+            self._exc = exc
+            self.last_attempt = type("_Attempt", (), {"exception": lambda self: exc})()
+
+    def stop_after_attempt(_n):
+        return None
+
+    def wait_fixed(_n):
+        return None
+
+    class _AttemptCtx:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, exc_type, exc, _tb):
+            if exc is not None:
+                raise exc
+            return False
+
+    class Retrying:
+        def __init__(self, *args, **kwargs):
+            self._done = False
+
+        def __iter__(self):
+            return self
+
+        def __next__(self):
+            if self._done:
+                raise StopIteration
+            self._done = True
+            return _AttemptCtx()
 from utils.structured_logger import get_logger, log_event
 
 
@@ -561,7 +601,7 @@ def apply_buyma_post_option_fields(
                 }
 
                 function normText(t) {
-                    return (t || '').replace(/\s+/g, ' ').trim();
+                    return (t || '').replace(/\\\\s+/g, ' ').trim();
                 }
 
                 var fields = document.querySelectorAll('.bmm-c-field, .bmm-c-form-table__body tr, .bmm-c-form-table tr');
@@ -644,7 +684,7 @@ def apply_buyma_post_option_fields(
             function nearestText(el) {
                 var cur = el;
                 for (var depth = 0; cur && depth < 6; depth++) {
-                    var txt = (cur.textContent || '').replace(/\s+/g, ' ').trim();
+                    var txt = (cur.textContent || '').replace(/\\\\s+/g, ' ').trim();
                     if (txt) return txt;
                     cur = cur.parentElement;
                 }
@@ -679,7 +719,7 @@ def apply_buyma_post_option_fields(
             var fields = document.querySelectorAll('.bmm-c-field, .bmm-c-form-table__body tr, .bmm-c-form-table tr');
             for (var i = 0; i < fields.length; i++) {
                 var root = fields[i];
-                var txt = (root.textContent || '').replace(/\s+/g, ' ').trim();
+                var txt = (root.textContent || '').replace(/\\\\s+/g, ' ').trim();
                 if (hasQtyHint(txt)) {
                     var ipt = root.querySelector("input.bmm-c-text-field, input[type='text'], input[type='number'], input[type='tel']");
                     if (ipt && isVisible(ipt)) return ipt;
@@ -689,7 +729,7 @@ def apply_buyma_post_option_fields(
             var labels = document.querySelectorAll('label, .bmm-c-field__label, .bmm-c-form-table__header, .bmm-c-form-table__label');
             for (var i2 = 0; i2 < labels.length; i2++) {
                 var label = labels[i2];
-                var labelText = (label.textContent || '').replace(/\s+/g, ' ').trim();
+                var labelText = (label.textContent || '').replace(/\\\\s+/g, ' ').trim();
                 if (!hasQtyHint(labelText)) continue;
                 var forId = label.getAttribute('for') || '';
                 if (forId) {
@@ -708,7 +748,7 @@ def apply_buyma_post_option_fields(
 
             var allNodes = document.querySelectorAll("p, span, div, th, td, label");
             for (var z = 0; z < allNodes.length; z++) {
-                var nt = (allNodes[z].textContent || '').replace(/\s+/g, ' ').trim();
+                var nt = (allNodes[z].textContent || '').replace(/\\\\s+/g, ' ').trim();
                 if (!hasQtyHint(nt)) continue;
                 var c = allNodes[z];
                 for (var upz = 0; c && upz < 6; upz++) {
@@ -809,7 +849,7 @@ def apply_buyma_post_option_fields(
                 function nearestText(el) {
                     var cur = el;
                     for (var depth = 0; cur && depth < 5; depth++) {
-                        var txt = (cur.textContent || '').replace(/\s+/g, ' ').trim();
+                        var txt = (cur.textContent || '').replace(/\\\\s+/g, ' ').trim();
                         if (txt) return txt;
                         cur = cur.parentElement;
                     }
@@ -1093,3 +1133,4 @@ class BuymaUploaderAdapter(MarketplaceUploader):
             max_items=max_items,
             interactive=interactive,
         )
+
