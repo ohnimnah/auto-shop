@@ -862,6 +862,17 @@ def fill_buyma_form(
     fill_size_supplement,
 ) -> Dict[str, Any]:
     """Marketplace BUYMA form fill orchestration."""
+
+    def _is_apparel_category(diag: Dict[str, Any]) -> bool:
+        standard = str(diag.get("standard_category", "") or "").upper()
+        if standard.startswith("TOP_") or standard in {"OUTER", "PANTS", "HOME_PAJAMA"}:
+            return True
+        middle = str(diag.get("target_buyma_middle_category", "") or "")
+        for token in ("トップス", "ボトムス", "パンツ", "アウター", "ジャケット", "ワンピース", "インナー"):
+            if token in middle:
+                return True
+        return False
+
     category_diag: Dict[str, Any] = {}
     try:
         try:
@@ -903,6 +914,18 @@ def fill_buyma_form(
                 select_category_by_arrow=select_category_by_arrow,
                 find_best_option_by_arrow=find_best_option_by_arrow,
             )
+            actual_mid = str(category_diag.get("actual_selected_middle_category", "") or "")
+            actual_child = str(category_diag.get("actual_selected_child_category", "") or "")
+            if "その他" in actual_mid or "その他" in actual_child:
+                # 의류 카테고리의 '기타' 선택은 실패로 격상한다.
+                if _is_apparel_category(category_diag):
+                    category_diag["final_result"] = "failed"
+                    if not category_diag.get("failure_stage"):
+                        category_diag["failure_stage"] = "middle_other" if "その他" in actual_mid else "child_other"
+                    category_diag["category_selection_success"] = False
+                else:
+                    category_diag["final_result"] = category_diag.get("final_result") or "other"
+                    category_diag["category_selection_success"] = False
         except Exception as exc:
             print(f"  ✗ 카테고리 선택 실패: {exc}")
             category_diag = {
@@ -922,6 +945,10 @@ def fill_buyma_form(
                 "mapping_table_used": bool(category_plan.get("mapping_table_used", False)) if "category_plan" in locals() else False,
                 "legacy_used": bool(category_plan.get("legacy_used", False)) if "category_plan" in locals() else False,
             }
+
+        if str(category_diag.get("final_result", "")).lower() in {"other", "failed"}:
+            print("  △ 카테고리 선택 결과가 기타/실패로 판단되어 자동 진행을 중단합니다.")
+            return {"result": "error", "category_diag": category_diag}
 
         core_fill_result = apply_buyma_core_fields(
             driver,
