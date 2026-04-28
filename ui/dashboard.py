@@ -507,8 +507,12 @@ class AutoShopLauncher(tk.Tk):
 
     def _build_pipeline_section(self, parent: tk.Frame) -> None:
         card = self._grid_card(parent, "파이프라인 진행 현황", row=2, pady=(0, 12))
-        for idx, step in enumerate(self.state.pipeline_steps):
-            self._pipeline_step(card, idx, step.key, step.title, step.metric, step.ratio, self.theme[step.color_key])
+        steps = list(self.state.pipeline_steps)
+        for idx in range(len(steps)):
+            card.grid_columnconfigure(idx, weight=1, uniform="pipeline")
+        card.grid_rowconfigure(0, weight=1)
+        for idx, step in enumerate(steps):
+            self._pipeline_step(card, idx, len(steps), step.key, step.title, step.metric, step.ratio, self.theme[step.color_key])
 
     def _build_activity_section(self, parent: tk.Frame) -> None:
         wrap = tk.Frame(parent, bg=self.theme["bg"])
@@ -785,10 +789,15 @@ class AutoShopLauncher(tk.Tk):
         else:
             tk.Label(card, text=sub, bg=self.theme["panel"], fg=self.theme["muted"], font=("Segoe UI", 8)).pack(anchor="w", pady=(5, 0))
 
-    def _pipeline_step(self, parent: tk.Widget, col: int, key: str, title: str, metric: str, ratio: float, accent: str) -> None:
+    def _pipeline_step(self, parent: tk.Widget, col: int, total: int, key: str, title: str, metric: str, ratio: float, accent: str) -> None:
         bg = "#112b4f" if key == "scout" else self.theme["panel_2"]
         box = tk.Frame(parent, bg=bg, padx=12, pady=10)
-        box.pack(side=tk.LEFT, fill=tk.BOTH, expand=True, padx=(0 if col == 0 else 5, 0 if col == 5 else 5))
+        box.grid(
+            row=0,
+            column=col,
+            sticky="nsew",
+            padx=(0 if col == 0 else 5, 0 if col == total - 1 else 5),
+        )
         tk.Label(box, text=title, bg=bg, fg=accent, font=("Segoe UI", 9, "bold")).pack(anchor="w")
         self.pipeline_progress_vars[key] = tk.StringVar(value=f"{metric}    {int(ratio * 100)}%")
         self.pipeline_ratios[key] = ratio
