@@ -1,7 +1,12 @@
-"""Standalone StandardCategory -> BUYMA mapping table support.
+"""Runtime StandardCategory -> BUYMA mapping table support.
 
-This module does NOT change upload behavior.
-It is a support layer for manual `category_mapping` table creation and tests.
+The upload flow resolves StandardCategory through this module. Runtime mapping
+rows are loaded once in this priority order:
+
+1. Google Sheet tab `category_mapping` rows with source `manual` or `verified`
+2. local `_debug/category_mapping.json`
+3. Google Sheet tab `category_mapping` rows with source `auto_seed`
+4. built-in default mapping rows
 """
 
 from __future__ import annotations
@@ -10,37 +15,18 @@ from dataclasses import dataclass, asdict
 from datetime import datetime
 import json
 import os
-from typing import Dict, Iterable, List, Optional, Sequence, Tuple
+from typing import Dict, Iterable, List, Optional, Tuple
 
-from marketplace.buyma.standard_category import StandardCategory
-
-
-# BUYMA labels (use unicode escapes to avoid terminal/font encoding issues)
-PARENT_WOMEN = "\u30ec\u30c7\u30a3\u30fc\u30b9\u30d5\u30a1\u30c3\u30b7\u30e7\u30f3"
-PARENT_MEN = "\u30e1\u30f3\u30ba\u30d5\u30a1\u30c3\u30b7\u30e7\u30f3"
-
-MIDDLE_TOPS = "\u30c8\u30c3\u30d7\u30b9"
-MIDDLE_INNER_ROOM = "\u30a4\u30f3\u30ca\u30fc\u30fb\u30eb\u30fc\u30e0\u30a6\u30a7\u30a2"
-MIDDLE_OUTER_WOMEN = "\u30a2\u30a6\u30bf\u30fc"
-MIDDLE_OUTER_MEN = "\u30a2\u30a6\u30bf\u30fc\u30fb\u30b8\u30e3\u30b1\u30c3\u30c8"
-MIDDLE_BOTTOMS_WOMEN = "\u30dc\u30c8\u30e0\u30b9"
-MIDDLE_BOTTOMS_MEN = "\u30d1\u30f3\u30c4\u30fb\u30dc\u30c8\u30e0\u30b9"
-MIDDLE_SHOES_WOMEN = "\u9774\u30fb\u30b7\u30e5\u30fc\u30ba"
-MIDDLE_SHOES_MEN = "\u9774\u30fb\u30d6\u30fc\u30c4\u30fb\u30b5\u30f3\u30c0\u30eb"
-MIDDLE_DRESS_WOMEN = "\u30ef\u30f3\u30d4\u30fc\u30b9\u30fb\u30aa\u30fc\u30eb\u30a4\u30f3\u30ef\u30f3"
-MIDDLE_OTHER_FASHION_MEN = "\u305d\u306e\u4ed6\u30d5\u30a1\u30c3\u30b7\u30e7\u30f3"
-
-CHILD_HOODIE = "\u30d1\u30fc\u30ab\u30fc\u30fb\u30d5\u30fc\u30c7\u30a3"
-CHILD_SWEAT = "\u30b9\u30a6\u30a7\u30c3\u30c8\u30fb\u30c8\u30ec\u30fc\u30ca\u30fc"
-CHILD_TSHIRT = "T\u30b7\u30e3\u30c4\u30fb\u30ab\u30c3\u30c8\u30bd\u30fc"
-CHILD_KNIT = "\u30cb\u30c3\u30c8\u30fb\u30bb\u30fc\u30bf\u30fc"
-CHILD_PAJAMA = "\u30eb\u30fc\u30e0\u30a6\u30a7\u30a2\u30fb\u30d1\u30b8\u30e3\u30de"
-CHILD_SHIRT = "\u30b7\u30e3\u30c4"
-CHILD_CARDIGAN = "\u30ab\u30fc\u30c7\u30a3\u30ac\u30f3"
-CHILD_OUTER_JACKET = "\u30b8\u30e3\u30b1\u30c3\u30c8"
-CHILD_PANTS = "\u30d1\u30f3\u30c4"
-CHILD_SNEAKER = "\u30b9\u30cb\u30fc\u30ab\u30fc"
-CHILD_DRESS = ""
+from marketplace.buyma.standard_category import (
+    PARENT_MEN,
+    PARENT_WOMEN,
+    STANDARD_CATEGORY_SPECS,
+    StandardCategory,
+    get_buyma_parent_category,
+    normalize_standard_category,
+    resolve_standard_category,
+    validate_buyma_category_path,
+)
 
 
 MAPPING_HEADERS: List[str] = [
@@ -55,6 +41,12 @@ MAPPING_HEADERS: List[str] = [
     "note",
     "updated_at",
 ]
+
+CATEGORY_MAPPING_SHEET_NAME = "category_mapping"
+SHEET_VERIFIED_SOURCES = {"manual", "verified"}
+SHEET_AUTO_SEED_SOURCE = "auto_seed"
+_RUNTIME_MAPPING_CACHE: Optional[Tuple[List["CategoryMappingRow"], str]] = None
+_RUNTIME_MAPPING_LOGGED_SOURCE = ""
 
 
 @dataclass(frozen=True)
@@ -82,11 +74,6 @@ def _norm(v: str) -> str:
     return (v or "").strip()
 
 
-def _contains(text: str, keywords: Sequence[str]) -> bool:
-    t = text.lower()
-    return any(k.lower() in t for k in keywords)
-
-
 def normalize_gender(value: str) -> str:
     text = (value or "").strip().lower()
     if text in {"women", "woman", "female", "f", "w", "\uc5ec\uc131", "\ub808\ub514\uc2a4"}:
@@ -103,23 +90,8 @@ def resolve_standard_category_for_test(
     musinsa_small: str = "",
 ) -> StandardCategory:
     """Small standalone resolver for mapping-table tests."""
-    text = " ".join([musinsa_large or "", musinsa_middle or "", musinsa_small or "", product_name or ""]).lower()
-
-    if _contains(text, ["\ud30c\uc790\ub9c8", "\uc7a0\uc637", "\ub8f8\uc6e8\uc5b4", "pajama", "sleepwear", "loungewear"]):
-        return StandardCategory.HOME_PAJAMA
-    if _contains(text, ["\ud6c4\ub4dc", "\ud6c4\ub514", "hoodie", "hooded"]):
-        return StandardCategory.TOP_HOODIE
-    if _contains(text, ["\ub9e8\ud22c\ub9e8", "\uc2a4\uc6e8\ud2b8", "\uc2a4\uc6fb", "sweatshirt"]):
-        return StandardCategory.TOP_SWEAT
-    if _contains(text, ["\ub2c8\ud2b8", "\uc2a4\uc6e8\ud130", "knit", "sweater"]):
-        return StandardCategory.TOP_KNIT
-    if _contains(text, ["\ud2f0\uc154\uce20", "\ubc18\ud314", "\uae34\ud314", "t-shirt", "tee"]):
-        return StandardCategory.TOP_TSHIRT
-    if _contains(text, ["\uc2a4\ub2c8\ucee4\uc988", "\uc6b4\ub3d9\ud654", "sneaker", "sneakers"]):
-        return StandardCategory.SNEAKER
-    if _contains(text, ["\uc6d0\ud53c\uc2a4", "\ub4dc\ub808\uc2a4", "dress", "onepiece"]):
-        return StandardCategory.DRESS
-    return StandardCategory.ETC
+    std, _combined = resolve_standard_category(musinsa_large, musinsa_middle, musinsa_small, product_name)
+    return std
 
 
 def _find_raw_category_row(
@@ -141,52 +113,13 @@ def _find_raw_category_row(
 
 def build_common_mapping_rows_from_raw(raw_rows: Iterable[Dict[str, str]]) -> List[CategoryMappingRow]:
     """Build mapping rows for common categories and both genders."""
-    top_specs: List[Tuple[StandardCategory, str, str]] = [
-        (StandardCategory.TOP_HOODIE, MIDDLE_TOPS, CHILD_HOODIE),
-        (StandardCategory.TOP_SWEAT, MIDDLE_TOPS, CHILD_SWEAT),
-        (StandardCategory.TOP_TSHIRT, MIDDLE_TOPS, CHILD_TSHIRT),
-        (StandardCategory.TOP_SHIRT, MIDDLE_TOPS, CHILD_SHIRT),
-        (StandardCategory.TOP_KNIT, MIDDLE_TOPS, CHILD_KNIT),
-        (StandardCategory.TOP_CARDIGAN, MIDDLE_TOPS, CHILD_CARDIGAN),
-        (StandardCategory.HOME_PAJAMA, MIDDLE_INNER_ROOM, CHILD_PAJAMA),
-    ]
-
     out: List[CategoryMappingRow] = []
     now = _now_iso()
     for gender, parent in (("women", PARENT_WOMEN), ("men", PARENT_MEN)):
-        for std_cat, middle, child in top_specs:
-            hit = _find_raw_category_row(raw_rows, parent=parent, middle=middle, child=child)
-            out.append(
-                CategoryMappingRow(
-                    standard_category=std_cat.value,
-                    gender=gender,
-                    buyma_parent_category=parent,
-                    buyma_middle_category=middle,
-                    buyma_child_category=child,
-                    category_url=_norm((hit or {}).get("category_url", "")),
-                    category_id=_norm((hit or {}).get("category_id", "")),
-                    source="buyma_categories_raw",
-                    note="" if hit else "NOT_FOUND_IN_RAW",
-                    updated_at=now,
-                )
-            )
-        outer_middle = MIDDLE_OUTER_MEN if gender == "men" else MIDDLE_OUTER_WOMEN
-        pants_middle = MIDDLE_BOTTOMS_MEN if gender == "men" else MIDDLE_BOTTOMS_WOMEN
-
-        for std_cat, middle, child in (
-            (StandardCategory.OUTER, outer_middle, CHILD_OUTER_JACKET),
-            (StandardCategory.PANTS, pants_middle, CHILD_PANTS),
-            (
-                StandardCategory.SNEAKER,
-                MIDDLE_SHOES_MEN if gender == "men" else MIDDLE_SHOES_WOMEN,
-                CHILD_SNEAKER,
-            ),
-            (
-                StandardCategory.DRESS,
-                MIDDLE_OTHER_FASHION_MEN if gender == "men" else MIDDLE_DRESS_WOMEN,
-                CHILD_DRESS,
-            ),
-        ):
+        is_mens = gender == "men"
+        for std_cat, spec in STANDARD_CATEGORY_SPECS.items():
+            middle = spec.middle(is_mens=is_mens)
+            child = spec.child
             hit = _find_raw_category_row(raw_rows, parent=parent, middle=middle, child=child)
             out.append(
                 CategoryMappingRow(
@@ -260,73 +193,26 @@ def mapping_rows_to_sheet_values(rows: Iterable[CategoryMappingRow]) -> List[Lis
 
 
 def build_default_mapping_rows() -> List[CategoryMappingRow]:
-    """Return the current default 18-row mapping set."""
+    """Return the default StandardCategory mapping set for both genders."""
     now = _now_iso()
     rows: List[CategoryMappingRow] = []
     for gender, parent in (("women", PARENT_WOMEN), ("men", PARENT_MEN)):
-        rows.extend(
-            [
-                CategoryMappingRow(StandardCategory.TOP_HOODIE.value, gender, parent, MIDDLE_TOPS, CHILD_HOODIE, "", "", "default", "", now),
-                CategoryMappingRow(StandardCategory.TOP_SWEAT.value, gender, parent, MIDDLE_TOPS, CHILD_SWEAT, "", "", "default", "", now),
-                CategoryMappingRow(StandardCategory.TOP_TSHIRT.value, gender, parent, MIDDLE_TOPS, CHILD_TSHIRT, "", "", "default", "", now),
-                CategoryMappingRow(StandardCategory.TOP_SHIRT.value, gender, parent, MIDDLE_TOPS, CHILD_SHIRT, "", "", "default", "", now),
-                CategoryMappingRow(StandardCategory.TOP_KNIT.value, gender, parent, MIDDLE_TOPS, CHILD_KNIT, "", "", "default", "", now),
-                CategoryMappingRow(StandardCategory.TOP_CARDIGAN.value, gender, parent, MIDDLE_TOPS, CHILD_CARDIGAN, "", "", "default", "", now),
-                CategoryMappingRow(StandardCategory.HOME_PAJAMA.value, gender, parent, MIDDLE_INNER_ROOM, CHILD_PAJAMA, "", "", "default", "", now),
+        is_mens = gender == "men"
+        for std_cat, spec in STANDARD_CATEGORY_SPECS.items():
+            rows.append(
                 CategoryMappingRow(
-                    StandardCategory.SNEAKER.value,
+                    std_cat.value,
                     gender,
                     parent,
-                    MIDDLE_SHOES_MEN if gender == "men" else MIDDLE_SHOES_WOMEN,
-                    CHILD_SNEAKER,
+                    spec.middle(is_mens=is_mens),
+                    spec.child,
                     "",
                     "",
                     "default",
                     "",
                     now,
-                ),
-                CategoryMappingRow(
-                    StandardCategory.DRESS.value,
-                    gender,
-                    parent,
-                    MIDDLE_OTHER_FASHION_MEN if gender == "men" else MIDDLE_DRESS_WOMEN,
-                    CHILD_DRESS,
-                    "",
-                    "",
-                    "default",
-                    "",
-                    now,
-                ),
-            ]
-        )
-        rows.append(
-            CategoryMappingRow(
-                StandardCategory.OUTER.value,
-                gender,
-                parent,
-                MIDDLE_OUTER_MEN if gender == "men" else MIDDLE_OUTER_WOMEN,
-                CHILD_OUTER_JACKET,
-                "",
-                "",
-                "default",
-                "",
-                now,
+                )
             )
-        )
-        rows.append(
-            CategoryMappingRow(
-                StandardCategory.PANTS.value,
-                gender,
-                parent,
-                MIDDLE_BOTTOMS_MEN if gender == "men" else MIDDLE_BOTTOMS_WOMEN,
-                CHILD_PANTS,
-                "",
-                "",
-                "default",
-                "",
-                now,
-            )
-        )
     return rows
 
 
@@ -351,7 +237,7 @@ def load_mapping_rows_from_json(path: str) -> List[CategoryMappingRow]:
                     buyma_child_category=str(item.get("buyma_child_category", "") or ""),
                     category_url=str(item.get("category_url", "") or ""),
                     category_id=str(item.get("category_id", "") or ""),
-                    source=str(item.get("source", "") or "json"),
+                    source=_normalize_mapping_source(str(item.get("source", "") or "json")),
                     note=str(item.get("note", "") or ""),
                     updated_at=str(item.get("updated_at", "") or ""),
                 )
@@ -361,14 +247,280 @@ def load_mapping_rows_from_json(path: str) -> List[CategoryMappingRow]:
         return []
 
 
+def _safe_log(message: str) -> None:
+    try:
+        print(message)
+    except UnicodeEncodeError:
+        encoding = "utf-8"
+        print((message or "").encode(encoding, errors="replace").decode(encoding, errors="replace"))
+
+
+def _log_mapping_source(source: str, count: int, detail: str = "") -> None:
+    global _RUNTIME_MAPPING_LOGGED_SOURCE
+    if _RUNTIME_MAPPING_LOGGED_SOURCE == source:
+        return
+    _RUNTIME_MAPPING_LOGGED_SOURCE = source
+    suffix = f" ({detail})" if detail else ""
+    _safe_log(f"  [category][mapping] mapping_source={source} rows={count}{suffix}")
+
+
+def _normalize_mapping_source(value: str) -> str:
+    source = (value or "").strip().lower()
+    if source in {"manual", "verified", "auto_seed"}:
+        return source
+    if source in {"google_sheet", "sheet"}:
+        return "auto_seed"
+    if source in {"json", "local", "local_json"}:
+        return "local_json"
+    if source == "default":
+        return "default"
+    return source or "auto_seed"
+
+
+def reset_runtime_mapping_cache() -> None:
+    """Clear runtime mapping cache. Intended for tests and explicit reload tools."""
+    global _RUNTIME_MAPPING_CACHE, _RUNTIME_MAPPING_LOGGED_SOURCE
+    _RUNTIME_MAPPING_CACHE = None
+    _RUNTIME_MAPPING_LOGGED_SOURCE = ""
+
+
+def _mapping_row_from_dict(item: Dict[str, str], *, source: str) -> CategoryMappingRow:
+    return CategoryMappingRow(
+        standard_category=str(item.get("standard_category", "") or "").strip(),
+        gender=normalize_gender(str(item.get("gender", "") or "")),
+        buyma_parent_category=str(item.get("buyma_parent_category", "") or "").strip(),
+        buyma_middle_category=str(item.get("buyma_middle_category", "") or "").strip(),
+        buyma_child_category=str(item.get("buyma_child_category", "") or "").strip(),
+        category_url=str(item.get("category_url", "") or "").strip(),
+        category_id=str(item.get("category_id", "") or "").strip(),
+        source=_normalize_mapping_source(str(item.get("source", "") or source)),
+        note=str(item.get("note", "") or "").strip(),
+        updated_at=str(item.get("updated_at", "") or "").strip(),
+    )
+
+
+def _is_valid_mapping_row(row: CategoryMappingRow) -> bool:
+    if not row.standard_category:
+        return False
+    try:
+        category = normalize_standard_category(row.standard_category)
+    except Exception:
+        return False
+    if category == StandardCategory.ETC:
+        return False
+    return validate_buyma_category_path(
+        row.buyma_parent_category,
+        row.buyma_middle_category,
+        row.buyma_child_category,
+    )
+
+
+def _filter_valid_mapping_rows(rows: Iterable[CategoryMappingRow]) -> List[CategoryMappingRow]:
+    valid: List[CategoryMappingRow] = []
+    for row in rows:
+        if _is_valid_mapping_row(row):
+            valid.append(
+                CategoryMappingRow(
+                    standard_category=normalize_standard_category(row.standard_category).value,
+                    gender=normalize_gender(row.gender),
+                    buyma_parent_category=row.buyma_parent_category,
+                    buyma_middle_category=row.buyma_middle_category,
+                    buyma_child_category=row.buyma_child_category,
+                    category_url=row.category_url,
+                    category_id=row.category_id,
+                    source=_normalize_mapping_source(row.source),
+                    note=row.note,
+                    updated_at=row.updated_at,
+                )
+            )
+    return valid
+
+
+def _load_sheet_runtime_config() -> Tuple[str, str]:
+    try:
+        from marketplace.common.runtime import get_runtime_data_dir
+        from marketplace.common.sheet_source import extract_spreadsheet_id
+
+        cfg_path = os.path.join(get_runtime_data_dir(), "sheets_config.json")
+        if not os.path.exists(cfg_path):
+            return "", CATEGORY_MAPPING_SHEET_NAME
+        with open(cfg_path, "r", encoding="utf-8") as f:
+            cfg = json.load(f)
+        if not isinstance(cfg, dict):
+            return "", CATEGORY_MAPPING_SHEET_NAME
+        spreadsheet_id = extract_spreadsheet_id(str(cfg.get("spreadsheet_id") or ""))
+        mapping_sheet_name = str(cfg.get("category_mapping_sheet_name") or CATEGORY_MAPPING_SHEET_NAME).strip()
+        return spreadsheet_id, mapping_sheet_name or CATEGORY_MAPPING_SHEET_NAME
+    except Exception:
+        return "", CATEGORY_MAPPING_SHEET_NAME
+
+
+def _read_google_sheet_values(spreadsheet_id: str, sheet_name: str) -> List[List[str]]:
+    if not spreadsheet_id:
+        return []
+    try:
+        from marketplace.common.sheet_source import get_credentials_path, get_sheets_service
+
+        here = os.path.dirname(os.path.abspath(__file__))
+        credentials_path = get_credentials_path(here)
+        service = get_sheets_service(credentials_path)
+        last_col = chr(ord("A") + len(MAPPING_HEADERS) - 1)
+        result = service.spreadsheets().values().get(
+            spreadsheetId=spreadsheet_id,
+            range=f"'{sheet_name}'!A1:{last_col}5000",
+        ).execute()
+        return result.get("values", []) or []
+    except Exception as exc:
+        _safe_log(f"  [category][mapping] google_sheet load failed: {exc}")
+        return []
+
+
+def load_mapping_rows_from_google_sheet() -> List[CategoryMappingRow]:
+    """Load validator-passing rows from Google Sheet tab `category_mapping`."""
+    spreadsheet_id, sheet_name = _load_sheet_runtime_config()
+    values = _read_google_sheet_values(spreadsheet_id, sheet_name)
+    if not values:
+        return []
+
+    raw_header = [str(v or "").strip() for v in values[0]]
+    header_index = {name: idx for idx, name in enumerate(raw_header) if name}
+    if "standard_category" not in header_index:
+        return []
+
+    rows: List[CategoryMappingRow] = []
+    for raw in values[1:]:
+        record: Dict[str, str] = {}
+        for header in MAPPING_HEADERS:
+            idx = header_index.get(header)
+            record[header] = str(raw[idx]).strip() if idx is not None and idx < len(raw) else ""
+        rows.append(_mapping_row_from_dict(record, source="google_sheet"))
+    return _filter_valid_mapping_rows(rows)
+
+
+def _mapping_key(row: CategoryMappingRow) -> Tuple[str, str]:
+    return (row.standard_category, normalize_gender(row.gender))
+
+
+def _split_sheet_mapping_rows(rows: Iterable[CategoryMappingRow]) -> Tuple[List[CategoryMappingRow], List[CategoryMappingRow]]:
+    verified: List[CategoryMappingRow] = []
+    auto_seed: List[CategoryMappingRow] = []
+    for row in rows:
+        source = _normalize_mapping_source(row.source)
+        if source in SHEET_VERIFIED_SOURCES:
+            verified.append(row)
+        elif source == SHEET_AUTO_SEED_SOURCE:
+            auto_seed.append(row)
+    return verified, auto_seed
+
+
+def _merge_mapping_layers(
+    *,
+    default_rows: List[CategoryMappingRow],
+    auto_seed_rows: List[CategoryMappingRow],
+    local_rows: List[CategoryMappingRow],
+    verified_rows: List[CategoryMappingRow],
+) -> List[CategoryMappingRow]:
+    by_key = {_mapping_key(row): row for row in default_rows}
+    for layer in (auto_seed_rows, local_rows, verified_rows):
+        by_key.update({_mapping_key(row): row for row in layer if row.standard_category})
+    return list(by_key.values())
+
+
+def _mapping_source_label(
+    *,
+    verified_rows: List[CategoryMappingRow],
+    local_rows: List[CategoryMappingRow],
+    auto_seed_rows: List[CategoryMappingRow],
+) -> str:
+    parts: List[str] = []
+    if verified_rows:
+        parts.append("google_sheet_verified")
+    if local_rows:
+        parts.append("local_json")
+    if auto_seed_rows:
+        parts.append("google_sheet_auto_seed")
+    parts.append("default")
+    return "+".join(parts)
+
+
+def _mapping_source_detail(
+    *,
+    verified_rows: List[CategoryMappingRow],
+    local_rows: List[CategoryMappingRow],
+    auto_seed_rows: List[CategoryMappingRow],
+    default_rows: List[CategoryMappingRow],
+) -> str:
+    verified_counts: Dict[str, int] = {}
+    for row in verified_rows:
+        verified_counts[row.source] = verified_counts.get(row.source, 0) + 1
+    verified_detail = ", ".join(f"{source}={count}" for source, count in sorted(verified_counts.items())) or "manual=0, verified=0"
+    return (
+        f"{verified_detail}, "
+        f"local_json={len(local_rows)}, "
+        f"auto_seed={len(auto_seed_rows)}, "
+        f"default={len(default_rows)}"
+    )
+
+
+def get_runtime_mapping_source() -> str:
+    """Return the cached runtime mapping source label."""
+    if _RUNTIME_MAPPING_CACHE is None:
+        get_runtime_mapping_rows()
+    return _RUNTIME_MAPPING_CACHE[1] if _RUNTIME_MAPPING_CACHE else "default"
+
+
+def get_resolved_mapping_row_source(
+    standard_category: StandardCategory,
+    *,
+    is_mens: bool,
+) -> str:
+    """Return the source label of the row that will resolve a standard category."""
+    gender = "men" if is_mens else "women"
+    standard_category = normalize_standard_category(standard_category)
+    match = resolve_buyma_category_from_mapping(
+        get_runtime_mapping_rows(),
+        standard_category=standard_category,
+        gender=gender,
+    )
+    return match.source if match else ""
+
+
 def get_runtime_mapping_rows() -> List[CategoryMappingRow]:
-    """Load mapping from _debug/category_mapping.json if possible, else use defaults."""
+    """Load mapping once with verified sheet rows before local and auto-seed rows."""
+    global _RUNTIME_MAPPING_CACHE
+    if _RUNTIME_MAPPING_CACHE is not None:
+        return list(_RUNTIME_MAPPING_CACHE[0])
+
+    sheet_rows = _filter_valid_mapping_rows(load_mapping_rows_from_google_sheet())
+    verified_rows, auto_seed_rows = _split_sheet_mapping_rows(sheet_rows)
+
     here = os.path.dirname(os.path.abspath(__file__))
     json_path = os.path.join(here, "_debug", "category_mapping.json")
-    loaded = load_mapping_rows_from_json(json_path)
-    if loaded:
-        return loaded
-    return build_default_mapping_rows()
+    local_rows = _filter_valid_mapping_rows(load_mapping_rows_from_json(json_path))
+    default_rows = build_default_mapping_rows()
+    rows = _merge_mapping_layers(
+        default_rows=default_rows,
+        auto_seed_rows=auto_seed_rows,
+        local_rows=local_rows,
+        verified_rows=verified_rows,
+    )
+    mapping_source = _mapping_source_label(
+        verified_rows=verified_rows,
+        local_rows=local_rows,
+        auto_seed_rows=auto_seed_rows,
+    )
+    _RUNTIME_MAPPING_CACHE = (rows, mapping_source)
+    _log_mapping_source(
+        mapping_source,
+        len(rows),
+        _mapping_source_detail(
+            verified_rows=verified_rows,
+            local_rows=local_rows,
+            auto_seed_rows=auto_seed_rows,
+            default_rows=default_rows,
+        ),
+    )
+    return list(rows)
 
 
 def resolve_standard_category_buyma_target(
@@ -382,6 +534,7 @@ def resolve_standard_category_buyma_target(
     Returns (parent, middle, child). Empty values mean not matched.
     """
     gender = "men" if is_mens else "women"
+    standard_category = normalize_standard_category(standard_category)
     rows = get_runtime_mapping_rows()
     match = resolve_buyma_category_from_mapping(
         rows,
@@ -389,6 +542,12 @@ def resolve_standard_category_buyma_target(
         gender=gender,
     )
     if not match:
+        return "", "", ""
+    if not validate_buyma_category_path(
+        match.buyma_parent_category,
+        match.buyma_middle_category,
+        match.buyma_child_category,
+    ):
         return "", "", ""
     return (
         match.buyma_parent_category or "",

@@ -1,5 +1,8 @@
-"""BUYMA parsing and matching helper functions."""
+"""BUYMA parsing, matching, and credential helper functions."""
 
+import base64
+import json
+import os
 import re
 import time
 import urllib.parse
@@ -9,6 +12,44 @@ from bs4 import BeautifulSoup
 from selenium.webdriver.common.by import By
 from selenium.webdriver.support import expected_conditions as EC
 from selenium.webdriver.support.ui import WebDriverWait
+
+
+class BuymaCredentialService:
+    """Persist BUYMA login credentials outside the UI layer."""
+
+    def __init__(self, credentials_path: str) -> None:
+        self.credentials_path = credentials_path
+
+    def save(self, email: str, password: str) -> None:
+        os.makedirs(os.path.dirname(self.credentials_path), exist_ok=True)
+        payload = {
+            "email": base64.b64encode(email.encode()).decode(),
+            "password": base64.b64encode(password.encode()).decode(),
+        }
+        with open(self.credentials_path, "w", encoding="utf-8") as file:
+            json.dump(payload, file, ensure_ascii=False, indent=2)
+
+    def load_email(self) -> str:
+        if not os.path.exists(self.credentials_path):
+            return ""
+        try:
+            with open(self.credentials_path, "r", encoding="utf-8") as file:
+                data = json.load(file)
+            return base64.b64decode(str(data.get("email", "")).encode()).decode().strip()
+        except Exception:
+            return ""
+
+    def exists(self) -> bool:
+        if not os.path.exists(self.credentials_path):
+            return False
+        try:
+            with open(self.credentials_path, "r", encoding="utf-8") as file:
+                data = json.load(file)
+            email = base64.b64decode(str(data.get("email", "")).encode()).decode().strip()
+            password = base64.b64decode(str(data.get("password", "")).encode()).decode().strip()
+            return bool(email and password)
+        except Exception:
+            return False
 
 
 def normalize_price(text: str) -> str:

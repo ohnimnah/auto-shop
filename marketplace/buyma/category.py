@@ -5,15 +5,26 @@ from __future__ import annotations
 from selenium.webdriver.common.by import By
 from selenium.webdriver.common.keys import Keys
 import sys
-from typing import Callable, Dict, List, Tuple
+from typing import Callable, Dict, List, Sequence, Tuple
 from marketplace.buyma.standard_category import (
+    STANDARD_CATEGORY_SPECS,
     StandardCategory,
     build_combined_text,
+    explain_standard_category_mapping,
+    get_standard_category_spec,
     map_standard_to_buyma_middle_and_subcategory,
+    normalize_standard_category,
     resolve_standard_category,
+    validate_buyma_category_path,
 )
 from marketplace.common.category_classifier import classify_standard_category_from_sheet
 import standard_category_map as standard_category_map_mod
+
+try:
+    from rapidfuzz import fuzz, process
+except Exception:  # pragma: no cover - exercised when rapidfuzz is unavailable.
+    fuzz = None
+    process = None
 
 
 def _safe_log(message: str) -> None:
@@ -59,6 +70,29 @@ CATEGORY_KEYWORDS = [
     (["부츠", "boot"], None, "靴", "ブーツ"),
     (["로퍼", "loafer"], None, "靴", "ローファー"),
 ]
+
+CATEGORY_RECOVERY_ALIASES: Dict[str, List[str]] = {
+    "スウェット・トレーナー": ["スウェット", "トレーナー"],
+    "Tシャツ・カットソー": ["カットソー", "Tシャツ"],
+    "パーカー・フーディ": ["パーカー", "フーディー", "フーディ"],
+    "ブラウス・シャツ": ["ブラウス", "シャツ"],
+    "ダウンジャケット・コート": ["ダウンジャケット", "ダウンコート", "ダウン"],
+    "レザージャケット・コート": ["レザージャケット", "レザーアウター"],
+    "デニム・ジーパン": ["デニム・ジーンズ", "ジーンズ", "デニムパンツ"],
+    "ショートパンツ": ["ショーツ", "ハーフ・ショートパンツ"],
+    "スウェットパンツ": ["トラックパンツ", "ジョガーパンツ"],
+    "ローファー・オックスフォード": ["ローファー", "オックスフォード"],
+    "サンダル・ミュール": ["サンダル", "ミュール"],
+    "ドレスシューズ・革靴・ビジネスシューズ": ["ドレスシューズ", "革靴", "ビジネスシューズ"],
+    "バックパック・リュック": ["バックパック", "リュック"],
+    "ニットキャップ・ビーニー": ["ニットキャップ", "ビーニー"],
+    "マフラー・ストール": ["マフラー", "ストール", "スカーフ"],
+}
+
+COMMON_PARENT_FALLBACK_MIDDLES: Dict[str, List[str]] = {
+    "レディースファッション": ["トップス", "アウター", "ボトムス", "ワンピース・オールインワン", "靴・シューズ", "バッグ・カバン", "ファッション雑貨・小物"],
+    "メンズファッション": ["トップス", "アウター・ジャケット", "パンツ・ボトムス", "靴・ブーツ・サンダル", "バッグ・カバン", "ファッション雑貨・小物", "その他ファッション"],
+}
 
 
 def detect_gender_raw(title: str) -> str:
@@ -274,7 +308,13 @@ def build_buyma_category_plan(
         default_mid = _default_middle_for_standard(standard_category.value, is_mens=is_mens_category)
         if default_mid:
             mapped_cat2 = default_mid
-    mapping_table_used = standard_category != StandardCategory.ETC and bool(mapped_cat2)
+    mapping_source = standard_category_map_mod.get_runtime_mapping_source()
+    mapping_row_source = standard_category_map_mod.get_resolved_mapping_row_source(
+        standard_category,
+        is_mens=is_mens_category,
+    )
+    mapping_valid = validate_buyma_category_path(mapped_parent, mapped_cat2, mapped_cat3)
+    mapping_table_used = standard_category != StandardCategory.ETC and bool(mapped_cat2) and mapping_valid
 
     legacy_cat2, legacy_cat3 = "", ""
     if not mapping_table_used:
@@ -283,7 +323,8 @@ def build_buyma_category_plan(
             combined_text,
             is_mens=is_mens_category,
         )
-    legacy_used = standard_category != StandardCategory.ETC and bool(legacy_cat2)
+    legacy_valid = validate_buyma_category_path(cat1, legacy_cat2, legacy_cat3)
+    legacy_used = standard_category != StandardCategory.ETC and bool(legacy_cat2) and legacy_valid
     semantic_fallback_used = not mapping_table_used
 
     if mapping_table_used:
@@ -304,13 +345,19 @@ def build_buyma_category_plan(
         source_product_name,
         musinsa_category_text,
     )
+    final_path_valid = validate_buyma_category_path(cat1, cat2, corrected_cat3)
+    mapping_diag = explain_standard_category_mapping(standard_category, is_mens=is_mens_category)
 
     _safe_log(f"  [category][semantic] musinsa={sheet_cat1} / {sheet_cat2} / {sheet_cat3}")
     _safe_log(f"  [category][semantic] product_name={source_product_name}")
     _safe_log(f"  [category][semantic] combined_text={combined_text}")
     _safe_log(f"  [category][semantic] standard_category={standard_category.value}")
     _safe_log(f"  [category][semantic] mapped_buyma={cat1} > {cat2} > {corrected_cat3}")
+    _safe_log(f"  [category][semantic] spec_buyma={mapping_diag.get('buyma_parent')} > {mapping_diag.get('buyma_middle')} > {mapping_diag.get('buyma_child')}")
+    _safe_log(f"  [category][semantic] validator_passed={final_path_valid}")
     _safe_log(f"  [category][semantic] mapping_table_used={mapping_table_used}")
+    _safe_log(f"  [category][semantic] mapping_source={mapping_source}")
+    _safe_log(f"  [category][semantic] mapping_row_source={mapping_row_source}")
     _safe_log(f"  [category][semantic] legacy_used={legacy_used}")
     _safe_log(f"  [category][semantic] fallback_used={semantic_fallback_used}")
 
@@ -327,12 +374,158 @@ def build_buyma_category_plan(
         "combined_text": combined_text,
         "standard_category": standard_category.value,
         "mapping_table_used": mapping_table_used,
+        "mapping_source": mapping_source,
+        "mapping_row_source": mapping_row_source,
         "legacy_used": legacy_used,
         "semantic_fallback_used": semantic_fallback_used,
+        "category_path_valid": final_path_valid,
+        "mapping_validator_passed": mapping_valid,
         "fallback_cat1": fallback_cat1,
         "fallback_cat2": fallback_cat2,
         "fallback_cat3": corrected_fallback_cat3,
     }
+
+
+def _dedupe_keep_order(values: Sequence[str]) -> List[str]:
+    out: List[str] = []
+    seen = set()
+    for value in values:
+        item = (value or "").strip()
+        if not item or item in seen:
+            continue
+        seen.add(item)
+        out.append(item)
+    return out
+
+
+def _category_recovery_aliases(label: str) -> List[str]:
+    return _dedupe_keep_order(CATEGORY_RECOVERY_ALIASES.get((label or "").strip(), []))
+
+
+def _category_recovery_candidates(
+    category_plan: Dict[str, str],
+    item_index: int,
+    *,
+    parent: str,
+    middle: str = "",
+) -> List[str]:
+    is_mens = "メンズ" in (parent or category_plan.get("cat1", ""))
+    standard_category = normalize_standard_category(str(category_plan.get("standard_category", "") or ""))
+    spec = get_standard_category_spec(standard_category)
+    candidates: List[str] = []
+
+    if item_index == 1:
+        if spec:
+            candidates.append(spec.middle(is_mens=is_mens))
+        candidates.extend(COMMON_PARENT_FALLBACK_MIDDLES.get(parent or category_plan.get("cat1", ""), []))
+        for other_spec in STANDARD_CATEGORY_SPECS.values():
+            candidates.append(other_spec.middle(is_mens=is_mens))
+    elif item_index == 2:
+        if spec:
+            candidates.append(spec.child)
+        target_middle = middle or category_plan.get("cat2", "")
+        for other_spec in STANDARD_CATEGORY_SPECS.values():
+            if other_spec.middle(is_mens=is_mens) == target_middle:
+                candidates.append(other_spec.child)
+
+    return _dedupe_keep_order([value for value in candidates if value and "その他" not in value])
+
+
+def _best_fuzzy_match(target: str, candidates: Sequence[str], *, threshold: int = 78) -> Tuple[str, int]:
+    target = (target or "").strip()
+    choices = _dedupe_keep_order(candidates)
+    if not target or not choices:
+        return "", 0
+    if process is not None and fuzz is not None:
+        found = process.extractOne(target, choices, scorer=fuzz.WRatio)
+        if not found:
+            return "", 0
+        label, score = str(found[0]), int(found[1])
+        return (label, score) if score >= threshold else ("", score)
+
+    import difflib
+
+    scored = [(candidate, int(difflib.SequenceMatcher(None, target, candidate).ratio() * 100)) for candidate in choices]
+    label, score = max(scored, key=lambda item: item[1])
+    return (label, score) if score >= threshold else ("", score)
+
+
+def _read_selected_category_value(driver, item_index: int) -> str:
+    try:
+        return str(
+            driver.execute_script(
+                """
+                var items = document.querySelectorAll('.sell-category__item');
+                if (arguments[0] === 0) {
+                    var root = document.querySelector('.sell-category-select');
+                    var v0 = root ? root.querySelector('.Select-value-label') : null;
+                    return v0 ? v0.textContent.trim() : '';
+                }
+                if (items.length <= arguments[0]) return '';
+                var v = items[arguments[0]].querySelector('.Select-value-label');
+                return v ? v.textContent.trim() : '';
+                """,
+                item_index,
+            )
+            or ""
+        ).strip()
+    except Exception:
+        return ""
+
+
+def _try_category_recovery(
+    driver,
+    category_plan: Dict[str, str],
+    diag: Dict[str, object],
+    *,
+    item_index: int,
+    target_label: str,
+    parent: str,
+    middle: str = "",
+    find_best_option_by_arrow: Callable[[object, int, str, bool], bool],
+) -> Tuple[bool, str]:
+    level_name = "middle" if item_index == 1 else "child"
+    target_label = (target_label or "").strip()
+    attempts: List[Dict[str, object]] = diag.setdefault("recovery_attempts", [])  # type: ignore[assignment]
+
+    def _attempt(method: str, label: str, score: int = 0, *, allow_other: bool = False) -> Tuple[bool, str]:
+        if not label:
+            return False, ""
+        _safe_log(f"  [category][recovery] level={level_name} method={method} target={target_label} try={label} score={score}")
+        ok = find_best_option_by_arrow(driver, item_index, label, allow_other)
+        selected = _read_selected_category_value(driver, item_index) or label if ok else ""
+        attempts.append({"level": level_name, "method": method, "target": target_label, "candidate": label, "score": score, "success": ok, "selected": selected})
+        if ok:
+            diag["recovery_used"] = True
+            diag["recovery_method"] = method
+            diag[f"recovered_{level_name}_category"] = selected
+            _safe_log(f"  [category][recovery] success level={level_name} method={method} selected={selected}")
+        return ok, selected
+
+    for alias in _category_recovery_aliases(target_label):
+        ok, selected = _attempt("alias", alias)
+        if ok:
+            return True, selected
+
+    candidates = _category_recovery_candidates(category_plan, item_index, parent=parent, middle=middle)
+    fuzzy_label, score = _best_fuzzy_match(target_label, candidates)
+    if fuzzy_label and fuzzy_label != target_label:
+        ok, selected = _attempt("fuzzy", fuzzy_label, score)
+        if ok:
+            return True, selected
+
+    fallback_candidates = [candidate for candidate in candidates if candidate not in {target_label, fuzzy_label, *set(_category_recovery_aliases(target_label))}]
+    for candidate in fallback_candidates[:8]:
+        ok, selected = _attempt("same_parent_fallback", candidate)
+        if ok:
+            return True, selected
+
+    ok, selected = _attempt("other", "その他", allow_other=False)
+    if ok:
+        diag["failure_stage"] = f"{level_name}_other"
+        diag["final_result"] = "other"
+        return True, selected
+    return False, ""
 
 
 def apply_buyma_category_selection(
@@ -364,6 +557,13 @@ def apply_buyma_category_selection(
         "actual_selected_child_category": "",
         "mapping_table_used": bool(category_plan.get("mapping_table_used", False)),
         "legacy_used": bool(category_plan.get("legacy_used", False)),
+        "category_path_valid": bool(category_plan.get("category_path_valid", False)),
+        "mapping_validator_passed": bool(category_plan.get("mapping_validator_passed", False)),
+        "recovery_used": False,
+        "recovery_method": "",
+        "recovered_middle_category": "",
+        "recovered_child_category": "",
+        "recovery_attempts": [],
     }
 
     if not cat1 or not cat2:
@@ -401,21 +601,32 @@ def apply_buyma_category_selection(
 
     diag["actual_selected_parent_category"] = cat1
     print(f"  ✓ 대카테: {cat1}")
-    if not cat2 or not find_best_option_by_arrow(driver, 1, cat2):
-        print(f"  △ 중카테 '{cat2}' 미발견, その他도 없음")
-        print("  [category][middle] selection failed")
+    if not cat2:
+        print("  △ 중카테 없음, 수동 선택 필요")
         diag["failure_stage"] = "middle"
         diag["final_result"] = "failed"
         return diag
 
-    sel_val = driver.execute_script(
-        """
-        var items = document.querySelectorAll('.sell-category__item');
-        if (items.length < 2) return '';
-        var v = items[1].querySelector('.Select-value-label');
-        return v ? v.textContent.trim() : '';
-        """
-    )
+    if not find_best_option_by_arrow(driver, 1, cat2, False):
+        print(f"  △ 중카테 '{cat2}' 직접 선택 실패, recovery 시작")
+        recovered, recovered_value = _try_category_recovery(
+            driver,
+            category_plan,
+            diag,
+            item_index=1,
+            target_label=cat2,
+            parent=cat1,
+            find_best_option_by_arrow=find_best_option_by_arrow,
+        )
+        if not recovered:
+            print(f"  △ 중카테 '{cat2}' recovery 실패")
+            diag["failure_stage"] = "middle"
+            diag["final_result"] = "failed"
+            return diag
+        cat2 = recovered_value or cat2
+        diag["target_buyma_middle_category"] = cat2
+
+    sel_val = _read_selected_category_value(driver, 1)
     diag["actual_selected_middle_category"] = sel_val or cat2
     if "その他" in (sel_val or ""):
         print(f"  ✓ 중카테: {cat2} -> その他 (기타)")
@@ -437,15 +648,8 @@ def apply_buyma_category_selection(
             diag["final_result"] = "success"
         return diag
 
-    if find_best_option_by_arrow(driver, 2, cat3):
-        sel_val3 = driver.execute_script(
-            """
-            var items = document.querySelectorAll('.sell-category__item');
-            if (items.length < 3) return '';
-            var v = items[2].querySelector('.Select-value-label');
-            return v ? v.textContent.trim() : '';
-            """
-        )
+    if find_best_option_by_arrow(driver, 2, cat3, False):
+        sel_val3 = _read_selected_category_value(driver, 2)
         diag["actual_selected_child_category"] = sel_val3 or cat3
         if "その他" in (sel_val3 or ""):
             print(f"  ✓ 소카테: {cat3} -> その他 (기타)")
@@ -455,11 +659,24 @@ def apply_buyma_category_selection(
         else:
             print(f"  ✓ 소카테: {sel_val3 or cat3}")
     else:
-        print(f"  △ 소카테 '{cat3}' 미발견, その他도 없음")
-        print("  [category][child] selection failed")
-        diag["failure_stage"] = "child"
-        diag["final_result"] = "failed"
-        return diag
+        print(f"  △ 소카테 '{cat3}' 직접 선택 실패, recovery 시작")
+        recovered, recovered_value = _try_category_recovery(
+            driver,
+            category_plan,
+            diag,
+            item_index=2,
+            target_label=cat3,
+            parent=cat1,
+            middle=cat2,
+            find_best_option_by_arrow=find_best_option_by_arrow,
+        )
+        if not recovered:
+            print(f"  △ 소카테 '{cat3}' recovery 실패")
+            diag["failure_stage"] = "child"
+            diag["final_result"] = "failed"
+            return diag
+        diag["actual_selected_child_category"] = recovered_value or cat3
+        diag["target_buyma_child_category"] = recovered_value or cat3
 
     diag["category_selection_success"] = (diag["final_result"] == "success")
     if not diag["final_result"]:

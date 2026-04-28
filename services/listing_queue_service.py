@@ -690,7 +690,7 @@ def _update_seed_row_simple(
     status: str,
     note: str,
 ) -> None:
-    """Update seed-only tab row (B=????, C=????, D=??)."""
+    """Update seed-only tab row (B=수집일시, C=수집상태, D=비고)."""
     now = _now_text()
     data = [
         {'range': f"'{sheet_name}'!B{row_num}", 'values': [[now]]},
@@ -769,7 +769,7 @@ def collect_listing_queue_once(
             spreadsheet_id=spreadsheet_id,
             seed_sheet_name=seed_sheet_name,
         )
-        print(f"[queue] seed ?? ?? ??: '{seed_sheet_name}'")
+        print(f"[queue] seed 전용 시트 사용: '{seed_sheet_name}'")
     else:
         seed_rows: List[Tuple[int, str]] = []
         page_url_header = QUEUE_HEADERS[0]
@@ -787,10 +787,10 @@ def collect_listing_queue_once(
     summary = {'seed_rows': len(seed_rows), 'new_rows': 0, 'duplicate_rows': 0, 'error_rows': 0}
 
     if not seed_rows:
-        print(f"[queue] '{queue_sheet_name}' ??: ??? ???URL(seed row)? ????.")
+        print(f"[queue] '{queue_sheet_name}' 시트: 처리할 seed URL이 없습니다.")
         return summary
 
-    print(f"[queue] '{queue_sheet_name}' ??: ???URL {len(seed_rows)}? ?? ??")
+    print(f"[queue] '{queue_sheet_name}' 시트: seed URL {len(seed_rows)}개 수집 시작")
 
     for row_num, page_url in seed_rows:
         try:
@@ -808,8 +808,8 @@ def collect_listing_queue_once(
                     product_id,
                     product_url,
                     _now_text(),
-                    '????',
-                    '??',
+                    "수집완료",
+                    "대기",
                     '',
                 ])
 
@@ -852,20 +852,20 @@ def collect_listing_queue_once(
                     spreadsheet_id=spreadsheet_id,
                     sheet_name=seed_sheet_name,
                     row_num=row_num,
-                    status='????',
+                    status="수집완료",
                     note=note,
                 )
             else:
                 _update_seed_row(
                     service=service,
-                    spreadsheet_id=spreadsheet_id,
-                    sheet_name=queue_sheet_name,
-                    row_num=row_num,
-                    header_map=header_map,
-                    status='????',
-                    note=note,
-                )
-            print(f"[queue] {row_num}? ??: ?? {len(append_values)}? / ?? {duplicate_count}? / ?? {note or '-'}")
+                        spreadsheet_id=spreadsheet_id,
+                        sheet_name=queue_sheet_name,
+                        row_num=row_num,
+                        header_map=header_map,
+                        status="수집완료",
+                        note=note,
+                    )
+            print(f"[queue] {row_num}행 완료: 신규 {len(append_values)}개 / 중복 {duplicate_count}개 / 비고 {note or '-'}")
         except Exception as exc:
             summary['error_rows'] += 1
             note = _classify_exception(exc)
@@ -876,7 +876,7 @@ def collect_listing_queue_once(
                         spreadsheet_id=spreadsheet_id,
                         sheet_name=seed_sheet_name,
                         row_num=row_num,
-                        status='??',
+                        status="오류",
                         note=note,
                     )
                 else:
@@ -886,15 +886,15 @@ def collect_listing_queue_once(
                         sheet_name=queue_sheet_name,
                         row_num=row_num,
                         header_map=header_map,
-                        status='??',
+                        status="오류",
                         note=note,
                     )
             except Exception:
                 pass
-            print(f"[queue] {row_num}? ??: {note} ({exc})")
+            print(f"[queue] {row_num}행 오류: {note} ({exc})")
 
     print(
-        f"[queue] ?? ??: seed={summary['seed_rows']} ??={summary['new_rows']} "
-        f"??={summary['duplicate_rows']} ??={summary['error_rows']}"
+        f"[queue] 수집 요약: seed={summary['seed_rows']} 신규={summary['new_rows']} "
+        f"중복={summary['duplicate_rows']} 오류={summary['error_rows']}"
     )
     return summary

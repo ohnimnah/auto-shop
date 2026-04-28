@@ -55,6 +55,17 @@ def column_index_to_letter(index: int) -> str:
     return result
 
 
+def column_letter_to_index(letter: str) -> int:
+    """Convert Google Sheets column letters to a 0-based index."""
+    value = (letter or "").strip().upper()
+    if not value or not value.isalpha():
+        raise ValueError(f"유효한 열 글자가 아닙니다: {letter}")
+    index = 0
+    for char in value:
+        index = index * 26 + (ord(char) - ord("A") + 1)
+    return index - 1
+
+
 def get_sheet_header_map(service, spreadsheet_id: str, sheet_name: str, header_row: int) -> Dict[str, int]:
     """Read header row and return header name -> 0-based column index map."""
     try:
@@ -108,7 +119,8 @@ def read_upload_rows(
     sheet_name: str,
     row_start: int,
     header_row: int,
-    col_map: Dict[str, int],
+    max_data_column: str,
+    upload_columns: Dict[str, str],
     progress_status_header: str,
     status_completed: str,
     status_upload_ready: str,
@@ -118,7 +130,14 @@ def read_upload_rows(
     """Read upload target rows from sheet. Only rows with BUYMA price are included."""
     header_map = get_sheet_header_map(service, spreadsheet_id, sheet_name, header_row)
     status_index = header_map.get(progress_status_header)
-    last_index = max(col_map["Y"], status_index if status_index is not None else col_map["Y"])
+    configured_indexes = [column_letter_to_index(max_data_column)]
+    for letter in upload_columns.values():
+        try:
+            configured_indexes.append(column_letter_to_index(letter))
+        except ValueError:
+            pass
+    max_data_index = max(configured_indexes)
+    last_index = max(max_data_index, status_index if status_index is not None else max_data_index)
     last_col_letter = column_index_to_letter(last_index)
 
     try:
@@ -136,27 +155,35 @@ def read_upload_rows(
             continue
 
         def cell(col_letter: str) -> str:
-            col_index = col_map[col_letter]
+            col_index = column_letter_to_index(col_letter)
             return row[col_index].strip() if col_index < len(row) and row[col_index] else ""
+
+        def field_cell(field_name: str) -> str:
+            col_letter = upload_columns.get(field_name, "")
+            return cell(col_letter) if col_letter else ""
+
+        def field_label(field_name: str, fallback_label: str) -> str:
+            col_letter = upload_columns.get(field_name, "")
+            return f"{fallback_label}({col_letter}열)" if col_letter else fallback_label
 
         def cell_by_index(index: int | None) -> str:
             if index is None:
                 return ""
             return row[index].strip() if index < len(row) and row[index] else ""
 
-        url = cell("B")
-        product_name = cell("E")
-        buyma_price = cell("M")
+        url = field_cell("url")
+        product_name = field_cell("product_name_kr")
+        buyma_price = field_cell("buyma_price")
 
         if not url or not product_name or not buyma_price:
             if specific_row and idx == specific_row:
                 missing = []
                 if not url:
-                    missing.append("URL(B열)")
+                    missing.append(field_label("url", "URL"))
                 if not product_name:
-                    missing.append("상품명(E열)")
+                    missing.append(field_label("product_name_kr", "상품명"))
                 if not buyma_price:
-                    missing.append("바이마판매가(M열)")
+                    missing.append(field_label("buyma_price", "바이마판매가"))
                 print(f"  {idx}행 제외: 필수값 누락 -> {', '.join(missing)}")
             continue
 
@@ -178,33 +205,32 @@ def read_upload_rows(
             }:
                 continue
 
-        v_cat = cell("V")
-        w_cat = cell("W")
-        x_cat = cell("X")
-        y_cat = cell("Y")
+        cat_large = field_cell("musinsa_category_large")
+        cat_middle = field_cell("musinsa_category_middle")
+        cat_small = field_cell("musinsa_category_small")
 
-        if w_cat or x_cat or y_cat:
-            cat_large, cat_middle, cat_small = w_cat, x_cat, y_cat
-        else:
-            cat_large, cat_middle, cat_small = v_cat, w_cat, x_cat
+        if not (cat_large or cat_middle or cat_small):
+            cat_large = field_cell("category_legacy_large")
+            cat_middle = field_cell("category_legacy_middle")
+            cat_small = field_cell("category_legacy_small")
 
         rows_data.append(
             {
                 "row_num": idx,
                 "url": url,
-                "brand": cell("C"),
-                "brand_en": cell("D"),
+                "brand": field_cell("brand"),
+                "brand_en": field_cell("brand_en"),
                 "product_name_kr": product_name,
-                "product_name_en": cell("F"),
-                "musinsa_sku": cell("G"),
-                "color_kr": cell("H"),
-                "color_en": cell("I"),
-                "size": cell("J"),
-                "actual_size": cell("K"),
-                "price_krw": cell("L"),
+                "product_name_en": field_cell("product_name_en"),
+                "musinsa_sku": field_cell("musinsa_sku"),
+                "color_kr": field_cell("color_kr"),
+                "color_en": field_cell("color_en"),
+                "size": field_cell("size"),
+                "actual_size": field_cell("actual_size"),
+                "price_krw": field_cell("price_krw"),
                 "buyma_price": buyma_price,
-                "image_paths": cell("N"),
-                "shipping_cost": cell("O"),
+                "image_paths": field_cell("image_paths"),
+                "shipping_cost": field_cell("shipping_cost"),
                 "musinsa_category_large": cat_large,
                 "musinsa_category_middle": cat_middle,
                 "musinsa_category_small": cat_small,

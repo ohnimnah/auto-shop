@@ -2,6 +2,7 @@
 
 import time
 import re
+from dataclasses import dataclass
 from typing import Any, Dict, List, Tuple
 
 from constants.status import STATUS_UPLOADING
@@ -10,6 +11,69 @@ from utils.logger import get_logger
 
 
 LOGGER = get_logger("auto_shop.pipeline")
+
+
+@dataclass(frozen=True)
+class WatchPolicy:
+    """Operational rules for foreground watch and team watch workers.
+
+    Single watch allows one foreground process. Team watch ignores duplicate
+    starts while a worker is alive, restarts only after the worker exits, and
+    pauses after repeated non-zero exits.
+    """
+
+    max_failures_before_pause: int = 3
+
+    def should_count_failure(self, return_code: int, enabled: bool) -> bool:
+        return enabled and return_code != 0
+
+    def should_pause_after_failure(self, failure_count: int) -> bool:
+        return failure_count >= self.max_failures_before_pause
+
+
+class LauncherPipelineService:
+    """Pipeline decisions for the launcher control panel.
+
+    ActionRunner calls this service for stage mapping so orchestration stays
+    separate from UI labels and subprocess log parsing rules.
+    """
+
+    team_watch_actions = {
+        "assets": "watch-images",
+        "design": "watch-thumbnails",
+        "sales": "watch-upload",
+    }
+
+    def __init__(self, watch_policy: WatchPolicy | None = None) -> None:
+        self.watch_policy = watch_policy or WatchPolicy()
+
+    def stage_for_action(self, action: str) -> str:
+        if action in {"run", "watch", "collect-listings"}:
+            return "scout"
+        if action in {"save-images", "watch-images"}:
+            return "assets"
+        if action in {"thumbnail-create", "watch-thumbnails"}:
+            return "design"
+        if action in {"upload-review", "upload-auto", "watch-upload"}:
+            return "sales"
+        return ""
+
+    def stage_from_log(self, message: str) -> str:
+        text = (message or "").lower()
+        if not text:
+            return ""
+        if "main.py" in text and "--download-images" in text:
+            return "assets"
+        if "main.py" in text and "--make-thumbnails" in text:
+            return "design"
+        if "make_thumbnails.py" in text:
+            return "design"
+        if "buyma_upload.py" in text:
+            return "sales"
+        return ""
+
+    def team_done_status(self, enabled: bool) -> str:
+        return "감시중" if enabled else "대기"
 
 
 def _column_index_to_letter(index: int) -> str:
@@ -394,19 +458,19 @@ def process_sheet_once(
     cfg: Dict[str, Any],
 ) -> None:
     """Run one sheet scan cycle using injected APIs/config."""
-    print(f"'{sheet_name}' ?쒗듃?먯꽌 B??留곹겕瑜??쎈뒗 以?..")
+    print(f"'{sheet_name}' 시트에서 B열 링크를 읽는 중...")
     rows = api["read_urls_from_sheet"](service, sheet_name)
     if not rows:
-        print(f"'{sheet_name}' ?쒗듃??B?댁뿉 泥섎━??URL???놁뒿?덈떎.")
+        print(f"'{sheet_name}' 시트 B열에 처리할 URL이 없습니다.")
         return
 
     header_map = api["get_sheet_header_map"](service, sheet_name)
     has_margin_header = cfg["MARGIN_RATE_HEADER"] in header_map
     has_status_header = cfg["PROGRESS_STATUS_HEADER"] in header_map
     if not has_margin_header:
-        print(f"'{sheet_name}' ?쒗듃: '{cfg['MARGIN_RATE_HEADER']}' ?ㅻ뜑瑜?李얠? 紐삵뻽?듬땲??")
+        print(f"'{sheet_name}' 시트: '{cfg['MARGIN_RATE_HEADER']}' 헤더를 찾지 못했습니다.")
     if not has_status_header:
-        print(f"'{sheet_name}' ?쒗듃: '{cfg['PROGRESS_STATUS_HEADER']}' ?ㅻ뜑瑜?李얠? 紐삵뻽?듬땲??")
+        print(f"'{sheet_name}' 시트: '{cfg['PROGRESS_STATUS_HEADER']}' 헤더를 찾지 못했습니다.")
 
     row_numbers = [row_num for row_num, _ in rows]
     existing_rows_map = api["get_existing_rows_bulk"](service, sheet_name, row_numbers)
@@ -444,10 +508,10 @@ def process_sheet_once(
                 target_rows.append((row_num, url))
 
     if not target_rows:
-        print(f"'{sheet_name}' ?쒗듃: ?좉퇋 ?묒꽦 ??곸씠 ?놁뒿?덈떎.")
+        print(f"'{sheet_name}' 시트: 신규 작성 대상이 없습니다.")
         return
 
-    print(f"'{sheet_name}' ?쒗듃: {len(target_rows)}媛??됱쓣 泥섎━?⑸땲??")
+    print(f"'{sheet_name}' 시트: {len(target_rows)}개 행을 처리합니다.")
 
     updates_buffer: List[Dict[str, object]] = []
     flush_size = int(cfg.get("BATCH_FLUSH_SIZE", 60))
@@ -553,7 +617,7 @@ def process_sheet_once(
 
     shipping_table = api["read_shipping_table"](service, sheet_name)
     if not shipping_table:
-        print(f"'{sheet_name}' ???: ??????????Z/AA/AB)????? ??? O???????? ????????")
+        print(f"'{sheet_name}' 배송표 없음: Z/AA/AB 기준 배송비 계산을 건너뜁니다.")
 
     multi_row_buffer: List[Dict[str, object]] = []
     pending_status_rows: set[int] = set()
@@ -598,13 +662,13 @@ def process_sheet_once(
                 next_status,
             )
             if margin_rate is None:
-                print(f" {sheet_name} {row_num}????? ??????: {next_status} (??????????")
+                print(f" {sheet_name} {row_num}행 진행상태: {next_status} (마진률 없음)")
             else:
-                print(f" {sheet_name} {row_num}????? ??????: {next_status} (?????{margin_rate:.2f}%)")
+                print(f" {sheet_name} {row_num}행 진행상태: {next_status} (마진률 {margin_rate:.2f}%)")
 
     try:
         for idx, url in target_rows:
-            print(f"[{sheet_name}] {idx}????? ?? {url}")
+            print(f"[{sheet_name}] {idx}행 처리: {url}")
             existing_values_for_row = existing_rows_map.get(idx, {})
             existing_product_for_row = product_from_sheet_row(existing_values_for_row, sheet_product_columns)
             sheet_sku = existing_product_for_row.musinsa_sku
@@ -637,9 +701,9 @@ def process_sheet_once(
                 shipping_cost = api["lookup_shipping_cost"](shipping_table, estimated_weight)
                 if shipping_cost:
                     product_info["shipping_cost"] = shipping_cost
-                    print(f"    ????????: ??? {estimated_weight}kg -> KRW {shipping_cost}")
+                    print(f"    배송비 계산: 예상 {estimated_weight}kg -> KRW {shipping_cost}")
                 else:
-                    print(f"    ???????? ???: ???????? ?????????????(??? {estimated_weight}kg)")
+                    print(f"    배송비 계산 실패: 배송표에서 구간을 찾지 못했습니다 (예상 {estimated_weight}kg)")
 
                 row_updates = api["write_to_sheet"](
                     service,
@@ -654,7 +718,7 @@ def process_sheet_once(
                 pending_status_rows.add(idx)
                 LOGGER.info("[CRAWL DONE] SKU=%s ROW=%s", sheet_sku or "-", idx)
             except Exception as row_exc:
-                print(f" {sheet_name} {idx}? ?? ??: {row_exc}")
+                print(f" {sheet_name} {idx}행 처리 오류: {row_exc}")
                 if product is not None:
                     try:
                         product.error_message = str(row_exc)
@@ -690,7 +754,4 @@ def process_sheet_once(
     finally:
         _flush_normal_buffer("normal-finally", force=True)
         LOGGER.info("[DONE] sheet=%s mode=crawl total_rows=%s", sheet_name, len(target_rows))
-
-
-
 

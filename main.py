@@ -116,8 +116,11 @@ from services.browser_service import setup_chrome_driver as svc_setup_chrome_dri
 from models.product_model import Product, product_to_sheet_field_map
 from services.listing_queue_service import collect_listing_queue_once, resolve_listing_queue_target
 
-# Windows cp949 터미널에서 유니코드 출력 오류 방지
-if sys.stdout.encoding and sys.stdout.encoding.lower().replace("-", "") in ("cp949", "euckr"):
+# 런처 subprocess 로그가 OS 로케일과 무관하게 UTF-8로 흐르도록 고정한다.
+try:
+    sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+    sys.stderr.reconfigure(encoding="utf-8", errors="replace")
+except AttributeError:
     import io
     sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding="utf-8", errors="replace")
     sys.stderr = io.TextIOWrapper(sys.stderr.buffer, encoding="utf-8", errors="replace")
