@@ -1,0 +1,401 @@
+{
+  "ok": true,
+  "mode": "dry-run",
+  "before": {
+    "total_rows": 374,
+    "classified": 364,
+    "unresolved": 10,
+    "unresolved_rate": 2.6737967914438503,
+    "status": "OK",
+    "total_csv_rows": 1000,
+    "valid_product_rows": 374,
+    "empty_rows": 626
+  },
+  "after": {
+    "total_rows": 374,
+    "classified": 357,
+    "unresolved": 17,
+    "unresolved_rate": 4.545454545454546,
+    "status": "OK",
+    "total_csv_rows": 1000,
+    "valid_product_rows": 374,
+    "empty_rows": 626
+  },
+  "improvement_rows": 7,
+  "improvement_rate_points": 1.8716577540106956,
+  "status": "PASS",
+  "candidates_count": 88,
+  "applicable_count": 76,
+  "skipped": [
+    {
+      "token": "옆가슴",
+      "reason": "no StandardCategory mapping"
+    },
+    {
+      "token": "bust",
+      "reason": "no StandardCategory mapping"
+    },
+    {
+      "token": "side",
+      "reason": "no StandardCategory mapping"
+    },
+    {
+      "token": "shorts",
+      "reason": "no StandardCategory mapping"
+    },
+    {
+      "token": "panties",
+      "reason": "no StandardCategory mapping"
+    },
+    {
+      "token": "side bust",
+      "reason": "no StandardCategory mapping"
+    },
+    {
+      "token": "mesh",
+      "reason": "no StandardCategory mapping"
+    },
+    {
+      "token": "slim",
+      "reason": "no StandardCategory mapping"
+    },
+    {
+      "token": "더블볼륨",
+      "reason": "no StandardCategory mapping"
+    },
+    {
+      "token": "슬림메쉬",
+      "reason": "no StandardCategory mapping"
+    },
+    {
+      "token": "double",
+      "reason": "no StandardCategory mapping"
+    },
+    {
+      "token": "length",
+      "reason": "no StandardCategory mapping"
+    },
+    {
+      "token": "slim mesh",
+      "reason": "no StandardCategory mapping"
+    },
+    {
+      "token": "length shorts",
+      "reason": "no StandardCategory mapping"
+    },
+    {
+      "token": "all",
+      "reason": "no StandardCategory mapping"
+    },
+    {
+      "token": "for",
+      "reason": "no StandardCategory mapping"
+    },
+    {
+      "token": "one",
+      "reason": "no StandardCategory mapping"
+    },
+    {
+      "token": "백리스",
+      "reason": "no StandardCategory mapping"
+    },
+    {
+      "token": "소프트",
+      "reason": "no StandardCategory mapping"
+    },
+    {
+      "token": "올인원",
+      "reason": "no StandardCategory mapping"
+    },
+    {
+      "token": "코르셋",
+      "reason": "no StandardCategory mapping"
+    },
+    {
+      "token": "neck",
+      "reason": "no StandardCategory mapping"
+    },
+    {
+      "token": "soft",
+      "reason": "no StandardCategory mapping"
+    },
+    {
+      "token": "기본볼륨",
+      "reason": "no StandardCategory mapping"
+    },
+    {
+      "token": "노와이어",
+      "reason": "no StandardCategory mapping"
+    },
+    {
+      "token": "볼륨브라",
+      "reason": "no StandardCategory mapping"
+    },
+    {
+      "token": "스퀘어넥",
+      "reason": "no StandardCategory mapping"
+    },
+    {
+      "token": "basic",
+      "reason": "no StandardCategory mapping"
+    },
+    {
+      "token": "corset",
+      "reason": "no StandardCategory mapping"
+    },
+    {
+      "token": "square",
+      "reason": "no StandardCategory mapping"
+    },
+    {
+      "token": "all one",
+      "reason": "no StandardCategory mapping"
+    },
+    {
+      "token": "padding",
+      "reason": "no StandardCategory mapping"
+    },
+    {
+      "token": "소프트 옆가슴",
+      "reason": "no StandardCategory mapping"
+    },
+    {
+      "token": "코르셋 all",
+      "reason": "no StandardCategory mapping"
+    },
+    {
+      "token": "backless",
+      "reason": "no StandardCategory mapping"
+    },
+    {
+      "token": "for side",
+      "reason": "no StandardCategory mapping"
+    },
+    {
+      "token": "wireless",
+      "reason": "no StandardCategory mapping"
+    },
+    {
+      "token": "노와이어 소프트",
+      "reason": "no StandardCategory mapping"
+    },
+    {
+      "token": "옆가슴 볼륨브라",
+      "reason": "no StandardCategory mapping"
+    },
+    {
+      "token": "soft side",
+      "reason": "no StandardCategory mapping"
+    },
+    {
+      "token": "enhancement",
+      "reason": "no StandardCategory mapping"
+    },
+    {
+      "token": "square neck",
+      "reason": "no StandardCategory mapping"
+    },
+    {
+      "token": "코르셋 all one",
+      "reason": "no StandardCategory mapping"
+    },
+    {
+      "token": "shorts basic",
+      "reason": "no StandardCategory mapping"
+    },
+    {
+      "token": "노와이어 소프트 옆가슴",
+      "reason": "no StandardCategory mapping"
+    },
+    {
+      "token": "소프트 옆가슴 볼륨브라",
+      "reason": "no StandardCategory mapping"
+    },
+    {
+      "token": "for side bust",
+      "reason": "no StandardCategory mapping"
+    },
+    {
+      "token": "shorts double",
+      "reason": "no StandardCategory mapping"
+    },
+    {
+      "token": "wireless soft",
+      "reason": "no StandardCategory mapping"
+    },
+    {
+      "token": "볼륨브라 wireless",
+      "reason": "no StandardCategory mapping"
+    },
+    {
+      "token": "corset panties",
+      "reason": "no StandardCategory mapping"
+    },
+    {
+      "token": "panties double",
+      "reason": "no StandardCategory mapping"
+    },
+    {
+      "token": "soft side bust",
+      "reason": "no StandardCategory mapping"
+    },
+    {
+      "token": "padding panties",
+      "reason": "no StandardCategory mapping"
+    },
+    {
+      "token": "옆가슴 볼륨브라 wireless",
+      "reason": "no StandardCategory mapping"
+    },
+    {
+      "token": "wireless soft side",
+      "reason": "no StandardCategory mapping"
+    },
+    {
+      "token": "볼륨브라 wireless soft",
+      "reason": "no StandardCategory mapping"
+    },
+    {
+      "token": "length shorts basic",
+      "reason": "no StandardCategory mapping"
+    },
+    {
+      "token": "length shorts double",
+      "reason": "no StandardCategory mapping"
+    },
+    {
+      "token": "홈웨어",
+      "reason": "duplicate keyword '홈웨어'"
+    },
+    {
+      "token": "심리스",
+      "reason": "duplicate keyword '심리스'"
+    },
+    {
+      "token": "seamless",
+      "reason": "duplicate keyword 'seamless'"
+    },
+    {
+      "token": "골반뽕",
+      "reason": "duplicate keyword '골반뽕'"
+    },
+    {
+      "token": "이너프리",
+      "reason": "duplicate keyword '이너프리'"
+    },
+    {
+      "token": "inner",
+      "reason": "duplicate keyword 'inner'"
+    },
+    {
+      "token": "seamless inner",
+      "reason": "duplicate keyword 'seamless inner'"
+    },
+    {
+      "token": "bra",
+      "reason": "duplicate keyword 'bra'"
+    },
+    {
+      "token": "padded",
+      "reason": "duplicate keyword 'padded'"
+    },
+    {
+      "token": "볼륨업",
+      "reason": "duplicate keyword '볼륨업'"
+    },
+    {
+      "token": "속바지",
+      "reason": "duplicate keyword '속바지'"
+    },
+    {
+      "token": "knit",
+      "reason": "duplicate keyword 'knit'"
+    }
+  ],
+  "added_lines": [
+    "    (\"심리스 이너웨어\", [\"심리스 이너프리\"], StandardCategory.INNER_UNDERWEAR),",
+    "    (\"홈웨어\", [\"bra 홈웨어\"], StandardCategory.HOME_PAJAMA),",
+    "    (\"보정속옷\", [\"골반뽕 속바지\"], StandardCategory.INNER_UNDERWEAR),",
+    "    (\"보정속옷\", [\"이너프리 골반뽕\"], StandardCategory.INNER_UNDERWEAR),",
+    "    (\"심리스 이너웨어\", [\"심리스 이너프리 골반뽕\"], StandardCategory.INNER_UNDERWEAR),",
+    "    (\"보정속옷\", [\"골반볼륨업\"], StandardCategory.INNER_UNDERWEAR),",
+    "    (\"심리스 이너웨어\", [\"심리스 옆가슴\"], StandardCategory.INNER_UNDERWEAR),",
+    "    (\"보정속옷\", [\"옆가슴 볼륨업\"], StandardCategory.INNER_UNDERWEAR),",
+    "    (\"보정속옷\", [\"슬림메쉬 골반뽕\"], StandardCategory.INNER_UNDERWEAR),",
+    "    (\"속옷/이너웨어\", [\"이너프리 슬림메쉬\"], StandardCategory.INNER_UNDERWEAR),",
+    "    (\"심리스 이너웨어\", [\"심리스 옆가슴 볼륨업\"], StandardCategory.INNER_UNDERWEAR),",
+    "    (\"보정속옷\", [\"슬림메쉬 골반뽕 속바지\"], StandardCategory.INNER_UNDERWEAR),",
+    "    (\"니트\", [\"knit seamless\"], StandardCategory.TOP_KNIT),",
+    "    (\"속옷/이너웨어\", [\"padded length\"], StandardCategory.INNER_UNDERWEAR),",
+    "    (\"심리스 이너웨어\", [\"더블볼륨 seamless\"], StandardCategory.INNER_UNDERWEAR),",
+    "    (\"심리스 이너웨어\", [\"심리스 이너프리 슬림메쉬\"], StandardCategory.INNER_UNDERWEAR),",
+    "    (\"보정속옷\", [\"이너프리 슬림메쉬 골반뽕\"], StandardCategory.INNER_UNDERWEAR),",
+    "    (\"심리스 이너웨어\", [\"골반볼륨업 seamless\"], StandardCategory.INNER_UNDERWEAR),",
+    "    (\"속옷/이너웨어\", [\"더블볼륨 seamless inner\"], StandardCategory.INNER_UNDERWEAR),",
+    "    (\"속옷/이너웨어\", [\"padded length shorts\"], StandardCategory.INNER_UNDERWEAR),",
+    "    (\"속옷/이너웨어\", [\"골반볼륨업 seamless inner\"], StandardCategory.INNER_UNDERWEAR),",
+    "    (\"속옷/이너웨어\", [\"bra for\"], StandardCategory.INNER_UNDERWEAR),",
+    "    (\"보정속옷\", [\"볼륨업 백리스\"], StandardCategory.INNER_UNDERWEAR),",
+    "    (\"보정속옷\", [\"볼륨업 코르셋\"], StandardCategory.INNER_UNDERWEAR),",
+    "    (\"보정속옷\", [\"올인원 볼륨업\"], StandardCategory.INNER_UNDERWEAR),",
+    "    (\"보정속옷\", [\"골반뽕 더블볼륨\"], StandardCategory.INNER_UNDERWEAR),",
+    "    (\"니트\", [\"백리스 knit\"], StandardCategory.TOP_KNIT),",
+    "    (\"니트\", [\"볼륨업 knit\"], StandardCategory.TOP_KNIT),",
+    "    (\"속옷/이너웨어\", [\"속바지 기본볼륨\"], StandardCategory.INNER_UNDERWEAR),",
+    "    (\"속옷/이너웨어\", [\"속바지 더블볼륨\"], StandardCategory.INNER_UNDERWEAR),",
+    "    (\"심리스 이너웨어\", [\"스퀘어넥 심리스\"], StandardCategory.INNER_UNDERWEAR),",
+    "    (\"보정속옷\", [\"골반뽕 골반볼륨업\"], StandardCategory.INNER_UNDERWEAR),",
+    "    (\"속옷/이너웨어\", [\"속바지 골반볼륨업\"], StandardCategory.INNER_UNDERWEAR),",
+    "    (\"심리스 이너웨어\", [\"심리스 square\"], StandardCategory.INNER_UNDERWEAR),",
+    "    (\"홈웨어\", [\"panties 홈웨어\"], StandardCategory.HOME_PAJAMA),",
+    "    (\"보정속옷\", [\"볼륨업 코르셋 all\"], StandardCategory.INNER_UNDERWEAR),",
+    "    (\"보정속옷\", [\"옆가슴 볼륨업 백리스\"], StandardCategory.INNER_UNDERWEAR),",
+    "    (\"보정속옷\", [\"올인원 볼륨업 코르셋\"], StandardCategory.INNER_UNDERWEAR),",
+    "    (\"속옷/이너웨어\", [\"backless bra\"], StandardCategory.INNER_UNDERWEAR),",
+    "    (\"속옷/이너웨어\", [\"bra for side\"], StandardCategory.INNER_UNDERWEAR),",
+    "    (\"심리스 이너웨어\", [\"seamless bra\"], StandardCategory.INNER_UNDERWEAR),",
+    "    (\"보정속옷\", [\"골반뽕 속바지 기본볼륨\"], StandardCategory.INNER_UNDERWEAR),",
+    "    (\"보정속옷\", [\"골반뽕 속바지 더블볼륨\"], StandardCategory.INNER_UNDERWEAR),",
+    "    (\"니트\", [\"볼륨업 백리스 knit\"], StandardCategory.TOP_KNIT),",
+    "    (\"니트\", [\"옆가슴 볼륨업 knit\"], StandardCategory.TOP_KNIT),",
+    "    (\"보정속옷\", [\"이너프리 골반뽕 속바지\"], StandardCategory.INNER_UNDERWEAR),",
+    "    (\"심리스 이너웨어\", [\"neck seamless\"], StandardCategory.INNER_UNDERWEAR),",
+    "    (\"속옷/이너웨어\", [\"padded shorts\"], StandardCategory.INNER_UNDERWEAR),",
+    "    (\"심리스 이너웨어\", [\"seamless side\"], StandardCategory.INNER_UNDERWEAR),",
+    "    (\"보정속옷\", [\"골반뽕 속바지 골반볼륨업\"], StandardCategory.INNER_UNDERWEAR),",
+    "    (\"심리스 이너웨어\", [\"기본볼륨 seamless\"], StandardCategory.INNER_UNDERWEAR),",
+    "    (\"보정속옷\", [\"이너프리 골반뽕 더블볼륨\"], StandardCategory.INNER_UNDERWEAR),",
+    "    (\"속옷/이너웨어\", [\"padded panties\"], StandardCategory.INNER_UNDERWEAR),",
+    "    (\"보정속옷\", [\"이너프리 골반뽕 골반볼륨업\"], StandardCategory.INNER_UNDERWEAR),",
+    "    (\"홈웨어\", [\"enhancement 홈웨어\"], StandardCategory.HOME_PAJAMA),",
+    "    (\"심리스 이너웨어\", [\"스퀘어넥 심리스 square\"], StandardCategory.INNER_UNDERWEAR),",
+    "    (\"심리스 이너웨어\", [\"심리스 square neck\"], StandardCategory.INNER_UNDERWEAR),",
+    "    (\"속옷/이너웨어\", [\"backless bra for\"], StandardCategory.INNER_UNDERWEAR),",
+    "    (\"홈웨어\", [\"seamless bra 홈웨어\"], StandardCategory.HOME_PAJAMA),",
+    "    (\"심리스 이너웨어\", [\"neck seamless bra\"], StandardCategory.INNER_UNDERWEAR),",
+    "    (\"심리스 이너웨어\", [\"seamless backless\"], StandardCategory.INNER_UNDERWEAR),",
+    "    (\"심리스 이너웨어\", [\"골반뽕 더블볼륨 seamless\"], StandardCategory.INNER_UNDERWEAR),",
+    "    (\"니트\", [\"백리스 knit seamless\"], StandardCategory.TOP_KNIT),",
+    "    (\"니트\", [\"볼륨업 knit seamless\"], StandardCategory.TOP_KNIT),",
+    "    (\"심리스 이너웨어\", [\"속바지 기본볼륨 seamless\"], StandardCategory.INNER_UNDERWEAR),",
+    "    (\"심리스 이너웨어\", [\"속바지 더블볼륨 seamless\"], StandardCategory.INNER_UNDERWEAR),",
+    "    (\"홈웨어\", [\"corset panties 홈웨어\"], StandardCategory.HOME_PAJAMA),",
+    "    (\"니트\", [\"knit seamless side\"], StandardCategory.TOP_KNIT),",
+    "    (\"심리스 이너웨어\", [\"seamless side bust\"], StandardCategory.INNER_UNDERWEAR),",
+    "    (\"심리스 이너웨어\", [\"골반뽕 골반볼륨업 seamless\"], StandardCategory.INNER_UNDERWEAR),",
+    "    (\"심리스 이너웨어\", [\"속바지 골반볼륨업 seamless\"], StandardCategory.INNER_UNDERWEAR),",
+    "    (\"속옷/이너웨어\", [\"기본볼륨 seamless inner\"], StandardCategory.INNER_UNDERWEAR),",
+    "    (\"심리스 이너웨어\", [\"square neck seamless\"], StandardCategory.INNER_UNDERWEAR),",
+    "    (\"속옷/이너웨어\", [\"padded panties double\"], StandardCategory.INNER_UNDERWEAR),",
+    "    (\"심리스 이너웨어\", [\"seamless backless bra\"], StandardCategory.INNER_UNDERWEAR),",
+    "    (\"니트\", [\"knit seamless backless\"], StandardCategory.TOP_KNIT),"
+  ],
+  "backup_path": "",
+  "matched_by": {
+    "force_map": 35,
+    "fallback_rules": 322,
+    "candidate_rules": 29,
+    "unresolved": 17
+  },
+  "created_at": "2026-04-29T00:25:35"
+}

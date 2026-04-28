@@ -19,6 +19,8 @@ from services.category_analysis_service import (
     generate_category_sample_csv,
     suggest_category_rules,
 )
+from services.category_rule_apply_service import apply_category_rules
+from services.category_tune_cycle_service import run_category_tune_cycle
 
 __version__ = "0.4.0-rc1"
 from config.app_config import (
@@ -833,6 +835,11 @@ def parse_args():
         help="카테고리 미분류율을 실측해 건강 상태를 출력",
     )
     parser.add_argument(
+        "--reclassify",
+        action="store_true",
+        help="카테고리 실측 시 CSV의 기존 category 값을 무시하고 재분류 기준으로 계산",
+    )
+    parser.add_argument(
         "--suggest-category-rules",
         action="store_true",
         help="unresolved CSV 기반 fallback rule 후보를 출력",
@@ -846,6 +853,21 @@ def parse_args():
         "--generate-category-sample",
         action="store_true",
         help="카테고리 튜닝용 샘플 CSV(logs/sample_category_rows.csv)를 생성",
+    )
+    parser.add_argument(
+        "--apply-category-rules",
+        action="store_true",
+        help="추천된 카테고리 rule 후보를 classifier 코드에 반영",
+    )
+    parser.add_argument(
+        "--dry-run",
+        action="store_true",
+        help="--apply-category-rules 실행 시 파일 변경 없이 반영 예정 내용만 출력(권장)",
+    )
+    parser.add_argument(
+        "--category-tune-cycle",
+        action="store_true",
+        help="미분류율 측정→룰 후보→(dry-run/apply)→재측정까지 1회 자동 실행",
     )
     return parser.parse_args()
 
@@ -932,22 +954,37 @@ def main():
         return
 
     if args.category_health:
-        health = category_health(logs_dir=os.path.join(os.getcwd(), "logs"), input_csv=args.input_csv)
+        health = category_health(
+            logs_dir=os.path.join(os.getcwd(), "logs"),
+            input_csv=args.input_csv,
+            reclassify=bool(args.reclassify),
+        )
         print("Category Health")
         print("---------------")
-        print(f"Total rows        {health['total_rows']}")
+        print(f"Total CSV rows    {health.get('total_csv_rows', health['total_rows'])}")
+        print(f"Valid product rows {health.get('valid_product_rows', health['total_rows'])}")
+        print(f"Empty rows         {health.get('empty_rows', 0)}")
         print(f"Classified        {health['classified']}")
         print(f"Unresolved        {health['unresolved']}")
         print(f"Unresolved rate   {health['unresolved_rate']:.1f}%")
         print(f"Status            {health['status']}")
+        if args.reclassify and health.get("matched_by"):
+            print("")
+            print("Matched by")
+            print("----------")
+            matched_by = health["matched_by"]
+            print(f"force_map        {matched_by.get('force_map', 0)}")
+            print(f"fallback_rules   {matched_by.get('fallback_rules', 0)}")
+            print(f"candidate_rules  {matched_by.get('candidate_rules', 0)}")
+            print(f"unresolved       {matched_by.get('unresolved', 0)}")
         return
 
     if args.suggest_category_rules:
         result = suggest_category_rules(logs_dir=os.path.join(os.getcwd(), "logs"), input_csv=args.input_csv, top_n=10)
-        print("Top unresolved tokens")
-        print("---------------------")
-        for token, count in result.get("top_tokens", []):
-            print(f"{token:<10} {count}")
+        print("Top phrases")
+        print("-----------")
+        for token, count in result.get("top_phrases", result.get("top_tokens", [])):
+            print(f"{token:<20} {count}")
         print("")
         print("Suggested rules")
         print("---------------")
@@ -960,6 +997,80 @@ def main():
     if args.generate_category_sample:
         path = generate_category_sample_csv(logs_dir=os.path.join(os.getcwd(), "logs"))
         print(path)
+        return
+
+    if args.apply_category_rules:
+        result = apply_category_rules(
+            input_csv=args.input_csv,
+            logs_dir=os.path.join(os.getcwd(), "logs"),
+            dry_run=bool(args.dry_run),
+        )
+        print("Category Rule Apply")
+        print("-------------------")
+        print(f"Mode: {'dry-run' if args.dry_run else 'apply'}")
+        print(f"Candidates: {result.get('candidates_count', 0)}")
+        print(f"Applicable: {result.get('applicable_count', 0)}")
+        print(f"Skipped: {len(result.get('skipped', []))}")
+        print("")
+        print("Will add:" if args.dry_run else "Added:")
+        for line in result.get("added_lines", []):
+            print(f"- {line.strip().rstrip(',')}")
+        if not result.get("added_lines"):
+            print("- (none)")
+        print("")
+        print("Skipped:")
+        for item in result.get("skipped", []):
+            print(f'- "{item.get("token", "")}" -> {item.get("reason", "skip")}')
+        if not result.get("skipped"):
+            print("- (none)")
+        if result.get("backup_path"):
+            print("")
+            print(f"Backup: {result.get('backup_path')}")
+        if not result.get("ok", False):
+            print("")
+            print(f"Result: FAILED ({result.get('reason', 'unknown')})")
+        return
+
+    if args.category_tune_cycle:
+        result = run_category_tune_cycle(
+            input_csv=args.input_csv,
+            logs_dir=os.path.join(os.getcwd(), "logs"),
+            dry_run=bool(args.dry_run),
+        )
+        before = result["before"]
+        after = result["after"]
+        print("Category Tune Cycle")
+        print("-------------------")
+        print("Before:")
+        print(f"Total CSV rows: {before.get('total_csv_rows', before['total_rows'])}")
+        print(f"Valid product rows: {before.get('valid_product_rows', before['total_rows'])}")
+        print(f"Empty rows: {before.get('empty_rows', 0)}")
+        print(f"Unresolved: {before['unresolved']}")
+        print(f"Rate: {before['unresolved_rate']:.1f}%")
+        print("")
+        print("Candidates:")
+        print(f"Applicable: {result['applicable_count']}")
+        print(f"Skipped: {len(result.get('skipped', []))}")
+        print("")
+        print("After:")
+        print(f"Valid product rows: {after.get('valid_product_rows', after['total_rows'])}")
+        print(f"Unresolved: {after['unresolved']}")
+        print(f"Rate: {after['unresolved_rate']:.1f}%")
+        matched_by = result.get("matched_by", {})
+        if matched_by:
+            print("")
+            print("Matched by:")
+            print(f"force_map: {matched_by.get('force_map', 0)}")
+            print(f"fallback_rules: {matched_by.get('fallback_rules', 0)}")
+            print(f"candidate_rules: {matched_by.get('candidate_rules', 0)}")
+            print(f"unresolved: {matched_by.get('unresolved', 0)}")
+        print("")
+        print("Improvement:")
+        print(f"{result['improvement_rows']:+d} rows")
+        print(f"{result['improvement_rate_points']:+.1f} percentage points")
+        print("")
+        print(f"Status: {result['status']}")
+        print(f"Result JSON: {result['result_json_path']}")
         return
 
     # 바이마 출품 모드

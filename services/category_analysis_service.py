@@ -9,6 +9,7 @@ from dataclasses import dataclass
 from typing import Dict, Iterable, List, Tuple
 
 from marketplace.buyma.standard_category import StandardCategory
+from marketplace.common.category_classifier import normalize_product_name, classify_category_with_reason
 from marketplace.common import sheet_source as sheet_source_mod
 
 
@@ -17,6 +18,68 @@ STOPWORDS = {
     "black", "white", "ivory", "navy", "blue", "red",
     "new", "official", "authentic", "women", "men",
     "무료배송", "정품", "공식",
+    "value", "카인다미", "kindame", "free", "volume", "hip",
+}
+CATEGORY_HINTS = {
+    "dress": ("원피스", StandardCategory.DRESS),
+    "mini dress": ("원피스", StandardCategory.DRESS),
+    "onepiece": ("원피스", StandardCategory.DRESS),
+    "skirt": ("스커트", StandardCategory.SKIRT_LONG),
+    "cardigan": ("가디건", StandardCategory.TOP_CARDIGAN),
+    "pleated skirt": ("스커트", StandardCategory.SKIRT_LONG),
+    "knit": ("니트", StandardCategory.TOP_KNIT),
+    "sweater": ("니트", StandardCategory.TOP_KNIT),
+    "shirt": ("셔츠/블라우스", StandardCategory.TOP_SHIRT),
+    "blouse": ("셔츠/블라우스", StandardCategory.TOP_SHIRT),
+    "coat": ("코트", StandardCategory.OUTER_COAT),
+    "puffer": ("패딩", StandardCategory.OUTER_PADDING),
+    "down jacket": ("패딩", StandardCategory.OUTER_PADDING),
+    "bag": ("가방", StandardCategory.BAG_SHOULDER),
+    "shoulder bag": ("가방", StandardCategory.BAG_SHOULDER),
+    "crossbody": ("가방", StandardCategory.BAG_SHOULDER),
+    "tote bag": ("가방", StandardCategory.BAG_SHOULDER),
+    "cap": ("모자", StandardCategory.ACC_CAP),
+    "hat": ("모자", StandardCategory.ACC_CAP),
+    "beanie": ("모자", StandardCategory.ACC_CAP),
+    "sneakers": ("스니커즈", StandardCategory.SHOES_SNEAKER),
+    "denim": ("데님 팬츠", StandardCategory.PANTS_DENIM),
+    "jeans": ("데님 팬츠", StandardCategory.PANTS_DENIM),
+    "belt": ("벨트", StandardCategory.ACC_BELT),
+    "cargo pants": ("카고 팬츠", StandardCategory.PANTS_CARGO),
+    # sample/production 보강 힌트
+    "jogger pants": ("카고 팬츠", StandardCategory.PANTS_CARGO),
+    "jogger": ("카고 팬츠", StandardCategory.PANTS_CARGO),
+    "sandal": ("샌들/슬리퍼", StandardCategory.SHOES_SANDAL),
+    "slide": ("샌들/슬리퍼", StandardCategory.SHOES_SANDAL),
+    "loafer": ("로퍼", StandardCategory.SHOES_LOAFER),
+    "backpack": ("백팩", StandardCategory.BAG_BACKPACK),
+    "socks": ("양말", StandardCategory.INNER_UNDERWEAR),
+    "sunglasses": ("선글라스", StandardCategory.ACC_EYEWEAR),
+    "hoodie": ("후드", StandardCategory.TOP_HOODIE),
+    "jacket": ("자켓", StandardCategory.OUTER_JACKET),
+    "tank top": ("탱크탑", StandardCategory.TOP_TANK),
+    "slacks": ("슬랙스", StandardCategory.PANTS_SLACKS),
+    "homewear": ("홈웨어", StandardCategory.HOME_PAJAMA),
+    "홈웨어": ("홈웨어", StandardCategory.HOME_PAJAMA),
+    "pajama": ("홈웨어", StandardCategory.HOME_PAJAMA),
+    "잠옷": ("홈웨어", StandardCategory.HOME_PAJAMA),
+    "파자마": ("홈웨어", StandardCategory.HOME_PAJAMA),
+    "inner": ("속옷/이너웨어", StandardCategory.INNER_UNDERWEAR),
+    "innerwear": ("속옷/이너웨어", StandardCategory.INNER_UNDERWEAR),
+    "underwear": ("속옷/이너웨어", StandardCategory.INNER_UNDERWEAR),
+    "심리스": ("심리스 이너웨어", StandardCategory.INNER_UNDERWEAR),
+    "seamless": ("심리스 이너웨어", StandardCategory.INNER_UNDERWEAR),
+    "골반뽕": ("보정속옷", StandardCategory.INNER_UNDERWEAR),
+    "보정속옷": ("보정속옷", StandardCategory.INNER_UNDERWEAR),
+    "shapewear": ("보정속옷", StandardCategory.INNER_UNDERWEAR),
+    "leggings": ("레깅스", StandardCategory.PANTS_LEGGINGS),
+    "레깅스": ("레깅스", StandardCategory.PANTS_LEGGINGS),
+    "이너프리": ("속옷/이너웨어", StandardCategory.INNER_UNDERWEAR),
+    "속바지": ("속옷/이너웨어", StandardCategory.INNER_UNDERWEAR),
+    "bra": ("속옷/이너웨어", StandardCategory.INNER_UNDERWEAR),
+    "padded": ("속옷/이너웨어", StandardCategory.INNER_UNDERWEAR),
+    "hip padded": ("보정속옷", StandardCategory.INNER_UNDERWEAR),
+    "볼륨업": ("보정속옷", StandardCategory.INNER_UNDERWEAR),
 }
 
 
@@ -26,6 +89,7 @@ class CategoryRow:
     product_name: str
     brand: str
     category: str
+    url: str = ""
 
 
 @dataclass
@@ -35,6 +99,36 @@ class UnresolvedCategoryRow:
     brand: str
     current_category: str
     detected_keywords: str
+
+
+_EMPTY_LIKE_VALUES = {"", "#value!", "nan", "none", "null"}
+
+
+def _normalize_cell_value(value: str) -> str:
+    return str(value or "").strip()
+
+
+def _is_empty_like(value: str) -> bool:
+    return _normalize_cell_value(value).lower() in _EMPTY_LIKE_VALUES
+
+
+def is_valid_product_row(row: dict | CategoryRow) -> bool:
+    if isinstance(row, CategoryRow):
+        product_name = _normalize_cell_value(row.product_name)
+        brand = _normalize_cell_value(row.brand)
+        url = _normalize_cell_value(row.url)
+    else:
+        product_name = _normalize_cell_value(row.get("product_name") or row.get("상품명") or row.get("name"))
+        brand = _normalize_cell_value(row.get("brand") or row.get("브랜드"))
+        url = _normalize_cell_value(row.get("url") or row.get("link") or row.get("링크"))
+
+    if _is_empty_like(product_name):
+        product_name = ""
+    if _is_empty_like(brand):
+        brand = ""
+    if _is_empty_like(url):
+        url = ""
+    return bool(product_name or brand or url)
 
 
 def _normalize_header(text: str) -> str:
@@ -74,8 +168,30 @@ def _load_runtime_sheet_config() -> Dict[str, str]:
 
 
 def extract_keywords(text: str) -> List[str]:
-    raw = re.findall(r"[a-zA-Z]{3,}|[가-힣]{2,}", (text or "").lower())
-    return [token for token in raw if token not in STOPWORDS]
+    normalized = normalize_product_name(text).replace("-", " ").replace("_", " ")
+    raw = re.findall(r"[a-zA-Z]{2,}|[가-힣]{2,}", normalized)
+    return filter_tokens(raw)
+
+
+def filter_tokens(tokens: List[str]) -> List[str]:
+    filtered: List[str] = []
+    for token in tokens:
+        t = (token or "").strip().lower()
+        if len(t) <= 2:
+            continue
+        if not re.search(r"[a-zA-Z가-힣]", t):
+            continue
+        filtered.append(t)
+    return filtered
+
+
+def extract_ngrams(tokens: List[str]) -> List[str]:
+    if not tokens:
+        return []
+    unigrams = list(tokens)
+    bigrams = [f"{tokens[i]} {tokens[i + 1]}" for i in range(len(tokens) - 1)]
+    trigrams = [f"{tokens[i]} {tokens[i + 1]} {tokens[i + 2]}" for i in range(len(tokens) - 2)]
+    return unigrams + bigrams + trigrams
 
 
 def _sheet_values() -> Tuple[List[List[str]], str]:
@@ -132,7 +248,8 @@ def _rows_from_values(values: List[List[str]]) -> List[CategoryRow]:
             "standard_category", "무신사소분류", "musinsa_subcategory",
             "category", "카테고리",
         ])
-        rows.append(CategoryRow(i, product_name, brand, category))
+        url = _pick(row, hmap, ["url", "link", "링크"])
+        rows.append(CategoryRow(i, product_name, brand, category, url))
     return rows
 
 
@@ -163,7 +280,8 @@ def _rows_from_input_csv(input_csv: str) -> List[CategoryRow]:
         category = _pick(row, hmap, [
             "category", "current_category", "카테고리", "standard_category", "무신사소분류", "musinsa_subcategory",
         ])
-        rows.append(CategoryRow(row_num, product_name, brand, category))
+        url = _pick(row, hmap, ["url", "link", "링크"])
+        rows.append(CategoryRow(row_num, product_name, brand, category, url))
     return rows
 
 
@@ -180,7 +298,7 @@ def _rows_from_log(logs_dir: str) -> List[CategoryRow]:
             m_brand = re.search(r"brand=(.*)$", line)
             product_name = (m_product.group(1).strip() if m_product else "").strip()
             brand = (m_brand.group(1).strip() if m_brand else "").strip()
-            rows.append(CategoryRow(0, product_name, brand, "미분류"))
+            rows.append(CategoryRow(0, product_name, brand, "미분류", ""))
     return rows
 
 
@@ -222,7 +340,10 @@ def analyze_unresolved_categories(*, logs_dir: str = "logs", input_csv: str = ""
         values, source = _sheet_values()
         base_rows = _rows_from_values(values) if values else _rows_from_log(logs_dir)
 
-    unresolved_rows = _to_unresolved(base_rows)
+    total_csv_rows = len(base_rows)
+    valid_rows = [row for row in base_rows if is_valid_product_row(row)]
+    empty_rows = total_csv_rows - len(valid_rows)
+    unresolved_rows = _to_unresolved(valid_rows)
     keyword_counter: Counter[str] = Counter()
     for row in unresolved_rows:
         for token in [t.strip() for t in row.detected_keywords.split(",") if t.strip()]:
@@ -235,8 +356,22 @@ def analyze_unresolved_categories(*, logs_dir: str = "logs", input_csv: str = ""
         "top_keywords": keyword_counter.most_common(20),
         "csv_path": csv_path,
         "source": source,
-        "total_rows": len(base_rows),
+        "total_rows": len(valid_rows),
+        "total_csv_rows": total_csv_rows,
+        "valid_product_rows": len(valid_rows),
+        "empty_rows": empty_rows,
     }
+
+
+def load_category_rows(*, logs_dir: str = "logs", input_csv: str = "", include_empty: bool = False) -> List[CategoryRow]:
+    if input_csv:
+        rows = _rows_from_input_csv(input_csv)
+    else:
+        values, _source = _sheet_values()
+        rows = _rows_from_values(values) if values else _rows_from_log(logs_dir)
+    if include_empty:
+        return rows
+    return [row for row in rows if is_valid_product_row(row)]
 
 
 def calculate_category_health(total_rows: int, unresolved_count: int) -> Dict[str, object]:
@@ -261,9 +396,39 @@ def calculate_category_health(total_rows: int, unresolved_count: int) -> Dict[st
     }
 
 
-def category_health(*, logs_dir: str = "logs", input_csv: str = "") -> Dict[str, object]:
-    report = analyze_unresolved_categories(logs_dir=logs_dir, input_csv=input_csv)
-    return calculate_category_health(int(report.get("total_rows", 0) or 0), len(report.get("rows", [])))
+def category_health(*, logs_dir: str = "logs", input_csv: str = "", reclassify: bool = False) -> Dict[str, object]:
+    if not reclassify:
+        report = analyze_unresolved_categories(logs_dir=logs_dir, input_csv=input_csv)
+        health = calculate_category_health(int(report.get("total_rows", 0) or 0), len(report.get("rows", [])))
+        health["total_csv_rows"] = int(report.get("total_csv_rows", health["total_rows"]) or health["total_rows"])
+        health["valid_product_rows"] = int(report.get("valid_product_rows", health["total_rows"]) or health["total_rows"])
+        health["empty_rows"] = int(report.get("empty_rows", 0) or 0)
+        return health
+
+    all_rows = load_category_rows(logs_dir=logs_dir, input_csv=input_csv, include_empty=True)
+    rows = [row for row in all_rows if is_valid_product_row(row)]
+    total = len(rows)
+    unresolved = 0
+    matched_by = {
+        "force_map": 0,
+        "fallback_rules": 0,
+        "existing_category": 0,
+        "unresolved": 0,
+    }
+    for row in rows:
+        category, reason = classify_category_with_reason(row.product_name, row.brand)
+        if category == StandardCategory.ETC:
+            unresolved += 1
+            matched_by["unresolved"] += 1
+        else:
+            matched_by[reason] = matched_by.get(reason, 0) + 1
+    health = calculate_category_health(total, unresolved)
+    health["total_csv_rows"] = len(all_rows)
+    health["valid_product_rows"] = len(rows)
+    health["empty_rows"] = len(all_rows) - len(rows)
+    health["matched_by"] = matched_by
+    health["reclassify"] = True
+    return health
 
 
 def _keyword_counter_from_unresolved_csv(csv_path: str) -> Counter[str]:
@@ -280,11 +445,75 @@ def _keyword_counter_from_unresolved_csv(csv_path: str) -> Counter[str]:
                 product = str(row.get("product_name", "") or "")
                 brand = str(row.get("brand", "") or "")
                 tokens = extract_keywords(f"{product} {brand}")
-            for token in tokens:
-                if token in STOPWORDS:
-                    continue
+            for token in filter_tokens(tokens):
                 counter[token] += 1
     return counter
+
+
+def _phrase_counter_from_unresolved_csv(csv_path: str) -> Counter[str]:
+    counter: Counter[str] = Counter()
+    if not os.path.exists(csv_path):
+        return counter
+    with open(csv_path, "r", encoding="utf-8-sig", newline="") as fp:
+        reader = csv.DictReader(fp)
+        for row in reader:
+            product = str(row.get("product_name", "") or "")
+            brand = str(row.get("brand", "") or "")
+            tokens = extract_keywords(f"{product} {brand}")
+            phrases = extract_ngrams(tokens)
+            for phrase in phrases:
+                p = phrase.strip().lower()
+                if len(p) <= 2:
+                    continue
+                parts = [part for part in p.split() if part]
+                if p in STOPWORDS or any(part in STOPWORDS for part in parts):
+                    continue
+                counter[p] += 1
+    return counter
+
+
+def _rank_phrases(counter: Counter[str], top_n: int) -> List[Tuple[str, int]]:
+    high = [item for item in counter.items() if item[1] >= 3]
+    mid = [item for item in counter.items() if item[1] == 2]
+    low = [item for item in counter.items() if item[1] == 1]
+    ranked = high + mid + low
+    ranked.sort(key=lambda x: (-x[1], len(x[0]), x[0]))
+    return ranked
+
+
+def _suggest_from_phrases(top_phrases: List[Tuple[str, int]], top_n: int) -> Tuple[List[str], List[Dict[str, str]]]:
+    candidates: List[str] = []
+    candidate_dicts: List[Dict[str, str]] = []
+    seen_pattern: set[str] = set()
+    for phrase, _count in top_phrases:
+        label_std = None
+        if phrase in CATEGORY_HINTS:
+            label_std = CATEGORY_HINTS[phrase]
+        else:
+            for hint, mapped in CATEGORY_HINTS.items():
+                if hint in phrase:
+                    label_std = mapped
+                    break
+        if not label_std:
+            continue
+        label, std = label_std
+        pattern = phrase
+        if pattern in seen_pattern:
+            continue
+        seen_pattern.add(pattern)
+        candidates.append(f'("{label}", ["{pattern}"], StandardCategory.{std.name})')
+        candidate_dicts.append(
+            {
+                "token": phrase,
+                "label": label,
+                "std_name": std.name,
+                "pattern": pattern,
+                "line": f'("{label}", ["{pattern}"], StandardCategory.{std.name})',
+            }
+        )
+        if len(candidates) >= top_n:
+            break
+    return candidates, candidate_dicts
 
 
 def suggest_category_rules(*, logs_dir: str = "logs", input_csv: str = "", top_n: int = 10) -> Dict[str, object]:
@@ -297,41 +526,41 @@ def suggest_category_rules(*, logs_dir: str = "logs", input_csv: str = "", top_n
             report = analyze_unresolved_categories(logs_dir=logs_dir)
             csv_path = report["csv_path"]
 
-    counter = _keyword_counter_from_unresolved_csv(csv_path)
-    keyword_to_rule = {
-        "dress": ("원피스", StandardCategory.DRESS),
-        "skirt": ("스커트", StandardCategory.SKIRT_LONG),
-        "cardigan": ("가디건", StandardCategory.TOP_CARDIGAN),
-        "knit": ("니트", StandardCategory.TOP_KNIT),
-        "shirt": ("셔츠/블라우스", StandardCategory.TOP_SHIRT),
-        "coat": ("코트", StandardCategory.OUTER_COAT),
-        "puffer": ("패딩", StandardCategory.OUTER_PADDING),
-        "bag": ("가방", StandardCategory.BAG_SHOULDER),
-        "cap": ("모자", StandardCategory.ACC_CAP),
-        "belt": ("벨트", StandardCategory.ACC_BELT),
-        "cargo": ("카고 팬츠", StandardCategory.PANTS_CARGO),
-    }
-
-    candidates: List[str] = []
-    for keyword, _count in counter.most_common(top_n * 3):
-        if keyword not in keyword_to_rule:
-            continue
-        label, std = keyword_to_rule[keyword]
-        if keyword == "cargo":
-            pattern = "cargo pants"
-        elif keyword == "skirt":
-            pattern = "pleated skirt"
-        elif keyword == "bag":
-            pattern = "shoulder bag"
-        else:
-            pattern = keyword
-        candidates.append(f'("{label}", ["{pattern}"], StandardCategory.{std.name})')
-        if len(candidates) >= top_n:
-            break
+    phrase_counter = _phrase_counter_from_unresolved_csv(csv_path)
+    top_phrases = _rank_phrases(phrase_counter, top_n)
+    candidates, candidate_dicts = _suggest_from_phrases(top_phrases, top_n)
 
     return {
-        "top_tokens": counter.most_common(20),
+        "top_tokens": top_phrases[:20],  # backward compatibility
+        "top_phrases": top_phrases[:20],
         "candidates": candidates,
+        "candidate_dicts": candidate_dicts,
+    }
+
+
+def suggest_category_rule_candidates(*, logs_dir: str = "logs", input_csv: str = "", top_token_n: int = 20) -> Dict[str, object]:
+    if input_csv:
+        report = analyze_unresolved_categories(logs_dir=logs_dir, input_csv=input_csv)
+        csv_path = report["csv_path"]
+    else:
+        csv_path = os.path.join(logs_dir, "unresolved_categories.csv")
+        if not os.path.exists(csv_path):
+            report = analyze_unresolved_categories(logs_dir=logs_dir)
+            csv_path = report["csv_path"]
+
+    phrase_counter = _phrase_counter_from_unresolved_csv(csv_path)
+    top_phrases = _rank_phrases(phrase_counter, top_token_n)
+    _candidate_lines, candidates = _suggest_from_phrases(top_phrases, top_token_n)
+    skipped: List[Dict[str, str]] = []
+    mapped_tokens = {c["token"] for c in candidates}
+    for token, _count in top_phrases:
+        if token not in mapped_tokens:
+            skipped.append({"token": token, "reason": "no StandardCategory mapping"})
+    return {
+        "top_tokens": top_phrases[:top_token_n],  # backward compatibility
+        "top_phrases": top_phrases[:top_token_n],
+        "candidates": candidates,
+        "skipped": skipped,
     }
 
 

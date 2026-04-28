@@ -1,4 +1,4 @@
-﻿"""Sheet-driven StandardCategory classifier (minimal additive layer).
+"""Sheet-driven StandardCategory classifier (minimal additive layer).
 
 Reads keyword rules from Google Sheet and returns StandardCategory when matched.
 If unavailable or unmatched, caller should fall back to existing resolver.
@@ -28,10 +28,6 @@ _RULE_CACHE: Dict[str, object] = {
 }
 _LOGGER = logging.getLogger(__name__)
 _UNRESOLVED_JSONL_PATH = os.path.join("logs", "category_unresolved.jsonl")
-_REMOVE_WORDS = [
-    "\ubb34\ub8cc\ubc30\uc1a1", "\ub2f9\uc77c\ucd9c\uace0", "\uc815\ud488", "\uacf5\uc2dd", "1+1", "\uc138\uc77c",
-    "\ud2b9\uac00", "\uc774\ubca4\ud2b8", "\ud560\uc778", "\ucd94\ucc9c", "\uc2e0\uc0c1",
-]
 
 
 @dataclass
@@ -43,41 +39,27 @@ class ClassificationRule:
 
 
 CATEGORY_FALLBACK_RULES: List[Tuple[str, List[str], StandardCategory]] = [
-    ("long_sleeve_tshirt", ["긴팔", "long sleeve", "ls tee"], StandardCategory.TOP_LONG_SLEEVE),
-    ("short_sleeve_tshirt", ["반팔", "short sleeve", "t-shirt", "tee"], StandardCategory.TOP_TSHIRT),
-    ("denim_pants", ["청바지", "denim", "jeans"], StandardCategory.PANTS_DENIM),
-    ("jogger_pants", ["조거", "jogger", "sweatpants", "track pants"], StandardCategory.PANTS_JOGGER),
-    ("sneakers", ["sneakers", "sneaker", "운동화", "스니커즈"], StandardCategory.SHOES_SNEAKER),
-    ("sandals", ["슬리퍼", "샌들", "sandal", "slide"], StandardCategory.SHOES_SANDAL),
-    ("hoodie", ["hoodie", "후드", "후디", "맨투맨", "sweatshirt"], StandardCategory.TOP_HOODIE),
-    ("dress", ["dress", "드레스", "원피스"], StandardCategory.DRESS),
-    ("skirt", ["skirt", "스커트"], StandardCategory.SKIRT_LONG),
-    ("cardigan", ["cardigan", "가디건"], StandardCategory.TOP_CARDIGAN),
-    ("knit", ["knit", "sweater", "니트", "스웨터"], StandardCategory.TOP_KNIT),
-    ("shirt_blouse", ["shirt", "blouse", "셔츠", "블라우스"], StandardCategory.TOP_SHIRT),
-    ("coat", ["coat", "코트"], StandardCategory.OUTER_COAT),
-    ("padding", ["padding", "puffer", "down jacket", "패딩"], StandardCategory.OUTER_PADDING),
-    ("jacket", ["jacket", "자켓", "재킷"], StandardCategory.OUTER_JACKET),
-    ("bag", ["bag", "백", "토트", "숄더백", "crossbody"], StandardCategory.BAG_SHOULDER),
-    ("cap", ["cap", "hat", "beanie", "모자", "비니"], StandardCategory.ACC_CAP),
-    ("belt", ["belt", "벨트"], StandardCategory.ACC_BELT),
-    ("sunglasses", ["sunglasses", "선글라스"], StandardCategory.ACC_EYEWEAR),
-    ("socks", ["socks", "sock", "양말"], StandardCategory.INNER_UNDERWEAR),
-    ("homewear", ["홈웨어", "homewear", "lounge wear", "loungewear", "잠옷", "파자마", "pajama"], StandardCategory.HOME_PAJAMA),
-    ("innerwear", ["이너", "이너프리", "inner", "innerwear", "underwear", "속옷", "속바지", "브라", "bra", "팬티", "panty", "panties", "padded"], StandardCategory.INNER_UNDERWEAR),
-    ("seamless_innerwear", ["심리스", "seamless", "seamless inner", "심리스 이너"], StandardCategory.INNER_UNDERWEAR),
-    ("shapewear", ["보정", "보정속옷", "골반뽕", "힙업", "볼륨업", "volume up", "hip padded", "shaper", "shapewear"], StandardCategory.INNER_UNDERWEAR),
-    ("leggings", ["레깅스", "leggings", "legging"], StandardCategory.PANTS_LEGGINGS),
-    ("loafer", ["loafer"], StandardCategory.SHOES_LOAFER),
+    ("긴소매 티셔츠", ["긴팔", "long sleeve", "ls tee"], StandardCategory.TOP_LONG_SLEEVE),
+    ("반소매 티셔츠", ["반팔", "short sleeve", "t-shirt", "tee"], StandardCategory.TOP_TSHIRT),
+    ("데님 팬츠", ["청바지", "denim", "jeans"], StandardCategory.PANTS_DENIM),
+    ("트레이닝/조거 팬츠", ["조거", "jogger", "sweatpants", "track pants"], StandardCategory.PANTS_JOGGER),
+    ("스니커즈", ["sneakers", "sneaker", "운동화", "스니커즈"], StandardCategory.SHOES_SNEAKER),
+    ("샌들/슬리퍼", ["슬리퍼", "샌들", "sandal", "slide"], StandardCategory.SHOES_SANDAL),
+    ("후드/맨투맨", ["hoodie", "후드", "후디", "맨투맨", "sweatshirt"], StandardCategory.TOP_HOODIE),
+    ("원피스", ["dress", "드레스", "원피스"], StandardCategory.DRESS),
+    ("스커트", ["skirt", "스커트"], StandardCategory.SKIRT_LONG),
+    ("가디건", ["cardigan", "가디건"], StandardCategory.TOP_CARDIGAN),
+    ("니트", ["knit", "sweater", "니트", "스웨터"], StandardCategory.TOP_KNIT),
+    ("셔츠/블라우스", ["shirt", "blouse", "셔츠", "블라우스"], StandardCategory.TOP_SHIRT),
+    ("코트", ["coat", "코트"], StandardCategory.OUTER_COAT),
+    ("패딩", ["padding", "puffer", "down jacket", "패딩"], StandardCategory.OUTER_PADDING),
+    ("자켓", ["jacket", "자켓", "재킷"], StandardCategory.OUTER_JACKET),
+    ("가방", ["bag", "백", "토트", "숄더백", "crossbody"], StandardCategory.BAG_SHOULDER),
+    ("모자", ["cap", "hat", "beanie", "모자", "비니"], StandardCategory.ACC_CAP),
+    ("벨트", ["belt", "벨트"], StandardCategory.ACC_BELT),
+    ("선글라스", ["sunglasses", "선글라스"], StandardCategory.ACC_EYEWEAR),
+    ("양말", ["socks", "sock", "양말"], StandardCategory.INNER_UNDERWEAR),
 ]
-
-FORCE_CATEGORY_MAP: Dict[Tuple[str, ...], StandardCategory] = {
-    ("골반뽕", "힙업", "볼륨업", "보정", "보정속옷", "shaper", "shapewear"): StandardCategory.INNER_UNDERWEAR,
-    ("심리스", "seamless", "심리스브라", "seamlessbra"): StandardCategory.INNER_UNDERWEAR,
-    ("이너프리", "innerfree", "inner", "이너", "innerwear", "underwear"): StandardCategory.INNER_UNDERWEAR,
-    ("bra", "브라", "sports bra", "sportsbra", "padded", "panty", "panties", "팬티"): StandardCategory.INNER_UNDERWEAR,
-    ("홈웨어", "homewear", "잠옷", "파자마", "pajama", "loungewear", "lounge wear"): StandardCategory.HOME_PAJAMA,
-}
 
 
 def _normalize_text(text: str) -> str:
@@ -87,72 +69,22 @@ def _normalize_text(text: str) -> str:
     return " ".join(value.split())
 
 
-def normalize_product_name(text: str) -> str:
-    value = (text or "").lower()
-    value = re.sub(r"\(.*?\)", " ", value)
-    value = re.sub(r"\[.*?\]", " ", value)
-    value = re.sub(r"\b\d+\+?\d*\b", " ", value)
-    for word in _REMOVE_WORDS:
-        value = value.replace(word.lower(), " ")
-    value = re.sub(r"[^a-z0-9가-힣\s]", " ", value)
-    value = re.sub(r"\s+", " ", value).strip()
-    return value
-
-
-def _contains_keyword(text: str, keyword: str) -> bool:
-    text_norm = (text or "").lower()
-    keyword_norm = (keyword or "").lower()
-    if not text_norm or not keyword_norm:
-        return False
-    if keyword_norm in text_norm:
-        return True
-    compact_text = text_norm.replace(" ", "")
-    compact_keyword = keyword_norm.replace(" ", "")
-    if compact_keyword and compact_keyword in compact_text:
-        return True
-    tokens = text_norm.split()
-    return any(compact_keyword in token.replace(" ", "") for token in tokens if token)
-
-
 def fallback_category(name: str, brand: str) -> str:
-    clean_name = normalize_product_name(name)
-    text = _normalize_text(f"{clean_name} {brand}")
+    text = _normalize_text(f"{name} {brand}")
     for category_label, keywords, _standard in CATEGORY_FALLBACK_RULES:
         if any(_normalize_text(keyword) in text for keyword in keywords):
             return category_label
-    return "湲고?"
-
-
-def classify_category_with_reason(
-    name: str,
-    brand: str,
-    existing_category: Optional[StandardCategory] = None,
-) -> Tuple[StandardCategory, str]:
-    clean_name = normalize_product_name(name)
-    force_text = f"{clean_name} {(brand or '').lower()}".strip()
-    result: StandardCategory | None = None
-    reason = "unresolved"
-    for keywords, category in FORCE_CATEGORY_MAP.items():
-        if any(_contains_keyword(force_text, keyword) for keyword in keywords):
-            result = category
-            reason = "force_map"
-            break
-
-    if result is None:
-        if existing_category is not None:
-            result = existing_category
-            reason = "existing_category"
-        else:
-            label = fallback_category(clean_name, brand)
-            matched = next((std for cat, _kw, std in CATEGORY_FALLBACK_RULES if cat == label), None)
-            result = matched or StandardCategory.ETC
-            reason = "fallback_rules" if matched else "unresolved"
-
-    return result, reason
+    return "기타"
 
 
 def classify_category(name: str, brand: str, existing_category: Optional[StandardCategory] = None) -> StandardCategory:
-    result, _reason = classify_category_with_reason(name, brand, existing_category)
+    if existing_category is not None:
+        result = existing_category
+    else:
+        label = fallback_category(name, brand)
+        matched = next((std for cat, _kw, std in CATEGORY_FALLBACK_RULES if cat == label), None)
+        result = matched or StandardCategory.ETC
+
     _LOGGER.info(
         "category_classification product=%s brand=%s result=%s",
         (name or "").strip(),
@@ -166,13 +98,11 @@ def classify_category(name: str, brand: str, existing_category: Optional[Standar
 
 
 def _tokenize_unresolved(text: str) -> List[str]:
-    normalized = normalize_product_name(text)
-    raw = re.findall(r"[a-zA-Z]{3,}|[가-힣]{2,}", normalized)
+    raw = re.findall(r"[a-zA-Z]{3,}|[가-힣]{2,}", (text or "").lower())
     stopwords = {
         "black", "white", "ivory", "navy", "blue", "red",
         "new", "official", "authentic", "women", "men",
-        "臾대즺諛곗넚", "?뺥뭹", "怨듭떇",
-        "value", "移댁씤?ㅻ?", "kindame", "free", "volume", "hip",
+        "무료배송", "정품", "공식",
     }
     return [token for token in raw if token not in stopwords]
 
@@ -190,7 +120,7 @@ def _write_unresolved_jsonl(*, product_name: str, brand: str, row: int = 0) -> N
         with open(_UNRESOLVED_JSONL_PATH, "a", encoding="utf-8") as fp:
             fp.write(json.dumps(payload, ensure_ascii=False) + "\n")
     except Exception:
-        # 遺꾨쪟 濡쒖쭅? ?덈? 以묐떒?쒗궎吏 ?딅뒗??
+        # 분류 로직은 절대 중단시키지 않는다.
         return
 
 
@@ -252,7 +182,7 @@ def _load_rules_from_sheet(
     try:
         credentials_path = sheet_source_mod.get_credentials_path(os.getcwd())
         service = sheet_source_mod.get_sheets_service(credentials_path)
-        # 癒쇱? ??議댁옱 ?щ?瑜??뺤씤??range parse ?먮윭瑜??쇳븳??
+        # 먼저 탭 존재 여부를 확인해 range parse 에러를 피한다.
         meta = service.spreadsheets().get(
             spreadsheetId=spreadsheet_id,
             fields="sheets(properties(title))",
@@ -316,7 +246,7 @@ def _load_rules_from_sheet(
         rules.sort(key=lambda r: r.priority)
         return rules
     except Exception as exc:
-        # ???대쫫???뺥솗???쇱튂?섏? ?딆쓣 ????뚮Ц??怨듬갚/?몃뜑?ㅼ퐫??李⑥씠) ?먮룞 ?댁꽍 ?ъ떆??
+        # 탭 이름이 정확히 일치하지 않을 때(대소문자/공백/언더스코어 차이) 자동 해석 재시도
         try:
             if _retried:
                 print(f"[classifier] rule load failed: {exc}")
@@ -436,4 +366,3 @@ def classify_standard_category_from_sheet(
         "sheet_name": sheet_name,
         "standard_category": resolved.value,
     }
-
