@@ -173,6 +173,8 @@ class AutoShopLauncher(tk.Tk):
         self.nav_buttons: dict[str, tk.Label] = {}
         self.page_container: tk.Frame | None = None
         self.current_page: tk.Frame | None = None
+        self.pages: dict[str, tk.Frame] = {}
+        self.current_page_name: str = self.state.active_view
         self.log_history: list[str] = []
         self.wizard_summary_var = tk.StringVar(value="첫 실행 준비를 확인하세요.")
         self.wizard_status_vars: dict[str, tk.StringVar] = {
@@ -334,20 +336,34 @@ class AutoShopLauncher(tk.Tk):
 
         root = tk.Frame(self, bg=self.theme["bg"])
         root.pack(fill=tk.BOTH, expand=True)
-        root.grid_columnconfigure(0, minsize=226)
+        root.grid_columnconfigure(0, minsize=240)
         root.grid_columnconfigure(1, weight=1)
+        root.grid_columnconfigure(2, minsize=300)
         root.grid_rowconfigure(0, weight=1)
+        self.root_shell = root
 
         sidebar = tk.Frame(root, bg=self.theme["sidebar"], padx=12, pady=14, highlightbackground=self.theme["line"], highlightthickness=1)
         content = tk.Frame(root, bg=self.theme["bg"], padx=18, pady=14)
+        right_panel = tk.Frame(root, bg=self.theme["bg"], padx=0, pady=14)
+        self.right_panel_frame = right_panel
         sidebar.grid(row=0, column=0, sticky="nsew")
         content.grid(row=0, column=1, sticky="nsew")
+        right_panel.grid(row=0, column=2, sticky="nsew", padx=(0, 18))
         content.grid_columnconfigure(0, weight=1)
         content.grid_rowconfigure(0, weight=1)
+        right_panel.grid_columnconfigure(0, weight=1)
+        right_panel.grid_rowconfigure(0, weight=1)
 
         self._build_sidebar(sidebar)
         self.page_container = tk.Frame(content, bg=self.theme["bg"])
         self.page_container.grid(row=0, column=0, sticky="nsew")
+        self.page_container.grid_rowconfigure(0, weight=1)
+        self.page_container.grid_columnconfigure(0, weight=1)
+        self.right_panel_container = tk.Frame(right_panel, bg=self.theme["bg"])
+        self.right_panel_container.grid(row=0, column=0, sticky="nsew")
+        self.right_panel_container.grid_rowconfigure(0, weight=1)
+        self.right_panel_container.grid_columnconfigure(0, weight=1)
+        self._build_pages()
         self._show_active_page(self.state.active_view)
 
         self.protocol("WM_DELETE_WINDOW", self.on_close)
@@ -637,12 +653,9 @@ class AutoShopLauncher(tk.Tk):
                 fg="#ffffff" if is_active else "#d5e0ee",
             )
 
-    def _show_active_page(self, view_name: str) -> None:
+    def _build_pages(self) -> None:
         if self.page_container is None:
             return
-        self._set_sidebar_active(view_name)
-        if self.current_page is not None and self.current_page.winfo_exists():
-            self.current_page.destroy()
         page_map = {
             "대시보드": DashboardPage,
             "수집 / 정찰": ScoutPage,
@@ -651,9 +664,31 @@ class AutoShopLauncher(tk.Tk):
             "감시 / 자동화": AutomationPage,
             "관리 / 설정": SettingsPage,
         }
-        page_cls = page_map.get(view_name, DashboardPage)
-        self.current_page = page_cls(self.page_container, self)
-        self.current_page.grid(row=0, column=0, sticky="nsew")
+        self.pages = {name: page_cls(self.page_container, self) for name, page_cls in page_map.items()}
+
+    def _show_active_page(self, view_name: str) -> None:
+        if self.page_container is None:
+            return
+        self._set_sidebar_active(view_name)
+        show_right_panel = view_name == "대시보드"
+        if hasattr(self, "right_panel_frame") and self.right_panel_frame.winfo_exists():
+            if show_right_panel:
+                self.right_panel_frame.grid()
+            else:
+                self.right_panel_frame.grid_remove()
+        if hasattr(self, "right_panel_container") and self.right_panel_container.winfo_exists():
+            for child in self.right_panel_container.winfo_children():
+                child.destroy()
+        page = self.pages.get(view_name) or self.pages.get("대시보드")
+        if page is None:
+            return
+        page.tkraise()
+        if hasattr(page, "refresh_view"):
+            page.refresh_view()
+        self.current_page = page
+        self.current_page_name = view_name
+        if show_right_panel and hasattr(self.current_page, "build_right_panel") and self.right_panel_container.winfo_exists():
+            self.current_page.build_right_panel(self.right_panel_container)
         if view_name == "대시보드":
             self._populate_log_widget()
             self._refresh_product_table()
@@ -755,7 +790,16 @@ class AutoShopLauncher(tk.Tk):
             start += extent
         canvas.create_oval(44, 44, 98, 98, fill=self.theme["panel"], outline=self.theme["panel"])
 
-    def _quick_button(self, parent: tk.Widget, title: str, subtitle: str, color: str, command) -> ColorButton:
+    def _quick_button(
+        self,
+        parent: tk.Widget,
+        title: str,
+        subtitle: str,
+        color: str,
+        command,
+        *,
+        auto_pack: bool = True,
+    ) -> ColorButton:
         btn = ColorButton(
             parent,
             text=f"{title}\n{subtitle}",
@@ -769,7 +813,8 @@ class AutoShopLauncher(tk.Tk):
             pady=9,
             font=("Segoe UI", 10, "bold"),
         )
-        btn.pack(fill=tk.X, pady=6)
+        if auto_pack:
+            btn.pack(fill=tk.X, pady=6)
         self.quick_action_buttons.append(btn)
         return btn
 
@@ -800,8 +845,8 @@ class AutoShopLauncher(tk.Tk):
 
     def refresh_dashboard_data(self) -> None:
         self.dashboard_data.refresh()
-        if self.state.active_view != "대시보드":
-            self._show_active_page(self.state.active_view)
+        if self.current_page is not None and self.current_page_name != "대시보드" and hasattr(self.current_page, "refresh_view"):
+            self.current_page.refresh_view()
 
     def toggle_auto_refresh(self) -> None:
         if self.auto_refresh_var.get():

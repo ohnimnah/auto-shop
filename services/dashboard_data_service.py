@@ -89,6 +89,7 @@ class DashboardDataService:
         waiting = sum(1 for row in products if self._matches_words(row.state, ("업로드 대기", "대기", "준비")))
         other_ratio = sum(1 for row in products if "기타" in row.category or "その他" in row.category) / max(1, len(products))
         reasons = self._group_count([row for row in products if self._is_error(row.state)], lambda row: row.state or "오류")
+        recovery_stats = self._load_upload_recovery_stats()
         return {
             "metrics": [
                 ("업로드 시도", uploaded + failed, "완료 + 실패 기준"),
@@ -101,6 +102,8 @@ class DashboardDataService:
             "failure_reasons": reasons[:6],
             "category_failures": failed,
             "other_ratio": other_ratio,
+            "recovery_success_ratio": recovery_stats["success_ratio"],
+            "recovery_counts": recovery_stats["counts"],
         }
 
     def get_automation_overview(self) -> dict:
@@ -121,6 +124,7 @@ class DashboardDataService:
             "team_cards": team_cards,
             "failures": dict(self.state.team_watch_failures),
             "retry_count": team_failures,
+            "recent_logs": self._load_recent_log_lines(limit=30, categories={"automation", "process", "scout", "assets", "design", "buyma", "sales"}),
         }
 
     def get_settings_overview(self) -> dict:
@@ -435,3 +439,48 @@ class DashboardDataService:
         if not path:
             return "-"
         return os.path.abspath(os.path.expanduser(path))
+
+    def _load_recent_log_lines(self, *, limit: int = 30, categories: set[str] | None = None) -> list[str]:
+        path = os.path.join(self.data_dir, "logs", f"launcher-{datetime.now():%Y-%m-%d}.log")
+        if not os.path.exists(path):
+            return []
+        lines: list[str] = []
+        try:
+            with open(path, "r", encoding="utf-8") as file:
+                for raw_line in file:
+                    try:
+                        payload = json.loads(raw_line)
+                    except Exception:
+                        continue
+                    category = str(payload.get("category") or "")
+                    if categories and category not in categories:
+                        continue
+                    timestamp = str(payload.get("timestamp") or "")[-8:]
+                    level = str(payload.get("level") or "INFO")
+                    message = str(payload.get("message") or "").strip()
+                    if not message:
+                        continue
+                    lines.append(f"[{timestamp}] [{level}] [{category}] {message}")
+        except Exception:
+            return []
+        return lines[-limit:]
+
+    def _load_upload_recovery_stats(self) -> dict:
+        counts = {"alias": 0, "fuzzy": 0, "same_parent_fallback": 0, "other": 0}
+        attempts = 0
+        successes = 0
+        for line in self._load_recent_log_lines(limit=500, categories={"buyma", "sales", "process"}):
+            if "[category][recovery]" not in line:
+                continue
+            method_match = re.search(r"method=([a-z_]+)", line)
+            method = method_match.group(1) if method_match else ""
+            if method in counts:
+                if "success" in line.lower():
+                    counts[method] += 1
+                    successes += 1
+                if "try=" in line:
+                    attempts += 1
+        return {
+            "counts": counts,
+            "success_ratio": successes / max(1, attempts),
+        }
