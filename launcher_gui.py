@@ -1,10 +1,6 @@
-"""Launcher entry point.
+"""Launcher entry point."""
 
-The dashboard UI lives in ui.dashboard. This file stays intentionally thin so
-packaging scripts and existing run commands can keep importing launcher_gui.
-"""
-
-from ui.dashboard import main
+from app.launcher.runtime import run_launcher as main
 
 
 if __name__ == "__main__":

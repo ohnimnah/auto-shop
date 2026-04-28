@@ -4,12 +4,6 @@ import glob
 import os
 import re
 
-from selenium import webdriver
-from selenium.common.exceptions import SessionNotCreatedException
-from selenium.webdriver.chrome.options import Options as ChromeOptions
-from selenium.webdriver.chrome.service import Service
-from webdriver_manager.chrome import ChromeDriverManager
-
 
 def _parse_version_parts(text: str) -> tuple[int, ...]:
     match = re.search(r"(\d+(?:\.\d+){1,3})", text or "")
@@ -32,6 +26,12 @@ def find_cached_chromedrivers() -> list[str]:
 
 def setup_chrome_driver(headless: bool = False):
     """Create configured Chrome WebDriver."""
+    from selenium import webdriver
+    from selenium.common.exceptions import SessionNotCreatedException
+    from selenium.webdriver.chrome.options import Options as ChromeOptions
+    from selenium.webdriver.chrome.service import Service
+    from webdriver_manager.chrome import ChromeDriverManager
+
     def _build_options(*, use_headless: bool) -> ChromeOptions:
         chrome_options = ChromeOptions()
         if use_headless:

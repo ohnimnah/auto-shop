@@ -10,6 +10,7 @@ from typing import Dict, List
 from selenium.webdriver.common.keys import Keys
 from selenium.webdriver.common.by import By
 
+from marketplace.buyma.retry_ops import safe_click
 from marketplace.buyma.selectors import JP_SHITEI_NASHI, JP_SIZE_SHITEI_NASHI
 
 
@@ -224,7 +225,7 @@ def select_color_system(driver, color_system: str, row_index: int = 0, *, sleep_
             return False
         color_select = color_selects[min(row_index, len(color_selects) - 1)]
         control = color_select.find_element(By.CSS_SELECTOR, ".Select-control")
-        scroll_and_click(driver, control)
+        safe_click(driver, control)
         sleep_fn(0.4)
 
         options = driver.find_elements(By.CSS_SELECTOR, ".Select-menu-outer .Select-option")
@@ -240,7 +241,7 @@ def select_color_system(driver, color_system: str, row_index: int = 0, *, sleep_
                 if "その他" in txt:
                     scroll_and_click(driver, opt)
                     return True
-            scroll_and_click(driver, options[0])
+            safe_click(driver, options[0])
             return True
 
         active = driver.switch_to.active_element

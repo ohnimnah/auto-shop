@@ -8,15 +8,20 @@ entrypoint so behavior stays stable while orchestration moves out of
 from __future__ import annotations
 
 from datetime import datetime, timedelta
+import logging
 import re
 from typing import Any, Callable, Dict, List
 
+from marketplace.buyma.failure_tracking import capture_failure_artifacts
 from marketplace.buyma.mapper import buyma_title_units
+from marketplace.buyma.retry_ops import safe_click
 from marketplace.common.interfaces import MarketplaceRow, MarketplaceUploader
 from selenium.webdriver.common.by import By
 from selenium.webdriver.common.keys import Keys
 from selenium.webdriver.support import expected_conditions as EC
 from selenium.webdriver.support.ui import WebDriverWait
+from tenacity import RetryError, Retrying, stop_after_attempt, wait_fixed
+from utils.structured_logger import get_logger, log_event
 
 
 def upload_products(
@@ -41,6 +46,7 @@ def upload_products(
     status_completed: str,
 ) -> None:
     """Main upload loop for BUYMA."""
+    logger = get_logger("auto_shop.upload")
     print("바이마 출품 자동화 시작합니다\n")
     print(f"업로드 모드: {upload_mode}\n")
 
@@ -86,8 +92,42 @@ def upload_products(
             ):
                 print(f"  {row_num}행 상태 업데이트: {status_uploading}")
             processed += 1
-
-            fill_output = fill_buyma_form(driver, row_data)
+            log_event(logger, logging.INFO, "upload_started", row=row_num, brand=row_data.get("brand", ""))
+            try:
+                fill_output = None
+                for attempt in Retrying(stop=stop_after_attempt(3), wait=wait_fixed(2), reraise=True):
+                    with attempt:
+                        fill_output = fill_buyma_form(driver, row_data)
+            except RetryError as retry_exc:
+                last = retry_exc.last_attempt.exception()
+                error_text = str(last or retry_exc)
+                capture_failure_artifacts(driver, int(row_num), "fill_buyma_form", error_text, retry_count=3)
+                log_event(
+                    logger,
+                    logging.ERROR,
+                    "upload_fill_failed",
+                    row=row_num,
+                    step="fill_buyma_form",
+                    error=error_text,
+                    retry_count=3,
+                )
+                if update_cell_by_header(service, sheet_name, row_num, header_map, progress_status_header, "오류"):
+                    print(f"  {row_num}행 상태 업데이트: 오류")
+                continue
+            except Exception as exc:
+                capture_failure_artifacts(driver, int(row_num), "fill_buyma_form", str(exc), retry_count=0)
+                log_event(
+                    logger,
+                    logging.ERROR,
+                    "upload_fill_failed",
+                    row=row_num,
+                    step="fill_buyma_form",
+                    error=str(exc),
+                    retry_count=0,
+                )
+                if update_cell_by_header(service, sheet_name, row_num, header_map, progress_status_header, "오류"):
+                    print(f"  {row_num}행 상태 업데이트: 오류")
+                continue
             if isinstance(fill_output, dict):
                 fill_result = str(fill_output.get("result", "error"))
                 category_diag = dict(fill_output.get("category_diag") or {})
@@ -141,6 +181,16 @@ def upload_products(
                 return
             else:
                 print(f"  {row_num}행 상품입력 실패. 건너뜁니다")
+                capture_failure_artifacts(driver, int(row_num), "fill_result_error", fill_result, retry_count=0)
+                log_event(
+                    logger,
+                    logging.ERROR,
+                    "upload_row_failed",
+                    row=row_num,
+                    step="fill_result_error",
+                    error=fill_result,
+                    retry_count=0,
+                )
                 if update_cell_by_header(
                     service,
                     sheet_name,

@@ -3,6 +3,7 @@ import queue
 import random
 import re
 import json
+import base64
 import shutil
 import sys
 import tkinter as tk
@@ -642,13 +643,13 @@ class AutoShopLauncher(tk.Tk):
 
     def _build_quick_actions_panel(self, parent: tk.Frame) -> None:
         card = self._grid_card(parent, "빠른 실행", row=0, pady=(0, 12))
-        self.run_btn = self._quick_button(card, "정찰 실행", "상품 정보 수집", self.theme["green"], lambda: self.run_action("run"))
-        self.image_save_btn = self._quick_button(card, "이미지 저장", "이미지 다운로드", self.theme["blue"], lambda: self.run_action("save-images"))
-        self.thumb_btn = self._quick_button(card, "썸네일 생성", "썸네일 일괄 제작", self.theme["purple"], self.run_thumbnail_action)
-        self.upload_auto_btn = self._quick_button(card, "업로드 실행", "BUYMA 자동 업로드", self.theme["orange"], lambda: self.run_action("upload-auto"))
-        self.upload_review_btn = self._quick_button(card, "실패 건 재실행", "오류 상품 재처리", "#334155", lambda: self.run_action("upload-review"))
-        self.watch_btn = self._quick_button(card, "테스트 모드", "감시 실행", "#334155", lambda: self.run_action("watch"))
-        self.stop_btn = self._quick_button(card, "현재 작업 중지", "실행 중인 작업 종료", self.theme["red"], self.stop_action)
+        self.run_btn = self._quick_button(card, "정찰 실행", "상품 정보 수집", self.theme["green"], lambda: self.run_action("run"), compact=True)
+        self.image_save_btn = self._quick_button(card, "이미지 저장", "이미지 다운로드", self.theme["blue"], lambda: self.run_action("save-images"), compact=True)
+        self.thumb_btn = self._quick_button(card, "썸네일 생성", "썸네일 일괄 제작", self.theme["purple"], self.run_thumbnail_action, compact=True)
+        self.upload_auto_btn = self._quick_button(card, "업로드 실행", "BUYMA 자동 업로드", self.theme["orange"], lambda: self.run_action("upload-auto"), compact=True)
+        self.upload_review_btn = self._quick_button(card, "실패 건 재실행", "오류 상품 재처리", "#334155", lambda: self.run_action("upload-review"), compact=True)
+        self.watch_btn = self._quick_button(card, "테스트 모드", "감시 실행", "#334155", lambda: self.run_action("watch"), compact=True)
+        self.stop_btn = self._quick_button(card, "현재 작업 중지", "실행 중인 작업 종료", self.theme["red"], self.stop_action, compact=True)
         self.stop_btn.configure(state=tk.DISABLED)
 
     def _build_system_status_panel(self, parent: tk.Frame) -> None:
@@ -857,22 +858,24 @@ class AutoShopLauncher(tk.Tk):
         command,
         *,
         auto_pack: bool = True,
+        compact: bool = False,
     ) -> ColorButton:
+        text = f"{title} · {subtitle}" if compact else f"{title}\n{subtitle}"
         btn = ColorButton(
             parent,
-            text=f"{title}\n{subtitle}",
+            text=text,
             command=command,
             bg=color,
             fg="#ffffff",
             activebackground=color,
             anchor="w",
             justify=tk.LEFT,
-            padx=16,
-            pady=9,
-            font=("Segoe UI", 10, "bold"),
+            padx=12 if compact else 16,
+            pady=7 if compact else 9,
+            font=("Segoe UI", 9 if compact else 10, "bold"),
         )
         if auto_pack:
-            btn.pack(fill=tk.X, pady=6)
+            btn.pack(fill=tk.X, pady=4 if compact else 6)
         self.quick_action_buttons.append(btn)
         return btn
 
@@ -1541,10 +1544,19 @@ class AutoShopLauncher(tk.Tk):
             if email and password and "@" in email:
                 self.buyma_credentials.save(email, password)
             else:
-                shutil.copy2(selected_path, self._get_buyma_credentials_target_path())
-                self.buyma_credentials = BuymaCredentialService(self._get_buyma_credentials_target_path())
-                if not self.buyma_credentials.exists():
-                    raise ValueError("지원하지 않는 BUYMA 계정 파일 형식입니다.")
+                decoded_email, decoded_password = "", ""
+                try:
+                    decoded_email = base64.b64decode(email.encode()).decode().strip()
+                    decoded_password = base64.b64decode(password.encode()).decode().strip()
+                except Exception:
+                    pass
+                if decoded_email and decoded_password and "@" in decoded_email:
+                    self.buyma_credentials.save(decoded_email, decoded_password)
+                else:
+                    shutil.copy2(selected_path, self._get_buyma_credentials_target_path())
+                    self.buyma_credentials = BuymaCredentialService(self._get_buyma_credentials_target_path())
+                    if not self.buyma_credentials.exists():
+                        raise ValueError("지원하지 않는 BUYMA 계정 파일 형식입니다.")
             self.logger.emit(f"BUYMA 계정 파일 가져오기 완료: {self._get_buyma_credentials_target_path()}\n", category="settings")
             messagebox.showinfo("가져오기 완료", "BUYMA 계정 파일을 현재 프로필에 연결했습니다.")
             self.refresh_first_run_wizard()

@@ -2,13 +2,14 @@
 
 from __future__ import annotations
 
-import base64
 import json
 import os
 import re
 import shutil
 import subprocess
 from datetime import datetime
+
+from app.security.credential_store import KeyringCredentialStore
 
 
 class SystemChecker:
@@ -83,27 +84,11 @@ class SystemChecker:
 
     def has_buyma_credentials(self) -> bool:
         path = self.get_buyma_credentials_target_path()
-        if not os.path.exists(path):
-            return False
-        try:
-            with open(path, "r", encoding="utf-8") as file:
-                data = json.load(file)
-            email = base64.b64decode(str(data.get("email", "")).encode()).decode().strip()
-            password = base64.b64decode(str(data.get("password", "")).encode()).decode().strip()
-            return bool(email and password)
-        except Exception:
-            return False
+        return KeyringCredentialStore(path).exists()
 
     def load_buyma_email(self) -> str:
         path = self.get_buyma_credentials_target_path()
-        if not os.path.exists(path):
-            return ""
-        try:
-            with open(path, "r", encoding="utf-8") as file:
-                data = json.load(file)
-            return base64.b64decode(str(data.get("email", "")).encode()).decode().strip()
-        except Exception:
-            return ""
+        return KeyringCredentialStore(path).load_email()
 
     def has_ready_runtime(self) -> bool:
         python_cmd = self.resolve_python_executable()

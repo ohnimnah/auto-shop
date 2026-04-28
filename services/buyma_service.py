@@ -1,17 +1,21 @@
 """BUYMA parsing, matching, and credential helper functions."""
 
-import base64
-import json
 import os
 import re
 import time
 import urllib.parse
 from typing import Dict, List
 
+from app.security.credential_store import KeyringCredentialStore
 from bs4 import BeautifulSoup
-from selenium.webdriver.common.by import By
-from selenium.webdriver.support import expected_conditions as EC
-from selenium.webdriver.support.ui import WebDriverWait
+try:
+    from selenium.webdriver.common.by import By
+    from selenium.webdriver.support import expected_conditions as EC
+    from selenium.webdriver.support.ui import WebDriverWait
+except Exception:  # pragma: no cover - allows tests without selenium runtime.
+    By = None  # type: ignore[assignment]
+    EC = None  # type: ignore[assignment]
+    WebDriverWait = None  # type: ignore[assignment]
 
 
 class BuymaCredentialService:
@@ -19,37 +23,16 @@ class BuymaCredentialService:
 
     def __init__(self, credentials_path: str) -> None:
         self.credentials_path = credentials_path
+        self.store = KeyringCredentialStore(credentials_path)
 
     def save(self, email: str, password: str) -> None:
-        os.makedirs(os.path.dirname(self.credentials_path), exist_ok=True)
-        payload = {
-            "email": base64.b64encode(email.encode()).decode(),
-            "password": base64.b64encode(password.encode()).decode(),
-        }
-        with open(self.credentials_path, "w", encoding="utf-8") as file:
-            json.dump(payload, file, ensure_ascii=False, indent=2)
+        self.store.save(email=email, password=password)
 
     def load_email(self) -> str:
-        if not os.path.exists(self.credentials_path):
-            return ""
-        try:
-            with open(self.credentials_path, "r", encoding="utf-8") as file:
-                data = json.load(file)
-            return base64.b64decode(str(data.get("email", "")).encode()).decode().strip()
-        except Exception:
-            return ""
+        return self.store.load_email()
 
     def exists(self) -> bool:
-        if not os.path.exists(self.credentials_path):
-            return False
-        try:
-            with open(self.credentials_path, "r", encoding="utf-8") as file:
-                data = json.load(file)
-            email = base64.b64decode(str(data.get("email", "")).encode()).decode().strip()
-            password = base64.b64decode(str(data.get("password", "")).encode()).decode().strip()
-            return bool(email and password)
-        except Exception:
-            return False
+        return self.store.exists()
 
 
 def normalize_price(text: str) -> str:

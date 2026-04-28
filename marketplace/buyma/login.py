@@ -19,6 +19,8 @@ from selenium.webdriver.chrome.options import Options as ChromeOptions
 from selenium.webdriver.chrome.service import Service
 from webdriver_manager.chrome import ChromeDriverManager
 
+from app.security.credential_store import KeyringCredentialStore
+from marketplace.buyma.retry_ops import safe_click, safe_send_keys
 from marketplace.common.runtime import get_runtime_data_dir
 from marketplace.buyma.selectors import (
     BUYMA_LOGIN_URL,
@@ -66,29 +68,16 @@ def _ensure_buyma_page(driver, target_url: str, *, wait_scale: float = 0.6, retr
 
 
 def save_buyma_credentials(email: str, password: str) -> None:
-    os.makedirs(os.path.dirname(BUYMA_CRED_PATH), exist_ok=True)
-    import base64
-
-    payload = {
-        "email": base64.b64encode(email.encode()).decode(),
-        "password": base64.b64encode(password.encode()).decode(),
-    }
-    with open(BUYMA_CRED_PATH, "w", encoding="utf-8") as file:
-        json.dump(payload, file)
+    KeyringCredentialStore(BUYMA_CRED_PATH).save(email=email, password=password)
     print("  BUYMA credentials saved.")
 
 
 def load_buyma_credentials() -> Tuple[Optional[str], Optional[str]]:
-    if not os.path.exists(BUYMA_CRED_PATH):
-        return None, None
     try:
-        import base64
-
-        with open(BUYMA_CRED_PATH, "r", encoding="utf-8") as file:
-            data = json.load(file)
-        email = base64.b64decode(data["email"]).decode()
-        password = base64.b64decode(data["password"]).decode()
-        return email, password
+        record = KeyringCredentialStore(BUYMA_CRED_PATH).load()
+        if not record:
+            return None, None
+        return record.email, record.password
     except Exception:
         return None, None
 
@@ -272,21 +261,21 @@ def wait_for_buyma_login(
             email_input = WebDriverWait(driver, 10).until(
                 EC.visibility_of_element_located((By.CSS_SELECTOR, LOGIN_EMAIL_SELECTOR))
             )
-            scroll_and_click_fn(driver, email_input)
+            safe_click(driver, email_input)
             email_input.clear()
-            email_input.send_keys(email)
+            safe_send_keys(email_input, email)
 
             password_input = WebDriverWait(driver, 10).until(
                 EC.visibility_of_element_located((By.CSS_SELECTOR, LOGIN_PASSWORD_SELECTOR))
             )
-            scroll_and_click_fn(driver, password_input)
+            safe_click(driver, password_input)
             password_input.clear()
-            password_input.send_keys(password)
+            safe_send_keys(password_input, password)
 
             login_btn = WebDriverWait(driver, 10).until(
                 EC.element_to_be_clickable((By.CSS_SELECTOR, LOGIN_SUBMIT_SELECTOR))
             )
-            scroll_and_click_fn(driver, login_btn)
+            safe_click(driver, login_btn)
             _sleep(5, wait_scale)
 
             current_url = driver.current_url
