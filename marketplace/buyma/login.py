@@ -7,6 +7,7 @@ import platform
 import re
 import tempfile
 import time
+from urllib.parse import urlparse
 from typing import Callable, Optional, Tuple
 
 from selenium import webdriver
@@ -35,6 +36,33 @@ CHROMEDRIVER_LOG_PATH = os.path.join(get_runtime_data_dir(), "chromedriver_buyma
 
 def _sleep(seconds: float, wait_scale: float = 0.6) -> None:
     time.sleep(max(0.0, seconds * wait_scale))
+
+
+def _is_buyma_url(url: str) -> bool:
+    try:
+        host = (urlparse(url).hostname or "").lower()
+    except Exception:
+        return False
+    return host.endswith("buyma.com")
+
+
+def _is_buyma_login_url(url: str) -> bool:
+    return _is_buyma_url(url) and "/login" in (url or "")
+
+
+def _ensure_buyma_page(driver, target_url: str, *, wait_scale: float = 0.6, retries: int = 3) -> str:
+    last_url = ""
+    for attempt in range(1, retries + 1):
+        try:
+            driver.get(target_url)
+            _sleep(2, wait_scale)
+            last_url = driver.current_url
+            print(f"BUYMA navigate ({attempt}/{retries}): {last_url}")
+            if _is_buyma_url(last_url):
+                return last_url
+        except Exception as exc:
+            print(f"BUYMA navigate retry needed: {exc}")
+    return last_url
 
 
 def save_buyma_credentials(email: str, password: str) -> None:
@@ -217,11 +245,15 @@ def wait_for_buyma_login(
         "on",
     }
 
-    driver.get(BUYMA_SELL_URL)
-    _sleep(3, wait_scale)
+    current_url = _ensure_buyma_page(driver, BUYMA_SELL_URL, wait_scale=wait_scale)
+    if not _is_buyma_url(current_url):
+        print(f"Unexpected startup page detected: {current_url or '(empty url)'}")
+        current_url = _ensure_buyma_page(driver, BUYMA_LOGIN_URL, wait_scale=wait_scale)
 
-    if "/login" not in driver.current_url and not (force_relogin and email and password):
+    if _is_buyma_url(current_url) and not _is_buyma_login_url(current_url) and not (force_relogin and email and password):
         print("Already logged in.")
+        if current_url != BUYMA_SELL_URL:
+            _ensure_buyma_page(driver, BUYMA_SELL_URL, wait_scale=wait_scale)
         return True
 
     if email and password:
@@ -233,8 +265,9 @@ def wait_for_buyma_login(
                     _sleep(2, wait_scale)
                 except Exception:
                     pass
-            driver.get(BUYMA_LOGIN_URL)
-            _sleep(2, wait_scale)
+            current_url = _ensure_buyma_page(driver, BUYMA_LOGIN_URL, wait_scale=wait_scale)
+            if not _is_buyma_url(current_url):
+                print("BUYMA login page did not open correctly. Please check the browser window.")
 
             email_input = WebDriverWait(driver, 10).until(
                 EC.visibility_of_element_located((By.CSS_SELECTOR, LOGIN_EMAIL_SELECTOR))
@@ -256,10 +289,11 @@ def wait_for_buyma_login(
             scroll_and_click_fn(driver, login_btn)
             _sleep(5, wait_scale)
 
-            if "/login" not in driver.current_url:
+            current_url = driver.current_url
+            print(f"Post-login URL: {current_url}")
+            if _is_buyma_url(current_url) and not _is_buyma_login_url(current_url):
                 print("Auto login success.")
-                driver.get(BUYMA_SELL_URL)
-                _sleep(2, wait_scale)
+                _ensure_buyma_page(driver, BUYMA_SELL_URL, wait_scale=wait_scale)
                 return True
 
             print("Auto login failed. Please login manually.")
@@ -279,8 +313,9 @@ def wait_for_buyma_login(
         _sleep(1, wait_scale)
         try:
             current_url = driver.current_url
-            if "/login" not in current_url:
+            if _is_buyma_url(current_url) and not _is_buyma_login_url(current_url):
                 print("Login success. Continuing.")
+                _ensure_buyma_page(driver, BUYMA_SELL_URL, wait_scale=wait_scale)
                 save = safe_input_fn("Save this account credential? (y/n): ").strip().lower()
                 if save == "y":
                     new_email = safe_input_fn("  Email: ").strip()

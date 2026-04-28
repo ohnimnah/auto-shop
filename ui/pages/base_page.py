@@ -3,18 +3,36 @@ from __future__ import annotations
 import tkinter as tk
 from tkinter import ttk
 
-
-PAGE_PADX = 4
-PAGE_PADY = 2
-SECTION_GAP = 12
-CARD_PADX = 12
-CARD_PADY = 10
-RIGHT_PANEL_WIDTH = 300
-SIDE_PANEL_WIDTH = 320
-TABLE_MIN_HEIGHT = 280
-PANEL_MIN_HEIGHT = 180
-HEADER_BADGE_BG = "#102033"
-SURFACE_BG = "#122238"
+from ui.theme import (
+    ACTION_PANEL_HEIGHT,
+    BUTTON_PRIMARY_ACTIVE,
+    BUTTON_PRIMARY_BG,
+    BUTTON_SECONDARY_ACTIVE,
+    BUTTON_SECONDARY_BG,
+    BUTTON_SUCCESS_ACTIVE,
+    BUTTON_SUCCESS_BG,
+    BUTTON_WARNING_ACTIVE,
+    BUTTON_WARNING_BG,
+    CARD_PADX,
+    CARD_PADY,
+    CHART_PANEL_HEIGHT,
+    DETAIL_PAGE_RIGHT_WIDTH,
+    BOTTOM_PANEL_HEIGHT,
+    BOTTOM_TABLE_HEIGHT,
+    HEADER_BADGE_BG,
+    KPI_CARD_HEIGHT,
+    LARGE_CARD,
+    MEDIUM_CARD,
+    PAGE_PADX,
+    PAGE_PADY,
+    PANEL_MIN_HEIGHT,
+    PROGRESS_PANEL_HEIGHT,
+    RIGHT_PANEL_WIDTH,
+    SECTION_GAP,
+    SMALL_CARD,
+    SURFACE_BG,
+    TABLE_MIN_HEIGHT,
+)
 
 
 class BasePage(tk.Frame):
@@ -34,6 +52,11 @@ class BasePage(tk.Frame):
         self.body = tk.Frame(self, bg=self.controller.theme["bg"])
         self.body.grid(row=1, column=0, sticky="nsew", padx=PAGE_PADX, pady=(0, PAGE_PADY))
         self.body.grid_columnconfigure(0, weight=1)
+
+    def configure_standard_page_grid(self) -> None:
+        self.body.grid_columnconfigure(0, weight=1)
+        self.body.grid_rowconfigure(0, weight=0)
+        self.body.grid_rowconfigure(1, weight=1)
 
     def build_header(self) -> None:
         self.header.grid_columnconfigure(0, weight=1)
@@ -112,19 +135,157 @@ class BasePage(tk.Frame):
             self.controller._kpi_card(wrap, idx, title, value_var, sub, accents[idx % len(accents)])
         return wrap
 
-    def build_panel_card(self, parent: tk.Widget, title: str, *, min_height: int = PANEL_MIN_HEIGHT) -> tuple[tk.Frame, tk.Frame]:
+    def resolve_card_height(self, level: str) -> int:
+        return {
+            "small": SMALL_CARD,
+            "mid": MEDIUM_CARD,
+            "medium": MEDIUM_CARD,
+            "bottom": LARGE_CARD,
+            "large": LARGE_CARD,
+        }.get(level, MEDIUM_CARD)
+
+    def build_dashboard_layout(self, metrics: list[tuple[str, int, str]]) -> tuple[tk.Frame, tk.Frame, tk.Frame]:
+        self.configure_standard_page_grid()
+        self.build_metric_row(self.body, row=0, metrics=metrics)
+        shell = tk.Frame(self.body, bg=self.controller.theme["bg"])
+        shell.grid(row=1, column=0, sticky="nsew")
+        shell.grid_columnconfigure(0, weight=3, uniform="page_columns")
+        shell.grid_columnconfigure(1, weight=2, uniform="page_columns")
+        shell.grid_rowconfigure(0, weight=1)
+
+        left = tk.Frame(shell, bg=self.controller.theme["bg"])
+        right = tk.Frame(shell, bg=self.controller.theme["bg"])
+        left.grid(row=0, column=0, sticky="nsew", padx=(0, SECTION_GAP))
+        right.grid(row=0, column=1, sticky="nsew")
+        left.grid_columnconfigure(0, weight=1)
+        right.grid_columnconfigure(0, weight=1)
+        return shell, left, right
+
+    def build_panel_card(self, parent: tk.Widget, title: str, *, min_height: int | None = None, level: str = "mid", title_suffix: str = "") -> tuple[tk.Frame, tk.Frame]:
+        min_height = self.resolve_card_height(level) if min_height is None else min_height
         card = self.controller._panel(parent, padx=CARD_PADX, pady=CARD_PADY)
         card.grid_propagate(False)
         card.configure(height=min_height)
         card.grid_columnconfigure(0, weight=1)
         card.grid_rowconfigure(1, weight=1)
-        tk.Label(card, text=title, bg=self.controller.theme["panel"], fg=self.controller.theme["text"], font=("Segoe UI", 10, "bold")).grid(row=0, column=0, sticky="w", pady=(0, 8))
+        header = tk.Frame(card, bg=self.controller.theme["panel"])
+        header.grid(row=0, column=0, sticky="ew", pady=(0, 8))
+        header.grid_columnconfigure(0, weight=1)
+        tk.Label(header, text=title, bg=self.controller.theme["panel"], fg=self.controller.theme["text"], font=("Segoe UI", 10, "bold")).grid(row=0, column=0, sticky="w")
+        if title_suffix:
+            tk.Label(header, text=title_suffix, bg=self.controller.theme["panel"], fg=self.controller.theme["muted"], font=("Segoe UI", 8)).grid(row=0, column=1, sticky="e")
         body = tk.Frame(card, bg=self.controller.theme["panel"])
         body.grid(row=1, column=0, sticky="nsew")
         body.grid_columnconfigure(0, weight=1)
         return card, body
 
-    def build_simple_table(self, parent: tk.Widget, title: str, columns: list[tuple[str, str, int]], rows: list[tuple], *, min_height: int = TABLE_MIN_HEIGHT) -> tuple[tk.Frame, ttk.Treeview]:
+    def build_chart_panel(
+        self,
+        parent: tk.Widget,
+        title: str,
+        *,
+        values: list[int | float],
+        labels: list[str] | None = None,
+        accent: str | None = None,
+        secondary: str | None = None,
+        min_height: int = CHART_PANEL_HEIGHT,
+        mode: str = "line",
+        subtitle: str = "",
+    ) -> tuple[tk.Frame, tk.Frame]:
+        card, body = self.build_panel_card(parent, title, min_height=min_height, level="mid")
+        body.grid_rowconfigure(0, weight=1)
+        body.grid_columnconfigure(0, weight=1)
+        accent = accent or self.controller.theme["blue"]
+        secondary = secondary or self.controller.theme["green"]
+        chart = tk.Canvas(body, bg=self.controller.theme["panel"], highlightthickness=0, height=max(120, min_height - 78))
+        chart.grid(row=0, column=0, sticky="nsew")
+        self._draw_chart(chart, values=values, labels=labels or [], accent=accent, secondary=secondary, mode=mode)
+        if subtitle:
+            tk.Label(
+                body,
+                text=subtitle,
+                bg=self.controller.theme["panel"],
+                fg=self.controller.theme["muted"],
+                font=("Segoe UI", 8),
+                wraplength=360,
+                justify=tk.LEFT,
+            ).grid(row=1, column=0, sticky="w", pady=(8, 0))
+        return card, body
+
+    def build_progress_panel(
+        self,
+        parent: tk.Widget,
+        title: str,
+        *,
+        percent: int,
+        subtitle: str,
+        accent: str,
+        metrics: list[tuple[str, str]],
+        min_height: int = PROGRESS_PANEL_HEIGHT,
+    ) -> tuple[tk.Frame, tk.Frame]:
+        card, body = self.build_panel_card(parent, title, min_height=min_height, level="mid")
+        body.grid_columnconfigure(0, weight=1)
+        tk.Label(body, text=f"{percent}%", bg=self.controller.theme["panel"], fg=accent, font=("Segoe UI", 22, "bold")).grid(row=0, column=0, sticky="w", pady=(4, 6))
+        tk.Label(
+            body,
+            text=subtitle,
+            bg=self.controller.theme["panel"],
+            fg=self.controller.theme["muted"],
+            font=("Segoe UI", 8),
+            wraplength=360,
+            justify=tk.LEFT,
+        ).grid(row=1, column=0, sticky="w", pady=(0, 8))
+        bar = tk.Canvas(body, height=10, bg=self.controller.theme["panel"], highlightthickness=0)
+        bar.grid(row=2, column=0, sticky="ew", pady=(0, 10))
+        width = 960
+        bar.create_rectangle(0, 0, width, 10, fill="#21334d", outline="")
+        bar.create_rectangle(0, 0, int(width * max(0, min(100, percent)) / 100), 10, fill=accent, outline="")
+        self.build_mini_tiles(body, metrics, columns=2, start_row=3)
+        return card, body
+
+    def build_action_panel(
+        self,
+        parent: tk.Widget,
+        title: str,
+        *,
+        actions: list[tuple[str, str, str, str, object]],
+        details: list[tuple[str, str]] | None = None,
+        min_height: int = ACTION_PANEL_HEIGHT,
+    ) -> tuple[tk.Frame, tk.Frame]:
+        card, body = self.build_panel_card(parent, title, min_height=min_height, level="mid")
+        body.grid_columnconfigure(0, weight=1)
+        row = 0
+        for button_title, subtitle, bg, active_bg, command in actions:
+            self.controller._mini_button(
+                body,
+                button_title,
+                command,
+                bg,
+                active_bg,
+            ).grid(row=row, column=0, sticky="ew", pady=(0, 4 if row < len(actions) - 1 else 0))
+            row += 1
+        if details:
+            diagnostics = tk.Frame(body, bg=self.controller.theme["panel"])
+            diagnostics.grid(row=row, column=0, sticky="nsew", pady=(8, 0))
+            diagnostics.grid_columnconfigure(0, weight=1)
+            self.build_dense_list(diagnostics, details)
+        return card, body
+
+    def build_simple_table(
+        self,
+        parent: tk.Widget,
+        title: str,
+        columns: list[tuple[str, str, int]],
+        rows: list[tuple],
+        *,
+        min_height: int | None = None,
+        level: str = "mid",
+        empty_message: str = "",
+        empty_action: tuple[str, object, str] | None = None,
+    ) -> tuple[tk.Frame, ttk.Treeview]:
+        min_height = self.resolve_card_height("bottom" if level == "bottom" else "mid") if min_height is None else min_height
+        if min_height == LARGE_CARD and level == "bottom":
+            min_height = BOTTOM_TABLE_HEIGHT
         card = self.controller._panel(parent, padx=CARD_PADX, pady=CARD_PADY)
         card.grid_propagate(False)
         card.configure(height=min_height)
@@ -146,21 +307,94 @@ class BasePage(tk.Frame):
         table.configure(yscrollcommand=scrollbar.set)
         scrollbar.grid(row=0, column=1, sticky="ns")
         if not rows:
-            tk.Label(body, text="표시할 데이터가 없습니다.", bg=self.controller.theme["panel"], fg=self.controller.theme["muted"], font=("Segoe UI", 9, "bold")).place(relx=0.5, rely=0.5, anchor="center")
+            table.grid_remove()
+            scrollbar.grid_remove()
+            self.build_empty_state(
+                body,
+                empty_message or "아직 연결된 데이터가 없습니다.\n먼저 데이터를 동기화하거나 해당 작업을 시작해 주세요.",
+                action=empty_action,
+            )
         return card, table
+
+    def _draw_chart(
+        self,
+        canvas: tk.Canvas,
+        *,
+        values: list[int | float],
+        labels: list[str],
+        accent: str,
+        secondary: str,
+        mode: str,
+    ) -> None:
+        def redraw(_event=None) -> None:
+            width = max(canvas.winfo_width(), 240)
+            height = max(canvas.winfo_height(), 120)
+            canvas.delete("all")
+            if not values:
+                canvas.create_text(width / 2, height / 2, text="표시할 지표가 없습니다", fill=self.controller.theme["muted"], font=("Segoe UI", 10, "bold"))
+                return
+            if mode == "donut":
+                total = sum(max(float(v), 0.0) for v in values) or 1.0
+                start = 90
+                colors = [accent, self.controller.theme["yellow"], self.controller.theme["red"], secondary]
+                size = min(width, height) - 24
+                left = (width - size) / 2
+                top = (height - size) / 2
+                for idx, value in enumerate(values):
+                    extent = -360 * max(float(value), 0.0) / total
+                    color = colors[idx % len(colors)]
+                    canvas.create_arc(left, top, left + size, top + size, start=start, extent=extent, fill=color, outline=color)
+                    start += extent
+                inner = size * 0.48
+                canvas.create_oval(
+                    left + (size - inner) / 2,
+                    top + (size - inner) / 2,
+                    left + (size + inner) / 2,
+                    top + (size + inner) / 2,
+                    fill=self.controller.theme["panel"],
+                    outline=self.controller.theme["panel"],
+                )
+                percent = int(round((max(float(values[0]), 0.0) / total) * 100))
+                canvas.create_text(width / 2, height / 2 - 6, text=f"{percent}%", fill=self.controller.theme["text"], font=("Segoe UI", 16, "bold"))
+                canvas.create_text(width / 2, height / 2 + 14, text="성공률", fill=self.controller.theme["muted"], font=("Segoe UI", 8))
+                return
+
+            pad_x = 28
+            pad_y = 18
+            chart_w = max(80, width - pad_x * 2)
+            chart_h = max(50, height - pad_y * 2 - 18)
+            max_value = max(max(float(v), 0.0) for v in values) or 1.0
+            points: list[tuple[float, float]] = []
+            for idx, value in enumerate(values):
+                x = pad_x + (chart_w * idx / max(1, len(values) - 1))
+                y = pad_y + chart_h - (chart_h * max(float(value), 0.0) / max_value)
+                points.append((x, y))
+            for step in range(5):
+                y = pad_y + chart_h * step / 4
+                canvas.create_line(pad_x, y, pad_x + chart_w, y, fill="#1b2a40")
+            flat_points = [coord for point in points for coord in point]
+            if len(flat_points) >= 4:
+                canvas.create_line(*flat_points, fill=accent, width=3, smooth=True)
+            for idx, (x, y) in enumerate(points):
+                canvas.create_oval(x - 4, y - 4, x + 4, y + 4, fill=accent, outline=accent)
+                if idx < len(labels):
+                    canvas.create_text(x, height - 8, text=labels[idx], fill=self.controller.theme["muted"], font=("Segoe UI", 7))
+
+        canvas.bind("<Configure>", redraw)
+        canvas.after(30, redraw)
 
     def build_two_column_section(
         self,
         parent: tk.Widget,
         *,
         row: int,
-        right_width: int = SIDE_PANEL_WIDTH,
+        right_width: int = DETAIL_PAGE_RIGHT_WIDTH,
         pady: tuple[int, int] = (0, SECTION_GAP),
     ) -> tuple[tk.Frame, tk.Frame, tk.Frame]:
         shell = tk.Frame(parent, bg=self.controller.theme["bg"])
         shell.grid(row=row, column=0, sticky="nsew", pady=pady)
-        shell.grid_columnconfigure(0, weight=1)
-        shell.grid_columnconfigure(1, minsize=right_width)
+        shell.grid_columnconfigure(0, weight=3, uniform="page_columns")
+        shell.grid_columnconfigure(1, weight=2, uniform="page_columns", minsize=right_width)
         shell.grid_rowconfigure(0, weight=1)
 
         left = tk.Frame(shell, bg=self.controller.theme["bg"])
@@ -204,16 +438,41 @@ class BasePage(tk.Frame):
             tk.Label(tile, text=title, bg=SURFACE_BG, fg=self.controller.theme["muted"], font=("Segoe UI", 8, "bold")).pack(anchor="w")
             tk.Label(tile, text=value, bg=SURFACE_BG, fg=self.controller.theme["text"], font=("Segoe UI", 11, "bold")).pack(anchor="w", pady=(6, 0))
 
-    def build_empty_state(self, parent: tk.Widget, text: str) -> None:
+    def build_empty_state(self, parent: tk.Widget, text: str, *, action: tuple[str, object, str] | None = None) -> None:
+        wrap = tk.Frame(parent, bg=self.controller.theme["panel"])
+        wrap.grid(row=0, column=0, sticky="nsew", padx=6, pady=6)
+        wrap.grid_columnconfigure(0, weight=1)
         tk.Label(
-            parent,
+            wrap,
             text=text,
             bg=self.controller.theme["panel"],
             fg=self.controller.theme["muted"],
             font=("Segoe UI", 9, "bold"),
             justify=tk.LEFT,
-            wraplength=320,
-        ).grid(row=0, column=0, sticky="nsew", padx=6, pady=6)
+            wraplength=360,
+        ).grid(row=0, column=0, sticky="w")
+        if action:
+            label, command, tone = action
+            self.build_action_button(wrap, label, command, tone=tone).grid(row=1, column=0, sticky="w", pady=(10, 0))
+
+    def build_action_button(self, parent: tk.Widget, label: str, command, *, tone: str = "secondary"):
+        palette = {
+            "primary": (BUTTON_PRIMARY_BG, BUTTON_PRIMARY_ACTIVE),
+            "secondary": (BUTTON_SECONDARY_BG, BUTTON_SECONDARY_ACTIVE),
+            "success": (BUTTON_SUCCESS_BG, BUTTON_SUCCESS_ACTIVE),
+            "warning": (BUTTON_WARNING_BG, BUTTON_WARNING_ACTIVE),
+        }
+        bg, active = palette.get(tone, palette["secondary"])
+        return self.controller._mini_button(parent, label, command, bg, active)
+
+    def get_empty_table_action(self, kind: str) -> tuple[str, object, str]:
+        mapping = {
+            "scout": ("데이터 수집 시작", lambda: self.controller.dispatch_ui_action("수집/정찰 시작", lambda: self.controller.run_action("run"), category="scout"), "success"),
+            "image": ("이미지 저장 시작", lambda: self.controller.dispatch_ui_action("이미지 저장 실행", lambda: self.controller.run_action("save-images"), category="assets"), "secondary"),
+            "upload": ("업로드 실행", lambda: self.controller.dispatch_ui_action("BUYMA 업로드 실행", lambda: self.controller.run_action("upload-auto"), category="buyma"), "warning"),
+            "refresh": ("새로고침", self.controller.refresh_dashboard_data, "secondary"),
+        }
+        return mapping.get(kind, mapping["refresh"])
 
     def build_right_panel(self, parent: tk.Widget) -> None:
         parent.grid_columnconfigure(0, weight=1)

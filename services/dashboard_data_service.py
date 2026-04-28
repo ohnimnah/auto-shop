@@ -6,6 +6,7 @@ import json
 import os
 import re
 from datetime import datetime
+from functools import lru_cache
 from typing import Iterable
 
 from core.process_manager import ProcessManager
@@ -17,6 +18,26 @@ from state.app_state import AppState, AppStateChange, DashboardMetrics, LogEvent
 DONE_WORDS = ("완료", "성공", "출품", "업로드 완료", "정상")
 ERROR_WORDS = ("실패", "오류", "error", "보류", "미칭", "exception")
 WAITING_WORDS = ("대기", "준비", "미처리", "pending", "")
+
+
+@lru_cache(maxsize=16)
+def _read_json_payload(path: str, mtime: float) -> object:
+    with open(path, "r", encoding="utf-8") as file:
+        return json.load(file)
+
+
+@lru_cache(maxsize=32)
+def _read_log_payloads(path: str, mtime: float) -> tuple[dict, ...]:
+    payloads: list[dict] = []
+    with open(path, "r", encoding="utf-8") as file:
+        for raw_line in file:
+            try:
+                payload = json.loads(raw_line)
+            except Exception:
+                continue
+            if isinstance(payload, dict):
+                payloads.append(payload)
+    return tuple(payloads)
 
 
 class DashboardDataService:
@@ -40,11 +61,16 @@ class DashboardDataService:
         self.pipeline_service = pipeline_service
 
     def refresh(self) -> None:
+        self.clear_caches()
         products, source_label, source_detail = self.load_products_with_source()
         self.state.set_product_rows(products)
         self.state.set_metrics(self.get_real_metrics(products))
         self.state.set_pipeline_steps(self.build_pipeline_from_runtime(products))
         self.state.set_data_source_status(source_label, datetime.now().strftime("%H:%M:%S"), source_detail)
+
+    def clear_caches(self) -> None:
+        _read_json_payload.cache_clear()
+        _read_log_payloads.cache_clear()
 
     def get_scout_overview(self) -> dict:
         products = self.state.product_rows
@@ -107,6 +133,8 @@ class DashboardDataService:
         }
 
     def get_automation_overview(self) -> dict:
+        watch_running = self.state.current_action == "watch"
+        team_watch_running_count = sum(1 for enabled in self.state.team_watch_enabled.values() if enabled)
         team_cards = [
             ("정찰", self.state.pipeline_status.get("scout", "대기"), self.state.current_action in {"watch", "run"}),
             ("이미지", self.state.pipeline_status.get("assets", "대기"), self.state.team_watch_enabled.get("assets", False)),
@@ -116,21 +144,27 @@ class DashboardDataService:
         team_failures = sum(self.state.team_watch_failures.values())
         return {
             "metrics": [
-                ("Watch 상태", 1 if self.state.current_action == "watch" else 0, self.state.status_text),
+                ("Watch 상태", 1 if watch_running else 0, self.state.status_text),
                 ("자동 새로고침", 1 if self.process_manager.is_running() else 0, "프로세스 실행 기준"),
-                ("팀 감시 활성", sum(1 for enabled in self.state.team_watch_enabled.values() if enabled), "assets / design / sales"),
+                ("팀 감시 활성", team_watch_running_count, "assets / design / sales"),
                 ("실패 누적", team_failures, "team watch 누적 실패"),
             ],
             "team_cards": team_cards,
             "failures": dict(self.state.team_watch_failures),
             "retry_count": team_failures,
+            "watch_running": watch_running,
+            "team_watch_running_count": team_watch_running_count,
             "recent_logs": self._load_recent_log_lines(limit=30, categories={"automation", "process", "scout", "assets", "design", "buyma", "sales"}),
         }
 
     def get_settings_overview(self) -> dict:
         config = self.system_checker.load_sheet_config()
+        profile_name = os.path.basename(self.data_dir.rstrip(os.sep))
+        if profile_name == ".auto_shop":
+            profile_name = "default"
         return {
-            "user_name": "master",
+            "user_name": profile_name,
+            "profile_name": profile_name,
             "run_mode": self.state.current_action or "idle",
             "log_level": "INFO",
             "sheet_enabled": bool(self._has_sheet_source()),
@@ -140,6 +174,7 @@ class DashboardDataService:
             "images_dir": self._safe_path(config.get("images_dir") or ""),
             "log_dir": self._safe_path(os.path.join(self.data_dir, "logs")),
             "buyma_email": self.system_checker.load_buyma_email(),
+            "buyma_credentials_path": self._safe_path(self.system_checker.get_buyma_credentials_target_path()),
             "max_concurrency": "1",
             "retry_limit": "3",
             "timeout_seconds": "120",
@@ -283,8 +318,7 @@ class DashboardDataService:
         if not os.path.exists(path):
             return []
         try:
-            with open(path, "r", encoding="utf-8") as file:
-                data = json.load(file)
+            data = _read_json_payload(path, os.path.getmtime(path))
         except Exception:
             return []
         records = data.get("products") if isinstance(data, dict) else data
@@ -446,23 +480,19 @@ class DashboardDataService:
             return []
         lines: list[str] = []
         try:
-            with open(path, "r", encoding="utf-8") as file:
-                for raw_line in file:
-                    try:
-                        payload = json.loads(raw_line)
-                    except Exception:
-                        continue
-                    category = str(payload.get("category") or "")
-                    if categories and category not in categories:
-                        continue
-                    timestamp = str(payload.get("timestamp") or "")[-8:]
-                    level = str(payload.get("level") or "INFO")
-                    message = str(payload.get("message") or "").strip()
-                    if not message:
-                        continue
-                    lines.append(f"[{timestamp}] [{level}] [{category}] {message}")
+            payloads = _read_log_payloads(path, os.path.getmtime(path))
         except Exception:
             return []
+        for payload in payloads:
+            category = str(payload.get("category") or "")
+            if categories and category not in categories:
+                continue
+            timestamp = str(payload.get("timestamp") or "")[-8:]
+            level = str(payload.get("level") or "INFO")
+            message = str(payload.get("message") or "").strip()
+            if not message:
+                continue
+            lines.append(f"[{timestamp}] [{level}] [{category}] {message}")
         return lines[-limit:]
 
     def _load_upload_recovery_stats(self) -> dict:

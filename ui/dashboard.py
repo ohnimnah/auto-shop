@@ -30,9 +30,12 @@ from ui.pages.image_thumbnail_page import ImageThumbnailPage
 from ui.pages.scout_page import ScoutPage
 from ui.pages.settings_page import SettingsPage
 from ui.sidebar import NAV_ITEMS, SHORTCUTS
+from ui.theme import CONTENT_PAD_X, CONTENT_PAD_Y, KPI_CARD_HEIGHT
 
 
 SCRIPT_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+DEFAULT_PROFILE_NAME = "default"
+PROFILE_CONFIG_FILENAME = "launcher_profile.json"
 
 
 def resolve_python_executable() -> str:
@@ -47,20 +50,59 @@ def resolve_python_executable() -> str:
     return sys.executable
 
 
-def get_default_data_dir() -> str:
-    """Return the default runtime data directory for the current OS."""
+def get_runtime_root_dir() -> str:
+    """Return the root runtime data directory for the current OS."""
     local_app_data = os.environ.get('LOCALAPPDATA', '').strip()
     if local_app_data:
         return os.path.join(local_app_data, 'auto_shop')
     return os.path.join(os.path.expanduser('~'), '.auto_shop')
 
 
-def get_default_images_dir() -> str:
+def sanitize_profile_name(raw_value: str) -> str:
+    value = re.sub(r"[^a-zA-Z0-9._-]+", "-", (raw_value or "").strip()).strip("-._")
+    return value or DEFAULT_PROFILE_NAME
+
+
+def get_saved_profile_name() -> str:
+    env_profile = os.environ.get("AUTO_SHOP_PROFILE", "").strip()
+    if env_profile:
+        return sanitize_profile_name(env_profile)
+    root_dir = get_runtime_root_dir()
+    config_path = os.path.join(root_dir, PROFILE_CONFIG_FILENAME)
+    try:
+        if os.path.exists(config_path):
+            with open(config_path, "r", encoding="utf-8") as f:
+                data = json.load(f)
+            if isinstance(data, dict):
+                return sanitize_profile_name(str(data.get("active_profile") or DEFAULT_PROFILE_NAME))
+    except Exception:
+        pass
+    return DEFAULT_PROFILE_NAME
+
+
+def save_profile_name(profile_name: str) -> None:
+    root_dir = get_runtime_root_dir()
+    os.makedirs(root_dir, exist_ok=True)
+    config_path = os.path.join(root_dir, PROFILE_CONFIG_FILENAME)
+    with open(config_path, "w", encoding="utf-8") as f:
+        json.dump({"active_profile": sanitize_profile_name(profile_name)}, f, ensure_ascii=False, indent=2)
+
+
+def get_default_data_dir(profile_name: str | None = None) -> str:
+    """Return the runtime data directory for the active profile."""
+    root_dir = get_runtime_root_dir()
+    profile = sanitize_profile_name(profile_name or get_saved_profile_name())
+    if profile == DEFAULT_PROFILE_NAME:
+        return root_dir
+    return os.path.join(root_dir, "profiles", profile)
+
+
+def get_default_images_dir(profile_name: str | None = None) -> str:
     """Return the default image storage directory."""
     env_images_dir = os.environ.get('AUTO_SHOP_IMAGES_DIR', '').strip()
     if env_images_dir:
         return os.path.abspath(os.path.expanduser(env_images_dir))
-    cfg_path = os.path.join(get_default_data_dir(), "sheets_config.json")
+    cfg_path = os.path.join(get_default_data_dir(profile_name), "sheets_config.json")
     try:
         if os.path.exists(cfg_path):
             with open(cfg_path, "r", encoding="utf-8") as f:
@@ -85,7 +127,8 @@ class AutoShopLauncher(tk.Tk):
 
         self.log_queue: queue.Queue[LogEvent] = queue.Queue()
         self.state_queue: queue.Queue[AppStateChange] = queue.Queue()
-        self.data_dir = get_default_data_dir()
+        self.profile_name = get_saved_profile_name()
+        self.data_dir = get_default_data_dir(self.profile_name)
         self.sheet_config_path = os.path.join(self.data_dir, "sheets_config.json")
         self.state = AppState()
         self.snapshot_store = StateSnapshotStore(os.path.join(self.data_dir, "launcher_state_snapshot.json"))
@@ -343,8 +386,9 @@ class AutoShopLauncher(tk.Tk):
         self.root_shell = root
 
         sidebar = tk.Frame(root, bg=self.theme["sidebar"], padx=12, pady=14, highlightbackground=self.theme["line"], highlightthickness=1)
-        content = tk.Frame(root, bg=self.theme["bg"], padx=18, pady=14)
-        right_panel = tk.Frame(root, bg=self.theme["bg"], padx=0, pady=14)
+        content = tk.Frame(root, bg=self.theme["bg"], padx=CONTENT_PAD_X, pady=CONTENT_PAD_Y)
+        right_panel = tk.Frame(root, bg=self.theme["bg"], padx=0, pady=CONTENT_PAD_Y)
+        self.content_frame = content
         self.right_panel_frame = right_panel
         sidebar.grid(row=0, column=0, sticky="nsew")
         content.grid(row=0, column=1, sticky="nsew")
@@ -671,6 +715,11 @@ class AutoShopLauncher(tk.Tk):
             return
         self._set_sidebar_active(view_name)
         show_right_panel = view_name == "대시보드"
+        if hasattr(self, "content_frame") and self.content_frame.winfo_exists():
+            if show_right_panel:
+                self.content_frame.grid_configure(columnspan=1)
+            else:
+                self.content_frame.grid_configure(columnspan=2)
         if hasattr(self, "right_panel_frame") and self.right_panel_frame.winfo_exists():
             if show_right_panel:
                 self.right_panel_frame.grid()
@@ -683,8 +732,6 @@ class AutoShopLauncher(tk.Tk):
         if page is None:
             return
         page.tkraise()
-        if hasattr(page, "refresh_view"):
-            page.refresh_view()
         self.current_page = page
         self.current_page_name = view_name
         if show_right_panel and hasattr(self.current_page, "build_right_panel") and self.right_panel_container.winfo_exists():
@@ -726,6 +773,8 @@ class AutoShopLauncher(tk.Tk):
     def _kpi_card(self, parent: tk.Widget, col: int, title: str, value_var: tk.StringVar, sub: str | tk.StringVar, accent: str) -> None:
         card = self._panel(parent, padx=12, pady=12)
         card.grid(row=0, column=col, sticky="ew", padx=(0 if col == 0 else 5, 0 if col == 4 else 5))
+        card.grid_propagate(False)
+        card.configure(height=KPI_CARD_HEIGHT)
         tk.Label(card, text=title, bg=self.theme["panel"], fg=accent, font=("Segoe UI", 9, "bold")).pack(anchor="w")
         row = tk.Frame(card, bg=self.theme["panel"])
         row.pack(fill=tk.X, pady=(6, 0))
@@ -1466,6 +1515,57 @@ class AutoShopLauncher(tk.Tk):
             messagebox.showerror("저장 실패", f"BUYMA 계정 저장 실패: {exc}")
             return False
 
+    def import_buyma_credentials_file(self) -> bool:
+        selected_path = filedialog.askopenfilename(
+            title="BUYMA 계정 파일 선택",
+            initialdir=os.path.expanduser("~"),
+            filetypes=[("JSON files", "*.json"), ("All files", "*.*")],
+            parent=self,
+        )
+        if not selected_path:
+            return False
+        try:
+            with open(selected_path, "r", encoding="utf-8") as f:
+                data = json.load(f)
+            email = str(data.get("email", "")).strip()
+            password = str(data.get("password", "")).strip()
+            if email and password and "@" in email:
+                self.buyma_credentials.save(email, password)
+            else:
+                shutil.copy2(selected_path, self._get_buyma_credentials_target_path())
+                self.buyma_credentials = BuymaCredentialService(self._get_buyma_credentials_target_path())
+                if not self.buyma_credentials.exists():
+                    raise ValueError("지원하지 않는 BUYMA 계정 파일 형식입니다.")
+            self.logger.emit(f"BUYMA 계정 파일 가져오기 완료: {self._get_buyma_credentials_target_path()}\n", category="settings")
+            messagebox.showinfo("가져오기 완료", "BUYMA 계정 파일을 현재 프로필에 연결했습니다.")
+            self.refresh_first_run_wizard()
+            self.refresh_dashboard_data()
+            return True
+        except Exception as exc:
+            messagebox.showerror("가져오기 실패", f"BUYMA 계정 파일을 불러오지 못했습니다: {exc}")
+            return False
+
+    def configure_user_profile(self) -> bool:
+        new_profile = simpledialog.askstring(
+            "프로필 변경",
+            "사용할 운영자 프로필명을 입력하세요.",
+            initialvalue=self.profile_name,
+            parent=self,
+        )
+        if new_profile is None:
+            return False
+        new_profile = sanitize_profile_name(new_profile)
+        if new_profile == self.profile_name:
+            return True
+        save_profile_name(new_profile)
+        messagebox.showinfo(
+            "프로필 변경",
+            f"활성 프로필을 '{new_profile}'(으)로 저장했습니다.\n런처를 다시 실행하면 해당 프로필 데이터 폴더를 사용합니다.",
+        )
+        self.logger.emit(f"프로필 변경 저장: {self.profile_name} -> {new_profile}\n", category="settings")
+        self.profile_name = new_profile
+        return True
+
     def import_credentials_file(self) -> bool:
         initial_dir = os.path.expanduser("~/Downloads")
         selected_path = filedialog.askopenfilename(
@@ -1689,10 +1789,21 @@ class AutoShopLauncher(tk.Tk):
         messagebox.showwarning("시트 설정 필요", "시트 ID가 없거나 잘못되었습니다. 시트 설정을 다시 입력해주세요.")
         return self.configure_sheet_settings()
 
+    def _ensure_buyma_credentials_before_action(self, action: str) -> bool:
+        if action not in {"watch-upload", "upload-review", "upload-auto"}:
+            return True
+        if self._has_buyma_credentials():
+            return True
+        messagebox.showwarning("BUYMA 계정 필요", "업로드를 실행하려면 먼저 BUYMA 계정을 저장해주세요.")
+        return self.configure_buyma_credentials()
+
     def run_action(self, action: str) -> None:
         self._close_action_bubble()
         if self.process_manager.is_running():
             messagebox.showwarning("실행 중", "이미 작업이 실행 중입니다. 먼저 중지해주세요.")
+            return
+        if not self._ensure_buyma_credentials_before_action(action):
+            self.logger.emit("BUYMA 계정이 없어 업로드 실행을 중단했습니다.\n", category="buyma", level="WARNING")
             return
         self.action_runner.run(action)
 
