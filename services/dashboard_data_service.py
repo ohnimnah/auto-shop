@@ -46,6 +46,101 @@ class DashboardDataService:
         self.state.set_pipeline_steps(self.build_pipeline_from_runtime(products))
         self.state.set_data_source_status(source_label, datetime.now().strftime("%H:%M:%S"), source_detail)
 
+    def get_scout_overview(self) -> dict:
+        products = self.state.product_rows
+        collected = sum(1 for row in products if self._matches_words(row.state, ("수집", "정찰", "완료", "성공")))
+        failed = sum(1 for row in products if self._matches_words(row.state, ("수집 실패", "정찰 실패", "실패", "오류")))
+        running = 1 if self.state.current_action in {"run", "collect-listings", "watch"} else 0
+        categories = self._group_count(products, lambda row: row.category or "미분류")
+        return {
+            "metrics": [
+                ("수집 대상", len(products), "연결된 전체 상품"),
+                ("수집 성공", collected, "수집 완료 또는 정찰 완료"),
+                ("수집 실패", failed, "실패 / 오류 상태"),
+                ("진행 중", running, "현재 정찰 프로세스"),
+            ],
+            "recent_rows": products[:10],
+            "category_rows": categories[:6],
+            "ratio": min(1.0, collected / max(1, len(products))),
+        }
+
+    def get_image_overview(self) -> dict:
+        products = self.state.product_rows
+        downloaded = sum(1 for row in products if self._matches_words(row.state, ("이미지", "저장", "다운로드")))
+        thumbs = sum(1 for row in products if self._matches_words(row.state, ("썸네일", "디자인")))
+        failures = sum(1 for row in products if self._matches_words(row.state, ("이미지 실패", "썸네일 실패", "실패", "오류")))
+        missing = max(0, len(products) - downloaded)
+        return {
+            "metrics": [
+                ("이미지 다운로드", downloaded, "이미지 저장 완료 기준"),
+                ("썸네일 생성", thumbs, "썸네일 생성 완료 기준"),
+                ("누락 이미지", missing, "이미지 저장 전 상품"),
+                ("실패 이미지", failures, "이미지 / 썸네일 실패"),
+            ],
+            "preview_rows": products[:8],
+            "failed_rows": [row for row in products if self._is_error(row.state)][:8],
+            "ratio": min(1.0, downloaded / max(1, len(products))),
+        }
+
+    def get_upload_overview(self) -> dict:
+        products = self.state.product_rows
+        uploaded = sum(1 for row in products if self._matches_words(row.state, ("출품", "업로드 완료", "출품완료", "완료")))
+        failed = sum(1 for row in products if self._matches_words(row.state, ("업로드 실패", "출품 실패", "오류", "보류")))
+        waiting = sum(1 for row in products if self._matches_words(row.state, ("업로드 대기", "대기", "준비")))
+        other_ratio = sum(1 for row in products if "기타" in row.category or "その他" in row.category) / max(1, len(products))
+        reasons = self._group_count([row for row in products if self._is_error(row.state)], lambda row: row.state or "오류")
+        return {
+            "metrics": [
+                ("업로드 시도", uploaded + failed, "완료 + 실패 기준"),
+                ("업로드 성공", uploaded, "출품 완료 기준"),
+                ("업로드 실패", failed, "업로드 실패 / 오류"),
+                ("보류 중", waiting, "업로드 대기 상태"),
+            ],
+            "success_ratio": uploaded / max(1, uploaded + failed),
+            "recent_rows": products[:10],
+            "failure_reasons": reasons[:6],
+            "category_failures": failed,
+            "other_ratio": other_ratio,
+        }
+
+    def get_automation_overview(self) -> dict:
+        team_cards = [
+            ("정찰", self.state.pipeline_status.get("scout", "대기"), self.state.current_action in {"watch", "run"}),
+            ("이미지", self.state.pipeline_status.get("assets", "대기"), self.state.team_watch_enabled.get("assets", False)),
+            ("썸네일", self.state.pipeline_status.get("design", "대기"), self.state.team_watch_enabled.get("design", False)),
+            ("업로드", self.state.pipeline_status.get("sales", "대기"), self.state.team_watch_enabled.get("sales", False)),
+        ]
+        team_failures = sum(self.state.team_watch_failures.values())
+        return {
+            "metrics": [
+                ("Watch 상태", 1 if self.state.current_action == "watch" else 0, self.state.status_text),
+                ("자동 새로고침", 1 if self.process_manager.is_running() else 0, "프로세스 실행 기준"),
+                ("팀 감시 활성", sum(1 for enabled in self.state.team_watch_enabled.values() if enabled), "assets / design / sales"),
+                ("실패 누적", team_failures, "team watch 누적 실패"),
+            ],
+            "team_cards": team_cards,
+            "failures": dict(self.state.team_watch_failures),
+            "retry_count": team_failures,
+        }
+
+    def get_settings_overview(self) -> dict:
+        config = self.system_checker.load_sheet_config()
+        return {
+            "user_name": "master",
+            "run_mode": self.state.current_action or "idle",
+            "log_level": "INFO",
+            "sheet_enabled": bool(self._has_sheet_source()),
+            "spreadsheet_id": self.system_checker.normalize_spreadsheet_id(config.get("spreadsheet_id", "")),
+            "sheet_name": (config.get("sheet_name") or "").strip(),
+            "log_sheet_name": (config.get("log_sheet_name") or "log").strip(),
+            "images_dir": self._safe_path(config.get("images_dir") or ""),
+            "log_dir": self._safe_path(os.path.join(self.data_dir, "logs")),
+            "buyma_email": self.system_checker.load_buyma_email(),
+            "max_concurrency": "1",
+            "retry_limit": "3",
+            "timeout_seconds": "120",
+        }
+
     def update_state_from_log(self, event: LogEvent) -> None:
         stage_key = self._stage_from_event(event)
         if stage_key:
@@ -305,6 +400,13 @@ class DashboardDataService:
                 count += 1
         return count
 
+    def _group_count(self, rows: Iterable[ProductRow], key_fn) -> list[tuple[str, int]]:
+        counts: dict[str, int] = {}
+        for row in rows:
+            key = str(key_fn(row) or "미분류").strip() or "미분류"
+            counts[key] = counts.get(key, 0) + 1
+        return sorted(counts.items(), key=lambda item: (-item[1], item[0]))
+
     def _is_done(self, state: str) -> bool:
         return any(word.lower() in str(state).lower() for word in DONE_WORDS)
 
@@ -328,3 +430,8 @@ class DashboardDataService:
             except Exception:
                 continue
         return False
+
+    def _safe_path(self, path: str) -> str:
+        if not path:
+            return "-"
+        return os.path.abspath(os.path.expanduser(path))

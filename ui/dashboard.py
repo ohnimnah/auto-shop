@@ -23,6 +23,12 @@ from services.system_checker import SystemChecker
 from state.app_state import AppLogger, AppState, AppStateChange, LogEvent
 from state.snapshot_store import StateSnapshotStore
 from ui.components import ColorButton
+from ui.pages.automation_page import AutomationPage
+from ui.pages.buyma_upload_page import BuymaUploadPage
+from ui.pages.dashboard_page import DashboardPage
+from ui.pages.image_thumbnail_page import ImageThumbnailPage
+from ui.pages.scout_page import ScoutPage
+from ui.pages.settings_page import SettingsPage
 from ui.sidebar import NAV_ITEMS, SHORTCUTS
 
 
@@ -164,6 +170,10 @@ class AutoShopLauncher(tk.Tk):
         self.pipeline_ratios: dict[str, float] = {}
         self.pipeline_colors: dict[str, str] = {}
         self.quick_action_buttons: list[ColorButton] = []
+        self.nav_buttons: dict[str, tk.Label] = {}
+        self.page_container: tk.Frame | None = None
+        self.current_page: tk.Frame | None = None
+        self.log_history: list[str] = []
         self.wizard_summary_var = tk.StringVar(value="첫 실행 준비를 확인하세요.")
         self.wizard_status_vars: dict[str, tk.StringVar] = {
             "runtime": tk.StringVar(value="확인 전"),
@@ -217,6 +227,8 @@ class AutoShopLauncher(tk.Tk):
             self._refresh_product_table()
         elif key == "data_source":
             self._render_data_source()
+        elif key == "active_view":
+            self._show_active_page(str(value))
         elif key.startswith("system_status."):
             self._render_system_status(key.split(".", 1)[1], str(value))
         elif key.startswith("pipeline_status."):
@@ -263,7 +275,7 @@ class AutoShopLauncher(tk.Tk):
         self.data_source_var.set(self.state.data_source.label)
         self.last_sync_var.set(f"마지막 동기화 {self.state.data_source.last_sync}")
         self.data_source_detail_var.set(self.state.data_source.detail)
-        if hasattr(self, "empty_products_label") and not self.state.product_rows:
+        if hasattr(self, "empty_products_label") and self.empty_products_label.winfo_exists() and not self.state.product_rows:
             self.empty_products_label.configure(text=self.state.data_source.detail or "표시할 상품이 없습니다.")
             self.empty_products_label.grid()
 
@@ -276,6 +288,14 @@ class AutoShopLauncher(tk.Tk):
             color = self.theme.get(step.color_key, self.theme["blue"]) if hasattr(self, "theme") else "#2563eb"
             self.pipeline_colors[step.key] = color
             self._draw_progress(step.key, step.ratio, color)
+
+    def _populate_log_widget(self) -> None:
+        if not hasattr(self, "log") or not self.log.winfo_exists():
+            return
+        self.log.delete("1.0", tk.END)
+        for line in self.log_history:
+            self.log.insert(tk.END, line)
+        self.log.see(tk.END)
 
     def _set_window_icon(self) -> None:
         """Create and apply a simple built-in icon without external files."""
@@ -316,35 +336,19 @@ class AutoShopLauncher(tk.Tk):
         root.pack(fill=tk.BOTH, expand=True)
         root.grid_columnconfigure(0, minsize=226)
         root.grid_columnconfigure(1, weight=1)
-        root.grid_columnconfigure(2, minsize=292)
         root.grid_rowconfigure(0, weight=1)
 
         sidebar = tk.Frame(root, bg=self.theme["sidebar"], padx=12, pady=14, highlightbackground=self.theme["line"], highlightthickness=1)
-        main = tk.Frame(root, bg=self.theme["bg"], padx=18, pady=14)
-        right = tk.Frame(root, bg=self.theme["bg"], padx=0, pady=14)
+        content = tk.Frame(root, bg=self.theme["bg"], padx=18, pady=14)
         sidebar.grid(row=0, column=0, sticky="nsew")
-        main.grid(row=0, column=1, sticky="nsew")
-        right.grid(row=0, column=2, sticky="nsew", padx=(0, 18))
-        main.grid_columnconfigure(0, weight=1)
-        main.grid_rowconfigure(4, weight=1)
-        right.grid_columnconfigure(0, weight=1)
-        right.grid_rowconfigure(2, weight=1)
+        content.grid(row=0, column=1, sticky="nsew")
+        content.grid_columnconfigure(0, weight=1)
+        content.grid_rowconfigure(0, weight=1)
 
         self._build_sidebar(sidebar)
-        self._build_topbar(main)
-        self._build_kpi_section(main)
-        self._build_pipeline_section(main)
-        self._build_activity_section(main)
-        self._build_table_section(main)
-        self._build_quick_actions_panel(right)
-        self._build_system_status_panel(right)
-
-        footer = tk.Frame(main, bg=self.theme["bg"])
-        footer.grid(row=5, column=0, sticky="ew", pady=(10, 0))
-        footer.grid_columnconfigure(1, weight=1)
-        tk.Label(footer, text="사용자: master", bg=self.theme["bg"], fg=self.theme["muted"], font=("Segoe UI", 9)).grid(row=0, column=0, sticky="w")
-        tk.Label(footer, text="현재 시트: collection", bg=self.theme["bg"], fg=self.theme["muted"], font=("Segoe UI", 9)).grid(row=0, column=1, sticky="w", padx=(36, 0))
-        tk.Label(footer, text="자동 감시: 활성", bg=self.theme["bg"], fg=self.theme["green"], font=("Segoe UI", 9, "bold")).grid(row=0, column=2, sticky="e")
+        self.page_container = tk.Frame(content, bg=self.theme["bg"])
+        self.page_container.grid(row=0, column=0, sticky="nsew")
+        self._show_active_page(self.state.active_view)
 
         self.protocol("WM_DELETE_WINDOW", self.on_close)
         self._refresh_system_status_labels()
@@ -390,8 +394,8 @@ class AutoShopLauncher(tk.Tk):
 
         nav = tk.Frame(parent, bg=self.theme["sidebar"])
         nav.pack(fill=tk.X)
-        for label, active in NAV_ITEMS:
-            self._sidebar_button(nav, label, active, lambda name=label: self.on_menu_click(name))
+        for label, _active in NAV_ITEMS:
+            self._sidebar_button(nav, label, self.state.active_view == label, lambda name=label: self.on_menu_click(name))
 
         quick = self._card(parent, "빠른 바로가기", pady=(18, 0))
         for label, action, color_key in SHORTCUTS:
@@ -474,13 +478,30 @@ class AutoShopLauncher(tk.Tk):
             relief=tk.FLAT,
             borderwidth=0,
             height=9,
+            exportselection=True,
         )
         self.log.grid(row=1, column=0, sticky="nsew")
+        self.log.bind("<ButtonRelease-1>", self._focus_log_widget)
         self.log.bind("<Command-c>", self.copy_selected_log)
+        self.log.bind("<Command-KeyPress-c>", self.copy_selected_log)
         self.log.bind("<Control-c>", self.copy_selected_log)
+        self.log.bind("<Control-KeyPress-c>", self.copy_selected_log)
+        self.log.bind("<<Copy>>", self.copy_selected_log)
         self.log.bind("<Command-a>", self.select_all_logs)
         self.log.bind("<Control-a>", self.select_all_logs)
         self.log.bind("<Key>", self._block_log_edit_key)
+
+        # 로그 전용 우클릭 컨텍스트 메뉴
+        self.log_menu = tk.Menu(self.log, tearoff=0, bg=self.theme["panel"], fg=self.theme["text"],
+                                activebackground=self.theme["blue"], activeforeground="#ffffff", font=("Segoe UI", 9))
+        self.log_menu.add_command(label="복사 (Copy)", command=self.copy_selected_log)
+        self.log_menu.add_command(label="전체 선택 (Select All)", command=self.select_all_logs)
+        self.log_menu.add_separator()
+        self.log_menu.add_command(label="로그 지우기 (Clear)", command=self.clear_log)
+
+        self.log.bind("<Button-3>", self._show_log_context_menu)  # Windows/Linux
+        self.log.bind("<Button-2>", self._show_log_context_menu)  # macOS
+        self.log.bind("<Control-Button-1>", self._show_log_context_menu) # macOS Ctrl+Click
 
         summary = self._panel(wrap, padx=12, pady=10)
         summary.grid(row=0, column=1, sticky="nsew")
@@ -602,8 +623,42 @@ class AutoShopLauncher(tk.Tk):
         fg = "#ffffff" if active else "#d5e0ee"
         label = tk.Label(parent, text=text, bg=bg, fg=fg, font=("Segoe UI", 10, "bold"), anchor="w", padx=14, pady=10, cursor="hand2")
         label.pack(fill=tk.X, pady=2)
+        self.nav_buttons[text] = label
         if command:
             label.bind("<Button-1>", lambda _event: command())
+
+    def _set_sidebar_active(self, active_name: str) -> None:
+        for name, label in self.nav_buttons.items():
+            if not label.winfo_exists():
+                continue
+            is_active = name == active_name
+            label.configure(
+                bg=self.theme["blue_2"] if is_active else self.theme["sidebar"],
+                fg="#ffffff" if is_active else "#d5e0ee",
+            )
+
+    def _show_active_page(self, view_name: str) -> None:
+        if self.page_container is None:
+            return
+        self._set_sidebar_active(view_name)
+        if self.current_page is not None and self.current_page.winfo_exists():
+            self.current_page.destroy()
+        page_map = {
+            "대시보드": DashboardPage,
+            "수집 / 정찰": ScoutPage,
+            "이미지 / 썸네일": ImageThumbnailPage,
+            "BUYMA 업로드": BuymaUploadPage,
+            "감시 / 자동화": AutomationPage,
+            "관리 / 설정": SettingsPage,
+        }
+        page_cls = page_map.get(view_name, DashboardPage)
+        self.current_page = page_cls(self.page_container, self)
+        self.current_page.grid(row=0, column=0, sticky="nsew")
+        if view_name == "대시보드":
+            self._populate_log_widget()
+            self._refresh_product_table()
+            self._render_pipeline_steps()
+            self._render_metrics()
 
     def _link_button(self, parent: tk.Widget, text: str, command, color: str) -> None:
         ColorButton(
@@ -663,7 +718,7 @@ class AutoShopLauncher(tk.Tk):
 
     def _draw_progress(self, key: str, ratio: float, accent: str) -> None:
         canvas = self.pipeline_canvas_widgets.get(key)
-        if not canvas:
+        if not canvas or not canvas.winfo_exists():
             return
         width = max(1, canvas.winfo_width())
         canvas.delete("all")
@@ -725,7 +780,7 @@ class AutoShopLauncher(tk.Tk):
         tk.Label(row, textvariable=value_var, bg=self.theme["panel"], fg=value_color or self.theme["green"], font=("Segoe UI", 9, "bold")).pack(side=tk.RIGHT)
 
     def _refresh_product_table(self) -> None:
-        if not hasattr(self, "product_table"):
+        if not hasattr(self, "product_table") or not self.product_table.winfo_exists():
             return
         for item in self.product_table.get_children():
             self.product_table.delete(item)
@@ -745,6 +800,8 @@ class AutoShopLauncher(tk.Tk):
 
     def refresh_dashboard_data(self) -> None:
         self.dashboard_data.refresh()
+        if self.state.active_view != "대시보드":
+            self._show_active_page(self.state.active_view)
 
     def toggle_auto_refresh(self) -> None:
         if self.auto_refresh_var.get():
@@ -787,14 +844,18 @@ class AutoShopLauncher(tk.Tk):
         messagebox.showinfo("프로그램 정보", "물류 자동화 런처 1.0.0\nPython 기반 운영 대시보드")
 
     def on_menu_click(self, menu_name: str) -> None:
-        self.state.notify("active_view", menu_name)
+        self.state.set_active_view(menu_name)
         if menu_name == "대시보드":
             self.refresh_dashboard_data()
-        elif "로그" in menu_name:
-            self.log.see(tk.END)
-        elif "상품" in menu_name or "BUYMA" in menu_name:
+        elif "BUYMA" in menu_name:
             self._refresh_product_table()
         self.logger.emit(f"메뉴 선택: {menu_name}\n", category="navigation")
+
+    def dispatch_ui_action(self, label: str, callback=None, *, category: str = "ui"):
+        self.logger.emit(f"{label}\n", category=category)
+        if callback is None:
+            return None
+        return callback()
 
     def _build_stat_card(self, parent: tk.Frame, col: int, title: str, value_var: tk.StringVar, accent: str) -> None:
         card = tk.Frame(parent, bg="#161f3e", padx=12, pady=10, highlightbackground=accent, highlightthickness=1)
@@ -1163,55 +1224,85 @@ class AutoShopLauncher(tk.Tk):
         var.set(f"{metric}    {status_map.get(text, text)}")
 
     def append_log(self, text: str) -> None:
-        self.log.insert(tk.END, text)
-        self.log.see(tk.END)
+        if hasattr(self, "log") and self.log.winfo_exists():
+            self.log.insert(tk.END, text)
+            self.log.see(tk.END)
 
     def clear_log(self) -> None:
-        self.log.delete("1.0", tk.END)
+        self.log_history.clear()
+        if hasattr(self, "log") and self.log.winfo_exists():
+            self.log.delete("1.0", tk.END)
 
     def copy_selected_log(self, _event=None) -> str:
-        try:
-            text = self.log.get(tk.SEL_FIRST, tk.SEL_LAST)
-        except tk.TclError:
+        if not hasattr(self, "log") or not self.log.winfo_exists():
+            return "break"
+        selection = self.log.tag_ranges(tk.SEL)
+        if selection:
+            text = self.log.get(selection[0], selection[1])
+        else:
             text = self.log.get("1.0", tk.END).rstrip()
         self.clipboard_clear()
         self.clipboard_append(text)
         return "break"
 
     def copy_all_logs(self) -> None:
-        text = self.log.get("1.0", tk.END).rstrip()
+        text = "\n".join(line.rstrip("\n") for line in self.log_history).rstrip()
         self.clipboard_clear()
         self.clipboard_append(text)
         self.status_var.set("로그 복사 완료")
 
     def select_all_logs(self, _event=None) -> str:
+        if not hasattr(self, "log") or not self.log.winfo_exists():
+            return "break"
         self.log.tag_add(tk.SEL, "1.0", tk.END)
         self.log.mark_set(tk.INSERT, "1.0")
         self.log.see(tk.INSERT)
+        self.log.focus_set()
         return "break"
 
+    def _focus_log_widget(self, _event=None) -> None:
+        if hasattr(self, "log") and self.log.winfo_exists():
+            self.log.focus_set()
+
+    def _show_log_context_menu(self, event) -> None:
+        if hasattr(self, "log_menu"):
+            self.log_menu.tk_popup(event.x_root, event.y_root)
+
     def _block_log_edit_key(self, event=None) -> str | None:
-        if event and (event.state & 0x4 or event.state & 0x8) and str(event.keysym).lower() in {"a", "c"}:
+        if not event:
+            return "break"
+        # 네비게이션 및 선택 키 허용 (방향키, Home, End, PageUp/Down, 각수정키)
+        if event.keysym in ("Left", "Right", "Up", "Down", "Prior", "Next", "Home", "End",
+                           "Control_L", "Control_R", "Shift_L", "Shift_R", "Meta_L", "Meta_R"):
             return None
+        # 복사(C) 및 전체선택(A) 단축키 조합 허용 (Ctrl, Cmd, Mod 등 대응)
+        if (event.state & (0x4 | 0x8 | 0x10)) and str(event.keysym).lower() in {"a", "c"}:
+            return None
+        # 그 외의 일반 키 입력(텍스트 수정)만 차단
         return "break"
 
     def _set_running_ui(self, running: bool) -> None:
         normal = tk.DISABLED if running else tk.NORMAL
-        self.run_btn.configure(state=normal)
-        self.watch_btn.configure(state=normal)
-        self.image_save_btn.configure(state=normal)
-        self.upload_review_btn.configure(state=normal)
-        self.upload_auto_btn.configure(state=normal)
-        self.thumb_btn.configure(state=normal)
-        self.stop_btn.configure(state=tk.NORMAL if running else tk.DISABLED)
+        for attr_name in ("run_btn", "watch_btn", "image_save_btn", "upload_review_btn", "upload_auto_btn", "thumb_btn"):
+            button = getattr(self, attr_name, None)
+            if button is not None and button.winfo_exists():
+                button.configure(state=normal)
+        stop_button = getattr(self, "stop_btn", None)
+        if stop_button is not None and stop_button.winfo_exists():
+            stop_button.configure(state=tk.NORMAL if running else tk.DISABLED)
 
     def _get_sheet_label_prefix(self) -> str:
         return "정찰팀"
 
     def _refresh_action_button_labels(self) -> None:
-        self.run_btn.configure(text="정찰 실행\n상품 정보 수집")
-        self.watch_btn.configure(text="테스트 모드\n감시 실행")
-        self.image_save_btn.configure(text="이미지 저장\n이미지 다운로드")
+        for attr_name, text in (
+            ("run_btn", "정찰 실행\n상품 정보 수집"),
+            ("watch_btn", "테스트 모드\n감시 실행"),
+            ("image_save_btn", "이미지 저장\n이미지 다운로드"),
+        ):
+            button = getattr(self, attr_name, None)
+            if button is not None and button.winfo_exists():
+                button.configure(text=text)
 
     def _get_credentials_target_path(self) -> str:
         return self.system_checker.get_credentials_target_path()
@@ -1686,7 +1777,11 @@ class AutoShopLauncher(tk.Tk):
         try:
             while not self.log_queue.empty():
                 event = self.log_queue.get_nowait()
-                self.append_log(event.format())
+                formatted = event.format()
+                self.log_history.append(formatted)
+                if len(self.log_history) > 1000:
+                    self.log_history = self.log_history[-1000:]
+                self.append_log(formatted)
         finally:
             self.after(100, self._drain_log_queue)
 
@@ -1713,19 +1808,14 @@ class AutoShopLauncher(tk.Tk):
                 self.after_cancel(self.auto_refresh_job)
             except Exception:
                 pass
-            self.auto_refresh_job = None
-        if self.process_manager.is_running():
+            finally:
+                self.auto_refresh_job = None
+        if self.process_manager.is_running() or any(self.process_manager.is_team_running(key) for key in self.team_watch_actions):
             if not messagebox.askyesno("종료", "실행 중인 작업을 중지하고 종료할까요?"):
                 return
         self.action_runner.stop_all()
         self.destroy()
 
-
 def main() -> None:
-    os.chdir(SCRIPT_DIR)
     app = AutoShopLauncher()
     app.mainloop()
-
-
-if __name__ == "__main__":
-    main()

@@ -97,6 +97,7 @@ class DataSourceStatus:
 class AppState:
     """Single source of truth for UI-visible launcher state."""
 
+    active_view: str = "대시보드"
     current_action: str = ""
     current_stage_key: str = ""
     status_text: str = "대기중"
@@ -154,6 +155,12 @@ class AppState:
             return
         self.status_text = text
         self.notify("status_text", text)
+
+    def set_active_view(self, view_name: str) -> None:
+        if self.active_view == view_name:
+            return
+        self.active_view = view_name
+        self.notify("active_view", view_name)
 
     def set_current_action(self, action: str, stage_key: str = "") -> None:
         changed_action = self.current_action != action
@@ -241,6 +248,7 @@ class AppState:
     def to_snapshot(self) -> dict:
         """Return a minimal restart snapshot without transient subprocess state."""
         return {
+            "active_view": self.active_view,
             "status_text": self.status_text,
             "pipeline_status": dict(self.pipeline_status),
             "team_watch_enabled": dict(self.team_watch_enabled),
@@ -275,6 +283,7 @@ class AppState:
                 last_sync=str(source.get("last_sync") or "--:--:--"),
                 detail=str(source.get("detail") or ""),
             )
+        self.active_view = str(data.get("active_view") or "대시보드")
         self.today_processed = int(data.get("today_processed") or 0)
         self.today_success = int(data.get("today_success") or 0)
         self.today_fail = int(data.get("today_fail") or 0)
