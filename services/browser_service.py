@@ -13,15 +13,41 @@ def _parse_version_parts(text: str) -> tuple[int, ...]:
 
 
 def find_cached_chromedrivers() -> list[str]:
-    candidates = [
-        path
-        for path in glob.glob(
-            os.path.join(os.path.expanduser("~"), ".wdm", "drivers", "chromedriver", "**", "chromedriver*"),
-            recursive=True,
-        )
-        if os.path.isfile(path) and os.access(path, os.X_OK)
-    ]
+    is_windows = os.name == "nt"
+    candidates: list[str] = []
+    for path in glob.glob(
+        os.path.join(os.path.expanduser("~"), ".wdm", "drivers", "chromedriver", "**", "chromedriver*"),
+        recursive=True,
+    ):
+        if not os.path.isfile(path):
+            continue
+        name = os.path.basename(path).lower()
+        if is_windows:
+            if name != "chromedriver.exe":
+                continue
+        else:
+            if not os.access(path, os.X_OK):
+                continue
+        candidates.append(path)
     return sorted(candidates, key=_parse_version_parts, reverse=True)
+
+
+def _resolve_driver_path(path: str) -> str:
+    """Normalize webdriver path and force an executable path on Windows."""
+    normalized = (path or "").strip()
+    if not normalized:
+        return ""
+    if os.name == "nt":
+        lower = normalized.lower()
+        if lower.endswith(".exe") and os.path.isfile(normalized):
+            return normalized
+        # webdriver-manager may occasionally return a zip path; find sibling exe.
+        base_dir = os.path.dirname(normalized) if os.path.isfile(normalized) else normalized
+        for candidate in glob.glob(os.path.join(base_dir, "**", "chromedriver.exe"), recursive=True):
+            if os.path.isfile(candidate):
+                return candidate
+        return ""
+    return normalized
 
 
 def setup_chrome_driver(headless: bool = False):
@@ -50,13 +76,16 @@ def setup_chrome_driver(headless: bool = False):
         return chrome_options
 
     cached_candidates = find_cached_chromedrivers()
-    cached_driver = cached_candidates[0] if cached_candidates else ""
+    cached_driver = _resolve_driver_path(cached_candidates[0]) if cached_candidates else ""
 
     if cached_driver:
         service = Service(cached_driver)
     else:
         # Fallback to webdriver-manager download only when cache is unavailable.
-        service = Service(ChromeDriverManager().install())
+        installed = _resolve_driver_path(ChromeDriverManager().install())
+        if not installed:
+            raise RuntimeError("No executable ChromeDriver found (expected chromedriver.exe).")
+        service = Service(installed)
 
     options = _build_options(use_headless=headless)
     try:

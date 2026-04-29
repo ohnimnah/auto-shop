@@ -169,7 +169,6 @@ class AutoShopLauncher(tk.Tk):
             system_checker=self.system_checker,
             pipeline_service=self.action_runner.pipeline_service,
         )
-        self.dashboard_data.refresh()
         self.logger.subscribe(self._enqueue_log)
         self.logger.subscribe(self.file_log_writer.handle)
         self.logger.subscribe(self.dashboard_data.update_state_from_log)
@@ -221,6 +220,7 @@ class AutoShopLauncher(tk.Tk):
         self.page_container: tk.Frame | None = None
         self.current_page: tk.Frame | None = None
         self.pages: dict[str, tk.Frame] = {}
+        self.page_classes: dict[str, type[tk.Frame]] = {}
         self.current_page_name: str = self.state.active_view
         self.log_history: list[str] = []
         self.wizard_summary_var = tk.StringVar(value="첫 실행 준비를 확인하세요.")
@@ -247,6 +247,8 @@ class AutoShopLauncher(tk.Tk):
         self._refresh_action_button_labels()
         self.after(100, self._drain_log_queue)
         self.after(100, self._drain_state_queue)
+        # Defer heavy data sync so window renders first.
+        self.after(300, self.refresh_dashboard_data)
         self.after(250, self._ensure_sheet_config_on_startup)
 
     def _enqueue_log(self, event: LogEvent) -> None:
@@ -261,7 +263,9 @@ class AutoShopLauncher(tk.Tk):
         if key == "status_text" and hasattr(self, "status_var"):
             self.status_var.set(str(value))
         elif key == "current_action" and hasattr(self, "run_btn"):
-            self._set_running_ui(bool(value))
+            # Queue delivery can be slightly out-of-order; always reflect latest state.
+            self._set_running_ui(bool(self.state.current_action))
+            self._refresh_action_button_labels()
         elif key == "today_processed":
             self.today_processed_var.set(str(value))
         elif key == "today_success":
@@ -681,12 +685,38 @@ class AutoShopLauncher(tk.Tk):
 
     def _build_quick_actions_panel(self, parent: tk.Frame) -> None:
         card = self._grid_card(parent, "빠른 실행", row=0, pady=(0, 12))
-        self.run_btn = self._quick_button(card, "정찰 실행", "상품 정보 수집", self.theme["green"], lambda: self.run_action("run"), compact=True)
-        self.image_save_btn = self._quick_button(card, "이미지 저장", "이미지 다운로드", self.theme["blue"], lambda: self.run_action("save-images"), compact=True)
-        self.thumb_btn = self._quick_button(card, "썸네일 생성", "썸네일 일괄 제작", self.theme["purple"], self.run_thumbnail_action, compact=True)
-        self.upload_auto_btn = self._quick_button(card, "업로드 실행", "BUYMA 자동 업로드", self.theme["orange"], lambda: self.run_action("upload-auto"), compact=True)
+        def _quick_pair(make_left, make_right):
+            row = tk.Frame(card, bg=self.theme["panel"])
+            row.pack(fill=tk.X, pady=4)
+            row.grid_columnconfigure(0, weight=1)
+            row.grid_columnconfigure(1, weight=1)
+            left_btn = make_left(row)
+            right_btn = make_right(row)
+            left_btn.grid(row=0, column=0, sticky="ew", padx=(0, 4))
+            right_btn.grid(row=0, column=1, sticky="ew", padx=(4, 0))
+            return left_btn, right_btn
+
+        self.run_btn, self.watch_btn = _quick_pair(
+            lambda p: self._quick_button(p, "정찰 1회 실행", "상품 정보 수집", self.theme["green"], lambda: self.run_action("run"), compact=True, auto_pack=False),
+            lambda p: self._quick_button(p, "정찰 감시 시작", "정찰 감시 모드", "#334155", self._toggle_scout_watch, compact=True, auto_pack=False),
+        )
+
+        self.image_save_btn, self.assets_watch_btn = _quick_pair(
+            lambda p: self._quick_button(p, "이미지 1회 실행", "이미지 다운로드", self.theme["blue"], lambda: self.run_action("save-images"), compact=True, auto_pack=False),
+            lambda p: self._quick_button(p, "이미지 감시 시작", "이미지 감시 모드", "#334155", lambda: self._toggle_team_watch("assets"), compact=True, auto_pack=False),
+        )
+
+        self.thumb_btn, self.design_watch_btn = _quick_pair(
+            lambda p: self._quick_button(p, "썸네일 1회 실행", "썸네일 일괄 제작", self.theme["purple"], self.run_thumbnail_action, compact=True, auto_pack=False),
+            lambda p: self._quick_button(p, "썸네일 감시 시작", "썸네일 감시 모드", "#334155", lambda: self._toggle_team_watch("design"), compact=True, auto_pack=False),
+        )
+
+        self.upload_auto_btn, self.sales_watch_btn = _quick_pair(
+            lambda p: self._quick_button(p, "업로드 1회 실행", "BUYMA 자동 업로드", self.theme["orange"], lambda: self.run_action("upload-auto"), compact=True, auto_pack=False),
+            lambda p: self._quick_button(p, "업로드 감시 시작", "업로드 감시 모드", "#334155", lambda: self._toggle_team_watch("sales"), compact=True, auto_pack=False),
+        )
+
         self.upload_review_btn = self._quick_button(card, "실패 건 재실행", "오류 상품 재처리", "#334155", lambda: self.run_action("upload-review"), compact=True)
-        self.watch_btn = self._quick_button(card, "테스트 모드", "감시 실행", "#334155", lambda: self.run_action("watch"), compact=True)
         self.stop_btn = self._quick_button(card, "현재 작업 중지", "실행 중인 작업 종료", self.theme["red"], self.stop_action, compact=True)
         self.stop_btn.configure(state=tk.DISABLED)
 
@@ -743,7 +773,7 @@ class AutoShopLauncher(tk.Tk):
     def _build_pages(self) -> None:
         if self.page_container is None:
             return
-        page_map = {
+        self.page_classes = {
             "대시보드": DashboardPage,
             "수집 / 정찰": ScoutPage,
             "이미지 / 썸네일": ImageThumbnailPage,
@@ -751,7 +781,7 @@ class AutoShopLauncher(tk.Tk):
             "감시 / 자동화": AutomationPage,
             "관리 / 설정": SettingsPage,
         }
-        self.pages = {name: page_cls(self.page_container, self) for name, page_cls in page_map.items()}
+        self.pages = {}
 
     def _show_active_page(self, view_name: str) -> None:
         if self.page_container is None:
@@ -771,7 +801,19 @@ class AutoShopLauncher(tk.Tk):
         if hasattr(self, "right_panel_container") and self.right_panel_container.winfo_exists():
             for child in self.right_panel_container.winfo_children():
                 child.destroy()
-        page = self.pages.get(view_name) or self.pages.get("대시보드")
+        page = self.pages.get(view_name)
+        if page is None:
+            page_cls = self.page_classes.get(view_name) or self.page_classes.get("대시보드")
+            if page_cls is not None and self.page_container is not None:
+                page = page_cls(self.page_container, self)
+                self.pages[view_name] = page
+        if page is None:
+            page = self.pages.get("대시보드")
+            if page is None:
+                page_cls = self.page_classes.get("대시보드")
+                if page_cls is not None and self.page_container is not None:
+                    page = page_cls(self.page_container, self)
+                    self.pages["대시보드"] = page
         if page is None:
             return
         page.tkraise()
@@ -898,7 +940,7 @@ class AutoShopLauncher(tk.Tk):
         auto_pack: bool = True,
         compact: bool = False,
     ) -> ColorButton:
-        text = f"{title} · {subtitle}" if compact else f"{title}\n{subtitle}"
+        text = f"{title}\n{subtitle}"
         btn = ColorButton(
             parent,
             text=text,
@@ -912,6 +954,9 @@ class AutoShopLauncher(tk.Tk):
             pady=7 if compact else 9,
             font=("Segoe UI", 9 if compact else 10, "bold"),
         )
+        if compact:
+            btn.configure(height=52)
+            btn.pack_propagate(False)
         if auto_pack:
             btn.pack(fill=tk.X, pady=4 if compact else 6)
         self.quick_action_buttons.append(btn)
@@ -928,7 +973,7 @@ class AutoShopLauncher(tk.Tk):
             return
         for item in self.product_table.get_children():
             self.product_table.delete(item)
-        rows = list(self.state.product_rows)
+        rows = [row for row in self.state.product_rows if self._is_valid_dashboard_row(row)]
         self._refresh_product_category_filter_options(rows)
         for row in rows:
             if not self._match_product_filters(row):
@@ -947,6 +992,15 @@ class AutoShopLauncher(tk.Tk):
             else:
                 self.empty_products_label.configure(text=self.state.data_source.detail or "표시할 상품이 없습니다.")
                 self.empty_products_label.grid()
+
+    def _is_valid_dashboard_row(self, row) -> bool:
+        def _clean(value: str) -> str:
+            text = str(value or "").strip()
+            if text.lower() in {"", "nan", "none", "#value!"}:
+                return ""
+            return text
+
+        return bool(_clean(getattr(row, "name", "")) or _clean(getattr(row, "brand", "")))
 
     def _refresh_product_category_filter_options(self, rows) -> None:
         if not hasattr(self, "product_category_filter") or not self.product_category_filter.winfo_exists():
@@ -1370,8 +1424,10 @@ class AutoShopLauncher(tk.Tk):
     def _toggle_scout_watch(self) -> None:
         if self._is_scout_watch_running():
             self.stop_action()
+            self._refresh_action_button_labels()
             return
         self.run_action("watch")
+        self._refresh_action_button_labels()
 
     def _toggle_team_watch(self, team_key: str) -> None:
         if team_key not in self.team_watch_actions:
@@ -1380,6 +1436,7 @@ class AutoShopLauncher(tk.Tk):
             self._stop_team_watch(team_key)
         else:
             self._start_team_watch(team_key)
+        self._refresh_action_button_labels()
 
     def _start_team_watch(self, team_key: str) -> None:
         if team_key not in self.team_watch_actions:
@@ -1388,6 +1445,7 @@ class AutoShopLauncher(tk.Tk):
             return
         self.action_runner.start_team_watch(team_key)
         self._schedule_team_watch_tick(team_key, delay_ms=20000)
+        self._refresh_action_button_labels()
 
     def _stop_team_watch(self, team_key: str) -> None:
         if team_key not in self.team_watch_actions:
@@ -1399,6 +1457,7 @@ class AutoShopLauncher(tk.Tk):
                 self.after_cancel(job_id)
             except Exception:
                 pass
+        self._refresh_action_button_labels()
 
     def _schedule_team_watch_tick(self, team_key: str, delay_ms: int = 20000) -> None:
         if not self.team_watch_enabled.get(team_key, False):
@@ -1488,11 +1547,24 @@ class AutoShopLauncher(tk.Tk):
         return "break"
 
     def _set_running_ui(self, running: bool) -> None:
-        normal = tk.DISABLED if running else tk.NORMAL
-        for attr_name in ("run_btn", "watch_btn", "image_save_btn", "upload_review_btn", "upload_auto_btn", "thumb_btn"):
+        one_shot_state = tk.DISABLED if running else tk.NORMAL
+        for attr_name in (
+            "run_btn",
+            "image_save_btn",
+            "upload_review_btn",
+            "upload_auto_btn",
+            "thumb_btn",
+        ):
             button = getattr(self, attr_name, None)
             if button is not None and button.winfo_exists():
-                button.configure(state=normal)
+                button.configure(state=one_shot_state)
+
+        # Watch toggles should stay clickable so users can turn OFF immediately.
+        watch_toggle_state = tk.NORMAL
+        for attr_name in ("watch_btn", "assets_watch_btn", "design_watch_btn", "sales_watch_btn"):
+            button = getattr(self, attr_name, None)
+            if button is not None and button.winfo_exists():
+                button.configure(state=watch_toggle_state)
         stop_button = getattr(self, "stop_btn", None)
         if stop_button is not None and stop_button.winfo_exists():
             stop_button.configure(state=tk.NORMAL if running else tk.DISABLED)
@@ -1502,13 +1574,51 @@ class AutoShopLauncher(tk.Tk):
 
     def _refresh_action_button_labels(self) -> None:
         for attr_name, text in (
-            ("run_btn", "정찰 실행\n상품 정보 수집"),
-            ("watch_btn", "테스트 모드\n감시 실행"),
-            ("image_save_btn", "이미지 저장\n이미지 다운로드"),
+            ("run_btn", "정찰 1회 실행\n상품 정보 수집"),
+            ("image_save_btn", "이미지 1회 실행\n이미지 다운로드"),
+            ("thumb_btn", "썸네일 1회 실행\n썸네일 일괄 제작"),
+            ("upload_auto_btn", "업로드 1회 실행\nBUYMA 자동 업로드"),
         ):
             button = getattr(self, attr_name, None)
             if button is not None and button.winfo_exists():
                 button.configure(text=text)
+
+        scout_watch_text = "정찰 감시 ON\n정찰 감시 모드" if self._is_scout_watch_running() else "정찰 감시 OFF\n정찰 감시 모드"
+        assets_watch_text = "이미지 감시 ON\n이미지 감시 모드" if self.team_watch_enabled.get("assets", False) else "이미지 감시 OFF\n이미지 감시 모드"
+        design_watch_text = "썸네일 감시 ON\n썸네일 감시 모드" if self.team_watch_enabled.get("design", False) else "썸네일 감시 OFF\n썸네일 감시 모드"
+        sales_watch_text = "업로드 감시 ON\n업로드 감시 모드" if self.team_watch_enabled.get("sales", False) else "업로드 감시 OFF\n업로드 감시 모드"
+
+        for attr_name, text in (
+            ("watch_btn", scout_watch_text),
+            ("assets_watch_btn", assets_watch_text),
+            ("design_watch_btn", design_watch_text),
+            ("sales_watch_btn", sales_watch_text),
+        ):
+            button = getattr(self, attr_name, None)
+            if button is not None and button.winfo_exists():
+                button.configure(text=text)
+
+        watch_on_colors = {
+            "watch_btn": "#0f766e",        # scout
+            "assets_watch_btn": "#1d4ed8", # image
+            "design_watch_btn": "#6d28d9", # thumbnail
+            "sales_watch_btn": "#b45309",  # upload
+        }
+        watch_on_states = {
+            "watch_btn": self._is_scout_watch_running(),
+            "assets_watch_btn": self.team_watch_enabled.get("assets", False),
+            "design_watch_btn": self.team_watch_enabled.get("design", False),
+            "sales_watch_btn": self.team_watch_enabled.get("sales", False),
+        }
+        for attr_name, is_on in watch_on_states.items():
+            button = getattr(self, attr_name, None)
+            if button is None or not button.winfo_exists():
+                continue
+            if is_on:
+                on_bg = watch_on_colors[attr_name]
+                button.configure(bg=on_bg, activebackground=on_bg)
+            else:
+                button.configure(bg="#334155", activebackground="#334155")
 
     def _get_credentials_target_path(self) -> str:
         return self.system_checker.get_credentials_target_path()
@@ -2075,8 +2185,15 @@ class AutoShopLauncher(tk.Tk):
     def stop_action(self) -> None:
         if not self.process_manager.is_running():
             self.state.set_status("대기중")
+            self.state.set_current_action("", "")
+            self._set_running_ui(False)
+            self._refresh_action_button_labels()
             return
         self.action_runner.stop()
+        # `on_done` 콜백 도착 전에도 즉시 UI를 복구해 체감 지연을 줄인다.
+        self.state.set_current_action("", "")
+        self._set_running_ui(False)
+        self._refresh_action_button_labels()
 
     def on_close(self) -> None:
         self._close_action_bubble()

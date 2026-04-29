@@ -226,21 +226,22 @@ class DashboardDataService:
 
     def get_real_metrics(self, products: list[ProductRow] | None = None) -> DashboardMetrics:
         products = products if products is not None else self.load_products()
-        today_rows = [row for row in products if self._is_today(row.updated)]
-        done_from_products = sum(1 for row in today_rows if self._is_done(row.state))
-        error_from_products = sum(1 for row in today_rows if self._is_error(row.state))
-        waiting = sum(1 for row in products if self._is_waiting(row.state))
+        valid_products = [row for row in products if self._is_valid_product_row(row)]
+        done_from_products = sum(1 for row in valid_products if self._is_done(row.state))
+        error_from_products = sum(1 for row in valid_products if self._is_error(row.state))
+        waiting = max(0, len(valid_products) - done_from_products - error_from_products)
         return DashboardMetrics(
-            total=len(products),
+            total=len(valid_products),
             running=self._running_count(),
             waiting=waiting,
-            done=max(self.state.today_success, done_from_products),
-            error=max(self.state.today_fail, error_from_products),
+            done=done_from_products,
+            error=error_from_products,
         )
 
     def build_pipeline_from_runtime(self, products: list[ProductRow] | None = None) -> list[PipelineStep]:
         products = products if products is not None else self.load_products()
-        total = max(1, len(products))
+        valid_products = [row for row in products if self._is_valid_product_row(row)]
+        total = max(1, len(valid_products))
         stage_specs = [
             ("scout", "정찰", "blue", ("정찰", "수집", "상품")),
             ("assets", "이미지 저장", "green", ("이미지", "저장")),
@@ -251,11 +252,11 @@ class DashboardDataService:
         ]
         steps: list[PipelineStep] = []
         for key, title, color_key, words in stage_specs:
-            count = self._count_rows_matching(products, words)
+            count = self._count_rows_matching(valid_products, words)
             if key in self.state.pipeline_status and self.state.pipeline_status.get(key) in {"진행중", "감시중"}:
                 count = max(count, 1)
             ratio = min(1.0, count / total)
-            steps.append(PipelineStep(key, title, f"{count} / {len(products)}", ratio, color_key))
+            steps.append(PipelineStep(key, title, f"{count} / {len(valid_products)}", ratio, color_key))
         return steps
 
     def load_products(self) -> list[ProductRow]:
@@ -523,9 +524,9 @@ class DashboardDataService:
 
         name = _clean(row.name)
         brand = _clean(row.brand)
-        category = _clean(row.category)
-        price = _clean(row.price)
-        return bool(name or brand or category or price)
+        # Dashboard totals should ignore template/empty rows even if formulas
+        # left category/price-like artifacts in the sheet.
+        return bool(name or brand)
 
     def _pick_dashboard_category(self, *candidates: str) -> str:
         for candidate in candidates:
