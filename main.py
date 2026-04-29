@@ -224,19 +224,6 @@ IMAGES_ROOT = get_default_images_dir()
 CREDENTIALS_PATH = os.path.join(DATA_DIR, 'credentials.json')
 
 
-def clear_invalid_proxy_env() -> None:
-    """잘못된 로컬 프록시 설정이 있을 때 Google API 연결 실패를 방지한다."""
-    proxy_keys = ("HTTP_PROXY", "HTTPS_PROXY", "ALL_PROXY", "http_proxy", "https_proxy", "all_proxy")
-    for key in proxy_keys:
-        value = (os.environ.get(key) or "").strip()
-        if not value:
-            continue
-        lowered = value.lower()
-        if "127.0.0.1:9" in lowered or "localhost:9" in lowered:
-            os.environ.pop(key, None)
-            print(f"프록시 환경변수 자동 해제: {key}={value}")
-
-
 def initialize_runtime_paths(data_dir: str = "", credentials_file: str = ""):
     """런타임 파일 경로를 초기화한다"""
     global DATA_DIR, IMAGES_ROOT, CREDENTIALS_PATH
@@ -848,11 +835,6 @@ def parse_args():
         help="카테고리 미분류율을 실측해 건강 상태를 출력",
     )
     parser.add_argument(
-        "--reclassify",
-        action="store_true",
-        help="카테고리 실측 시 CSV의 기존 category 값을 무시하고 재분류 기준으로 계산",
-    )
-    parser.add_argument(
         "--suggest-category-rules",
         action="store_true",
         help="unresolved CSV 기반 fallback rule 후보를 출력",
@@ -915,7 +897,6 @@ def scrape_musinsa_product(
 
 def main():
     args = parse_args()
-    clear_invalid_proxy_env()
     if args.version:
         print(__version__)
         return
@@ -968,29 +949,14 @@ def main():
         return
 
     if args.category_health:
-        health = category_health(
-            logs_dir=os.path.join(os.getcwd(), "logs"),
-            input_csv=args.input_csv,
-            reclassify=bool(args.reclassify),
-        )
+        health = category_health(logs_dir=os.path.join(os.getcwd(), "logs"), input_csv=args.input_csv)
         print("Category Health")
         print("---------------")
-        print(f"Total CSV rows    {health.get('total_csv_rows', health['total_rows'])}")
-        print(f"Valid product rows {health.get('valid_product_rows', health['total_rows'])}")
-        print(f"Empty rows         {health.get('empty_rows', 0)}")
+        print(f"Total rows        {health['total_rows']}")
         print(f"Classified        {health['classified']}")
         print(f"Unresolved        {health['unresolved']}")
         print(f"Unresolved rate   {health['unresolved_rate']:.1f}%")
         print(f"Status            {health['status']}")
-        if args.reclassify and health.get("matched_by"):
-            print("")
-            print("Matched by")
-            print("----------")
-            matched_by = health["matched_by"]
-            print(f"force_map        {matched_by.get('force_map', 0)}")
-            print(f"fallback_rules   {matched_by.get('fallback_rules', 0)}")
-            print(f"candidate_rules  {matched_by.get('candidate_rules', 0)}")
-            print(f"unresolved       {matched_by.get('unresolved', 0)}")
         return
 
     if args.suggest_category_rules:
@@ -1056,9 +1022,7 @@ def main():
         print("Category Tune Cycle")
         print("-------------------")
         print("Before:")
-        print(f"Total CSV rows: {before.get('total_csv_rows', before['total_rows'])}")
-        print(f"Valid product rows: {before.get('valid_product_rows', before['total_rows'])}")
-        print(f"Empty rows: {before.get('empty_rows', 0)}")
+        print(f"Total rows: {before['total_rows']}")
         print(f"Unresolved: {before['unresolved']}")
         print(f"Rate: {before['unresolved_rate']:.1f}%")
         print("")
@@ -1067,17 +1031,8 @@ def main():
         print(f"Skipped: {len(result.get('skipped', []))}")
         print("")
         print("After:")
-        print(f"Valid product rows: {after.get('valid_product_rows', after['total_rows'])}")
         print(f"Unresolved: {after['unresolved']}")
         print(f"Rate: {after['unresolved_rate']:.1f}%")
-        matched_by = result.get("matched_by", {})
-        if matched_by:
-            print("")
-            print("Matched by:")
-            print(f"force_map: {matched_by.get('force_map', 0)}")
-            print(f"fallback_rules: {matched_by.get('fallback_rules', 0)}")
-            print(f"candidate_rules: {matched_by.get('candidate_rules', 0)}")
-            print(f"unresolved: {matched_by.get('unresolved', 0)}")
         print("")
         print("Improvement:")
         print(f"{result['improvement_rows']:+d} rows")
