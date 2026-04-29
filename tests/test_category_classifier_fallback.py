@@ -48,6 +48,7 @@ class CategoryClassifierFallbackTests(unittest.TestCase):
         self.assertEqual(classify_category("심리스브라", ""), StandardCategory.INNER_UNDERWEAR)
         self.assertEqual(classify_category("sports bra", ""), StandardCategory.INNER_UNDERWEAR)
         self.assertEqual(classify_category("innerfree bra", ""), StandardCategory.INNER_UNDERWEAR)
+        self.assertEqual(classify_category("리브레 CF(1073A073100) 인도어화", "아식스"), StandardCategory.SHOES_SNEAKER)
 
 
 if __name__ == "__main__":

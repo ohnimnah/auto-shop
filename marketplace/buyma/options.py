@@ -17,6 +17,52 @@ except Exception:  # pragma: no cover
 from marketplace.buyma.retry_ops import safe_click
 from marketplace.buyma.selectors import JP_SHITEI_NASHI, JP_SIZE_SHITEI_NASHI
 
+SELECT_CONTROL_QUERY = (
+    ".Select, [class*='Select__control'], [class*='select__control'], "
+    "[role='combobox']"
+)
+SELECT_OPTION_QUERY = (
+    ".Select-menu-outer .Select-option, .Select-menu .Select-option, "
+    "[class*='Select__option'], [class*='select__option'], "
+    "[role='listbox'] [role='option'], [role='option']"
+)
+
+
+def _find_select_controls(scope):
+    try:
+        return scope.find_elements(By.CSS_SELECTOR, SELECT_CONTROL_QUERY)
+    except Exception:
+        return []
+
+
+def _find_select_options(driver):
+    try:
+        return driver.find_elements(By.CSS_SELECTOR, SELECT_OPTION_QUERY)
+    except Exception:
+        return []
+
+
+def _open_select_control(driver, select_el, *, sleep_fn, scroll_and_click) -> bool:
+    for query in (
+        ".Select-control",
+        "[class*='Select__control']",
+        "[class*='select__control']",
+        "[role='combobox']",
+    ):
+        try:
+            control = select_el.find_element(By.CSS_SELECTOR, query)
+            scroll_and_click(driver, control)
+            sleep_fn(0.2)
+            return True
+        except Exception:
+            continue
+    try:
+        scroll_and_click(driver, select_el)
+        sleep_fn(0.2)
+        return True
+    except Exception:
+        return False
+
 
 def infer_color_system(color_text: str) -> str:
     c = (color_text or "").strip().lower()
@@ -228,11 +274,9 @@ def select_color_system(driver, color_system: str, row_index: int = 0, *, sleep_
         if not color_selects:
             return False
         color_select = color_selects[min(row_index, len(color_selects) - 1)]
-        control = color_select.find_element(By.CSS_SELECTOR, ".Select-control")
-        safe_click(driver, control)
-        sleep_fn(0.4)
-
-        options = driver.find_elements(By.CSS_SELECTOR, ".Select-menu-outer .Select-option")
+        if not _open_select_control(driver, color_select, sleep_fn=sleep_fn, scroll_and_click=scroll_and_click):
+            return False
+        options = _find_select_options(driver)
         if options:
             target = color_system.replace("系", "")
             for opt in options:
@@ -336,10 +380,9 @@ def fill_color_supplement(driver, color_text_en: str, *, scroll_and_click) -> bo
 def select_option_in_select_control(driver, select_el, target_text: str, *, sleep_fn, scroll_and_click) -> bool:
     """Select target_text in a React Select control with exact match preference."""
     try:
-        control = select_el.find_element(By.CSS_SELECTOR, ".Select-control")
-        scroll_and_click(driver, control)
-        sleep_fn(0.2)
-        options = driver.find_elements(By.CSS_SELECTOR, ".Select-menu-outer .Select-option")
+        if not _open_select_control(driver, select_el, sleep_fn=sleep_fn, scroll_and_click=scroll_and_click):
+            return False
+        options = _find_select_options(driver)
 
         def _norm(s: str) -> str:
             text = (s or "").strip().replace(" ", "").replace("\u3000", "").lower()
@@ -399,7 +442,7 @@ def select_option_in_select_control(driver, select_el, target_text: str, *, slee
                     sel_input.clear()
                     sel_input.send_keys(query)
                     sleep_fn(0.35)
-                    filtered = driver.find_elements(By.CSS_SELECTOR, ".Select-menu-outer .Select-option")
+                    filtered = _find_select_options(driver)
                     for opt in filtered:
                         txt = (opt.text or "").strip()
                         if _to_mm(txt) == target_mm:
@@ -502,7 +545,7 @@ def try_add_size_row(driver, scope=None, *, sleep_fn, scroll_and_click) -> bool:
     """Click the BUYMA add-size-row action if present."""
     try:
         root = scope or driver
-        before = len(root.find_elements(By.CSS_SELECTOR, ".Select"))
+        before = len(_find_select_controls(root))
         candidates = root.find_elements(
             By.CSS_SELECTOR,
             "button, a, [role='button'], [class*='add'], [class*='plus'], "
@@ -529,7 +572,7 @@ def try_add_size_row(driver, scope=None, *, sleep_fn, scroll_and_click) -> bool:
             if any(keyword in cls for keyword in ["plus", "add", "icon"]):
                 scroll_and_click(driver, button)
                 sleep_fn(0.4)
-                after = len(root.find_elements(By.CSS_SELECTOR, ".Select"))
+                after = len(_find_select_controls(root))
                 if after > before:
                     return True
     except Exception:
@@ -558,7 +601,7 @@ def select_size_by_select_controls(
         for _ in range(10):
             if datetime.now().timestamp() - t0 > 8:
                 break
-            current_selects = scope.find_elements(By.CSS_SELECTOR, ".Select")
+            current_selects = _find_select_controls(scope)
             if len(current_selects) >= len(sizes):
                 break
             if not try_add_size_row_fn(driver, scope=scope):
@@ -568,28 +611,23 @@ def select_size_by_select_controls(
         for idx, sz in enumerate(sizes):
             if datetime.now().timestamp() - t0 > 12:
                 break
-            selects = scope.find_elements(By.CSS_SELECTOR, ".Select")
+            selects = _find_select_controls(scope)
             if not selects:
                 break
 
             if idx >= len(selects):
                 if not try_add_size_row_fn(driver, scope=scope):
                     break
-                selects = scope.find_elements(By.CSS_SELECTOR, ".Select")
+                selects = _find_select_controls(scope)
                 if idx >= len(selects):
                     break
 
             sel = selects[idx]
-            try:
-                control = sel.find_element(By.CSS_SELECTOR, ".Select-control")
-            except Exception:
+            if not _open_select_control(driver, sel, sleep_fn=sleep_fn, scroll_and_click=scroll_and_click):
                 continue
 
-            scroll_and_click(driver, control)
-            sleep_fn(0.25)
-
             variants = [v.lower().replace(" ", "") for v in build_size_variants(sz)]
-            options = driver.find_elements(By.CSS_SELECTOR, ".Select-menu-outer .Select-option")
+            options = _find_select_options(driver)
             picked = False
 
             if options:
@@ -616,7 +654,7 @@ def select_size_by_select_controls(
                         sel_input.clear()
                         sel_input.send_keys(query)
                         sleep_fn(0.4)
-                        filtered = driver.find_elements(By.CSS_SELECTOR, ".Select-menu-outer .Select-option")
+                        filtered = _find_select_options(driver)
                         for opt in filtered:
                             txt = (opt.text or "").strip()
                             if any(size_match(v, txt) for v in variants):
@@ -718,7 +756,7 @@ def check_no_variation_option(
             if any(keyword in meta for keyword in ["none", "unspecified", "no_variation", "variation_none"]):
                 return True
 
-        selects = variation.find_elements(By.CSS_SELECTOR, ".Select")
+        selects = _find_select_controls(variation)
         targets = (
             ["指定なし", "サイズ指定なし", "バリエーションなし", "在庫変動なし"]
             if prefer_shitei_nashi
@@ -762,7 +800,7 @@ def force_select_shitei_nashi(driver, *, scroll_and_click, select_option_in_sele
             if clicked:
                 return True
 
-        selects = variation.find_elements(By.CSS_SELECTOR, ".Select")
+        selects = _find_select_controls(variation)
         for sel in selects:
             if select_option_in_select_control_fn(driver, sel, JP_SHITEI_NASHI):
                 return True
@@ -778,7 +816,13 @@ def force_select_shitei_nashi_global(driver, *, force_select_shitei_nashi_fn, se
         return True
 
     try:
-        selects = driver.find_elements(By.CSS_SELECTOR, ".sell-size-table .Select, .sell-variation .Select")
+        selects = driver.find_elements(
+            By.CSS_SELECTOR,
+            ".sell-size-table .Select, .sell-variation .Select, "
+            ".sell-size-table [class*='Select__control'], .sell-variation [class*='Select__control'], "
+            ".sell-size-table [class*='select__control'], .sell-variation [class*='select__control'], "
+            ".sell-size-table [role='combobox'], .sell-variation [role='combobox']",
+        )
         for sel in selects:
             if select_option_in_select_control_fn(driver, sel, JP_SHITEI_NASHI):
                 return True
@@ -814,9 +858,19 @@ def force_reference_size_shitei_nashi(driver, panel=None, *, sleep_fn, scroll_an
     """Force JP reference size selects to 指定なし."""
     try:
         root = panel if panel is not None else driver
-        selects = root.find_elements(By.CSS_SELECTOR, ".sell-size-table .Select")
+        selects = root.find_elements(
+            By.CSS_SELECTOR,
+            ".sell-size-table .Select, .sell-size-table [class*='Select__control'], "
+            ".sell-size-table [class*='select__control'], .sell-size-table [role='combobox']",
+        )
         if not selects:
-            selects = root.find_elements(By.CSS_SELECTOR, ".sell-variation .sell-size-table .Select")
+            selects = root.find_elements(
+                By.CSS_SELECTOR,
+                ".sell-variation .sell-size-table .Select, "
+                ".sell-variation .sell-size-table [class*='Select__control'], "
+                ".sell-variation .sell-size-table [class*='select__control'], "
+                ".sell-variation .sell-size-table [role='combobox']",
+            )
         if not selects:
             return False
 
@@ -836,14 +890,13 @@ def force_reference_size_shitei_nashi(driver, panel=None, *, sleep_fn, scroll_an
                     continue
 
                 try:
-                    control = sel.find_element(By.CSS_SELECTOR, ".Select-control")
-                    scroll_and_click(driver, control)
-                    sleep_fn(0.2)
+                    if not _open_select_control(driver, sel, sleep_fn=sleep_fn, scroll_and_click=scroll_and_click):
+                        continue
                     inp = sel.find_element(By.CSS_SELECTOR, ".Select-input input")
                     inp.clear()
                     inp.send_keys(JP_SHITEI_NASHI)
                     sleep_fn(0.35)
-                    opts = driver.find_elements(By.CSS_SELECTOR, ".Select-menu-outer .Select-option")
+                    opts = _find_select_options(driver)
                     exact = None
                     for opt in opts:
                         if is_shitei_nashi_text(opt.text or ""):
@@ -872,9 +925,21 @@ def force_select_variation_none_sequence(driver, panel=None, *, select_option_in
     """Select バリエーションなし / 指定なし in size selects."""
     try:
         root = panel if panel is not None else driver
-        selects = root.find_elements(By.CSS_SELECTOR, ".sell-variation .Select, .sell-size-table .Select")
+        selects = root.find_elements(
+            By.CSS_SELECTOR,
+            ".sell-variation .Select, .sell-size-table .Select, "
+            ".sell-variation [class*='Select__control'], .sell-size-table [class*='Select__control'], "
+            ".sell-variation [class*='select__control'], .sell-size-table [class*='select__control'], "
+            ".sell-variation [role='combobox'], .sell-size-table [role='combobox']",
+        )
         if not selects:
-            selects = driver.find_elements(By.CSS_SELECTOR, ".sell-variation .Select, .sell-size-table .Select")
+            selects = driver.find_elements(
+                By.CSS_SELECTOR,
+                ".sell-variation .Select, .sell-size-table .Select, "
+                ".sell-variation [class*='Select__control'], .sell-size-table [class*='Select__control'], "
+                ".sell-variation [class*='select__control'], .sell-size-table [class*='select__control'], "
+                ".sell-variation [role='combobox'], .sell-size-table [role='combobox']",
+            )
         if not selects:
             return False
 
@@ -1423,7 +1488,11 @@ def apply_buyma_option_selection(
 
             for _ in range(16):
                 visible_labels = driver.find_elements(By.CSS_SELECTOR, ".sell-variation label")
-                visible_selects = driver.find_elements(By.CSS_SELECTOR, ".sell-variation .Select")
+                visible_selects = driver.find_elements(
+                    By.CSS_SELECTOR,
+                    ".sell-variation .Select, .sell-variation [class*='Select__control'], "
+                    ".sell-variation [class*='select__control'], .sell-variation [role='combobox']",
+                )
                 visible_inputs = [
                     input_el
                     for input_el in driver.find_elements(

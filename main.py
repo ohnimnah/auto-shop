@@ -224,6 +224,19 @@ IMAGES_ROOT = get_default_images_dir()
 CREDENTIALS_PATH = os.path.join(DATA_DIR, 'credentials.json')
 
 
+def clear_invalid_proxy_env() -> None:
+    """잘못된 로컬 프록시 설정이 있을 때 Google API 연결 실패를 방지한다."""
+    proxy_keys = ("HTTP_PROXY", "HTTPS_PROXY", "ALL_PROXY", "http_proxy", "https_proxy", "all_proxy")
+    for key in proxy_keys:
+        value = (os.environ.get(key) or "").strip()
+        if not value:
+            continue
+        lowered = value.lower()
+        if "127.0.0.1:9" in lowered or "localhost:9" in lowered:
+            os.environ.pop(key, None)
+            print(f"프록시 환경변수 자동 해제: {key}={value}")
+
+
 def initialize_runtime_paths(data_dir: str = "", credentials_file: str = ""):
     """런타임 파일 경로를 초기화한다"""
     global DATA_DIR, IMAGES_ROOT, CREDENTIALS_PATH
@@ -902,6 +915,7 @@ def scrape_musinsa_product(
 
 def main():
     args = parse_args()
+    clear_invalid_proxy_env()
     if args.version:
         print(__version__)
         return

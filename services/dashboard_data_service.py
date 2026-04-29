@@ -78,16 +78,17 @@ class DashboardDataService:
 
     def get_scout_overview(self) -> dict:
         products = self.state.product_rows
-        collected = sum(1 for row in products if self._matches_words(row.state, ("수집", "정찰", "완료", "성공")))
-        failed = sum(1 for row in products if self._matches_words(row.state, ("수집 실패", "정찰 실패", "실패", "오류")))
+        valid_products = [row for row in products if self._is_valid_product_row(row)]
+        collected = sum(1 for row in valid_products if self._matches_words(row.state, ("수집", "정찰", "완료", "성공")))
+        failed = sum(1 for row in valid_products if self._matches_words(row.state, ("수집 실패", "정찰 실패", "실패", "오류")))
         running = 1 if self.state.current_action in {"run", "collect-listings", "watch"} else 0
-        categories = self._group_count(products, lambda row: row.category or "미분류")
+        categories = self._group_count(valid_products, lambda row: row.category or "미분류")
         unresolved = sum(
             1
-            for row in products
+            for row in valid_products
             if str((row.category or "")).strip().lower() in {"", "미분류", "기타", "etc", "その他"}
         )
-        unresolved_ratio = unresolved / max(1, len(products))
+        unresolved_ratio = unresolved / max(1, len(valid_products))
         if unresolved_ratio <= 0.10:
             unresolved_status = "OK"
         elif unresolved_ratio <= 0.20:
@@ -96,14 +97,15 @@ class DashboardDataService:
             unresolved_status = "NEEDS_TUNING"
         return {
             "metrics": [
-                ("수집 대상", len(products), "연결된 전체 상품"),
+                ("수집 대상", len(valid_products), "유효 상품 행 기준"),
                 ("수집 성공", collected, "수집 완료 또는 정찰 완료"),
                 ("수집 실패", failed, "실패 / 오류 상태"),
                 ("진행 중", running, "현재 정찰 프로세스"),
             ],
-            "recent_rows": products[:10],
+            "recent_rows": valid_products[:10],
             "category_rows": categories[:6],
-            "ratio": min(1.0, collected / max(1, len(products))),
+            "category_rows_all": categories,
+            "ratio": min(1.0, collected / max(1, len(valid_products))),
             "unresolved_count": unresolved,
             "unresolved_ratio": unresolved_ratio,
             "category_tuning_required": unresolved_ratio > 0.10,
@@ -382,11 +384,11 @@ class DashboardDataService:
         get = lambda idx, default="": cells[idx] if idx < len(cells) else default
         state = pick("state", "status", "상태", "작업상태", "진행상태")
         name = get(SHEET_COL_NAME_KR) or pick("name", "상품명", "product_name", "product_name_kr", "title")
-        category = (
-            get(SHEET_COL_MUSINSA_SUBCATEGORY)
-            or pick("무신사소분류", "musinsa_subcategory", "musinsa_small_category", "소분류")
-            or get(SHEET_COL_CATEGORY_BUYMA)
-            or pick("category", "카테고리", "buyma_category", "buyma_cat", "category_name")
+        category = self._pick_dashboard_category(
+            get(SHEET_COL_MUSINSA_SUBCATEGORY),
+            pick("무신사소분류", "musinsa_subcategory", "musinsa_small_category", "소분류"),
+            get(SHEET_COL_CATEGORY_BUYMA),
+            pick("category", "카테고리", "buyma_category", "buyma_cat", "category_name"),
         )
         price = get(SHEET_COL_PRICE_BUYMA) or pick("price", "가격", "buyma_price", "판매가", "price_yen", "yen_price")
         return ProductRow(
@@ -407,7 +409,11 @@ class DashboardDataService:
         state = get(0) or "대기"
         name = get(SHEET_COL_NAME_KR) or get(1)
         brand = get(3)
-        category = get(SHEET_COL_MUSINSA_SUBCATEGORY) or get(4)
+        category = self._pick_dashboard_category(
+            get(SHEET_COL_MUSINSA_SUBCATEGORY),
+            get(SHEET_COL_CATEGORY_BUYMA),
+            get(4),
+        )
         price = get(SHEET_COL_PRICE_BUYMA) or get(5)
         return ProductRow(
             no=fallback_no,
@@ -505,6 +511,43 @@ class DashboardDataService:
                 return datetime.strptime(text[:19], fmt).date() == today
             except Exception:
                 continue
+        return False
+
+    def _is_valid_product_row(self, row: ProductRow) -> bool:
+        def _clean(value: str) -> str:
+            text = str(value or "").strip()
+            lowered = text.lower()
+            if lowered in {"", "nan", "none", "#value!"}:
+                return ""
+            return text
+
+        name = _clean(row.name)
+        brand = _clean(row.brand)
+        category = _clean(row.category)
+        price = _clean(row.price)
+        return bool(name or brand or category or price)
+
+    def _pick_dashboard_category(self, *candidates: str) -> str:
+        for candidate in candidates:
+            value = str(candidate or "").strip()
+            if not value:
+                continue
+            if self._looks_like_price_text(value):
+                continue
+            return value
+        return ""
+
+    def _looks_like_price_text(self, value: str) -> bool:
+        text = str(value or "").strip()
+        if not text:
+            return False
+        lowered = text.lower().replace(",", "").replace(" ", "")
+        if lowered.startswith("¥") or lowered.startswith("₩") or lowered.startswith("$"):
+            return True
+        if lowered.endswith("원") or lowered.endswith("엔"):
+            return True
+        if re.fullmatch(r"[0-9]+(\.[0-9]+)?", lowered):
+            return True
         return False
 
     def _safe_path(self, path: str) -> str:

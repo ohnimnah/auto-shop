@@ -197,6 +197,9 @@ class AutoShopLauncher(tk.Tk):
         self.data_source_detail_var = tk.StringVar(value=self.state.data_source.detail)
         self.auto_refresh_var = tk.BooleanVar(value=False)
         self.auto_refresh_job: str | None = None
+        self.product_filter_state_var = tk.StringVar(value="전체 상태")
+        self.product_filter_category_var = tk.StringVar(value="전체 카테고리")
+        self.product_filter_search_var = tk.StringVar(value="")
         self.summary_date_var = tk.StringVar(value=datetime.now().strftime("%Y-%m-%d"))
         self.summary_done_var = tk.StringVar(value="0건")
         self.summary_running_var = tk.StringVar(value="0건")
@@ -590,11 +593,37 @@ class AutoShopLauncher(tk.Tk):
         card.grid_rowconfigure(1, weight=1)
         toolbar = tk.Frame(card, bg=self.theme["panel"])
         toolbar.grid(row=0, column=0, sticky="ew", pady=(0, 8))
-        tk.OptionMenu(toolbar, tk.StringVar(value="전체 상태"), "전체 상태", "진행 중", "대기 중", "완료", "오류").pack(side=tk.LEFT, padx=(0, 8))
-        tk.OptionMenu(toolbar, tk.StringVar(value="전체 카테고리"), "전체 카테고리", "맨투맨", "후드티", "패딩").pack(side=tk.LEFT, padx=(0, 8))
-        search = tk.Entry(toolbar, bg="#091626", fg="#dbeafe", insertbackground="#dbeafe", relief=tk.FLAT, width=26)
-        search.insert(0, "상품명, 상품코드 검색...")
+        self.product_state_filter = ttk.Combobox(
+            toolbar,
+            textvariable=self.product_filter_state_var,
+            values=["전체 상태", "진행 중", "대기 중", "완료", "오류"],
+            state="readonly",
+            width=12,
+        )
+        self.product_state_filter.pack(side=tk.LEFT, padx=(0, 8))
+        self.product_state_filter.bind("<<ComboboxSelected>>", lambda _e: self._refresh_product_table())
+
+        self.product_category_filter = ttk.Combobox(
+            toolbar,
+            textvariable=self.product_filter_category_var,
+            values=["전체 카테고리"],
+            state="readonly",
+            width=16,
+        )
+        self.product_category_filter.pack(side=tk.LEFT, padx=(0, 8))
+        self.product_category_filter.bind("<<ComboboxSelected>>", lambda _e: self._refresh_product_table())
+
+        search = tk.Entry(
+            toolbar,
+            textvariable=self.product_filter_search_var,
+            bg="#091626",
+            fg="#dbeafe",
+            insertbackground="#dbeafe",
+            relief=tk.FLAT,
+            width=26,
+        )
         search.pack(side=tk.LEFT, fill=tk.X, expand=True, ipady=5, padx=(0, 8))
+        search.bind("<KeyRelease>", lambda _e: self._refresh_product_table())
         tk.Checkbutton(
             toolbar,
             text="자동 새로고침",
@@ -899,7 +928,11 @@ class AutoShopLauncher(tk.Tk):
             return
         for item in self.product_table.get_children():
             self.product_table.delete(item)
-        for row in self.state.product_rows:
+        rows = list(self.state.product_rows)
+        self._refresh_product_category_filter_options(rows)
+        for row in rows:
+            if not self._match_product_filters(row):
+                continue
             tag = self._product_state_tag(row.state)
             self.product_table.insert(
                 "",
@@ -908,12 +941,52 @@ class AutoShopLauncher(tk.Tk):
                 tags=(tag,),
             )
         if hasattr(self, "empty_products_label"):
-            if self.state.product_rows:
+            if self.product_table.get_children():
                 self.empty_products_label.configure(text="")
                 self.empty_products_label.grid_remove()
             else:
                 self.empty_products_label.configure(text=self.state.data_source.detail or "표시할 상품이 없습니다.")
                 self.empty_products_label.grid()
+
+    def _refresh_product_category_filter_options(self, rows) -> None:
+        if not hasattr(self, "product_category_filter") or not self.product_category_filter.winfo_exists():
+            return
+        categories = sorted({str(row.category or "").strip() for row in rows if str(row.category or "").strip()})
+        values = ["전체 카테고리"] + categories
+        current = self.product_filter_category_var.get().strip() or "전체 카테고리"
+        self.product_category_filter.configure(values=values)
+        if current not in values:
+            self.product_filter_category_var.set("전체 카테고리")
+
+    def _match_product_filters(self, row) -> bool:
+        state_filter = (self.product_filter_state_var.get() or "전체 상태").strip()
+        category_filter = (self.product_filter_category_var.get() or "전체 카테고리").strip()
+        keyword = (self.product_filter_search_var.get() or "").strip().lower()
+
+        if state_filter != "전체 상태":
+            bucket = self._product_state_bucket(row.state)
+            if bucket != state_filter:
+                return False
+
+        if category_filter != "전체 카테고리":
+            if str(row.category or "").strip() != category_filter:
+                return False
+
+        if keyword:
+            haystack = f"{row.name} {row.no}".lower()
+            if keyword not in haystack:
+                return False
+        return True
+
+    def _product_state_bucket(self, state_text: str) -> str:
+        text = str(state_text or "").lower()
+        if any(word in text for word in ("완료", "성공", "출품완료", "업로드 완료")):
+            return "완료"
+        if any(word in text for word in ("오류", "실패", "보류", "exception", "error")):
+            return "오류"
+        if any(word in text for word in ("업로드", "출품", "썸네일", "디자인", "이미지", "다운로드", "저장", "정찰", "수집", "진행")):
+            return "진행 중"
+        return "대기 중"
 
     def _product_state_tag(self, state_text: str) -> str:
         text = str(state_text or "").lower()

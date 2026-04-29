@@ -1,6 +1,7 @@
 ﻿from __future__ import annotations
 
 import tkinter as tk
+from tkinter import ttk
 
 from ui.pages.base_page import BasePage, SECTION_GAP
 from ui.theme import BOTTOM_TABLE_HEIGHT, CHART_PANEL_HEIGHT, ACTION_PANEL_HEIGHT
@@ -129,3 +130,61 @@ class ScoutPage(BasePage):
             empty_action=self.get_empty_table_action("scout"),
         )
         category_card.grid(row=1, column=0, sticky="nsew")
+        all_rows = list(overview.get("category_rows_all", overview.get("category_rows", [])))
+        if len(all_rows) > len(overview.get("category_rows", [])):
+            more_wrap = tk.Frame(category_card, bg=self.controller.theme["panel"])
+            more_wrap.grid(row=2, column=0, sticky="e", pady=(6, 0))
+            self.build_action_button(
+                more_wrap,
+                "더보기",
+                lambda rows=all_rows: self._open_all_categories_dialog(rows),
+                tone="secondary",
+            ).grid(row=0, column=0, sticky="e")
+
+    def _open_all_categories_dialog(self, category_rows: list[tuple[str, int]]) -> None:
+        dlg = tk.Toplevel(self)
+        dlg.title("카테고리 수집현황 - 전체")
+        dlg.configure(bg=self.controller.theme["bg"])
+        dlg.geometry("520x620")
+        dlg.transient(self.winfo_toplevel())
+        dlg.grab_set()
+
+        outer = tk.Frame(dlg, bg=self.controller.theme["bg"], padx=12, pady=12)
+        outer.pack(fill=tk.BOTH, expand=True)
+        outer.grid_columnconfigure(0, weight=1)
+        outer.grid_rowconfigure(1, weight=1)
+
+        tk.Label(
+            outer,
+            text=f"전체 카테고리 ({len(category_rows)}개)",
+            bg=self.controller.theme["bg"],
+            fg=self.controller.theme["text"],
+            font=("Segoe UI", 11, "bold"),
+        ).grid(row=0, column=0, sticky="w", pady=(0, 8))
+
+        table_wrap = tk.Frame(outer, bg=self.controller.theme["panel"])
+        table_wrap.grid(row=1, column=0, sticky="nsew")
+        table_wrap.grid_columnconfigure(0, weight=1)
+        table_wrap.grid_rowconfigure(0, weight=1)
+
+        table = ttk.Treeview(
+            table_wrap,
+            columns=("category", "count"),
+            show="headings",
+            style="Ops.Treeview",
+        )
+        table.heading("category", text="카테고리")
+        table.heading("count", text="건수")
+        table.column("category", width=360, minwidth=260, stretch=True)
+        table.column("count", width=100, minwidth=80, stretch=False, anchor="center")
+        for name, count in category_rows:
+            table.insert("", tk.END, values=(name, count))
+        table.grid(row=0, column=0, sticky="nsew")
+
+        scrollbar = ttk.Scrollbar(table_wrap, orient=tk.VERTICAL, command=table.yview)
+        table.configure(yscrollcommand=scrollbar.set)
+        scrollbar.grid(row=0, column=1, sticky="ns")
+
+        btn_wrap = tk.Frame(outer, bg=self.controller.theme["bg"])
+        btn_wrap.grid(row=2, column=0, sticky="e", pady=(10, 0))
+        self.build_action_button(btn_wrap, "닫기", dlg.destroy, tone="secondary").grid(row=0, column=0, sticky="e")

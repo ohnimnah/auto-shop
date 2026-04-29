@@ -87,6 +87,7 @@ CATEGORY_RECOVERY_ALIASES: Dict[str, List[str]] = {
     "バックパック・リュック": ["バックパック", "リュック"],
     "ニットキャップ・ビーニー": ["ニットキャップ", "ビーニー"],
     "マフラー・ストール": ["マフラー", "ストール", "スカーフ"],
+    "구두": ["パンプス", "ローファー・オックスフォード", "フラットシューズ", "シューズ・サンダルその他"],
 }
 
 COMMON_PARENT_FALLBACK_MIDDLES: Dict[str, List[str]] = {
@@ -159,7 +160,10 @@ def normalize_sheet_category_labels(cat1: str, cat2: str, cat3: str) -> Tuple[st
         "슈즈": "靴",
         "운동화": "靴",
         "아우터": "アウター",
-        "가방": "バッグ",
+        "가방": "バッグ・カバン",
+        "バッグ": "バッグ・カバン",
+        "스포츠/레저": "バッグ・カバン",
+        "스포츠레저": "バッグ・カバン",
         "악세서리": "アクセサリー",
         "악세사리": "アクセサリー",
         "원피스": "ワンピース",
@@ -178,6 +182,9 @@ def normalize_sheet_category_labels(cat1: str, cat2: str, cat3: str) -> Tuple[st
         "샌들": "サンダル",
         "부츠": "ブーツ",
         "로퍼": "ローファー",
+        "구두": "パンプス",
+        "펌프스": "パンプス",
+        "플랫슈즈": "フラットシューズ",
         "티셔츠": "Tシャツ・カットソー",
         "후드": "パーカー・フーディ",
         "후드티": "パーカー・フーディ",
@@ -628,6 +635,11 @@ def apply_buyma_category_selection(
         diag["target_buyma_middle_category"] = cat2
 
     sel_val = _read_selected_category_value(driver, 1)
+    if not _is_category_selected(driver, 1, cat2, allow_other=True):
+        print(f"  △ 중카테 '{cat2}' 선택값 검증 실패: selected='{sel_val}'")
+        diag["failure_stage"] = "middle"
+        diag["final_result"] = "failed"
+        return diag
     diag["actual_selected_middle_category"] = sel_val or cat2
     if "その他" in (sel_val or ""):
         print(f"  ✓ 중카테: {cat2} -> その他 (기타)")
@@ -829,7 +841,9 @@ def _click_option_by_signature(driver, item_index: int, option: Dict[str, str], 
     value = (option.get("value") or "").strip()
     clicked = driver.execute_script(
         """
-        var opts = document.querySelectorAll('.Select-menu-outer .Select-option');
+        var opts = document.querySelectorAll(
+            '.Select-menu-outer .Select-option, .Select-menu .Select-option, [role="listbox"] [role="option"], [role="option"]'
+        );
         var text = arguments[1] || '';
         var aria = arguments[2] || '';
         var value = arguments[3] || '';
@@ -844,7 +858,13 @@ def _click_option_by_signature(driver, item_index: int, option: Dict[str, str], 
             var a = norm(el.getAttribute('aria-label') || '');
             var v = norm(el.getAttribute('data-value') || el.getAttribute('value') || '');
             if ((valueN && v && v === valueN) || (ariaN && a && a === ariaN) || (textN && t && t === textN)) {
-                el.click();
+                try {
+                    el.dispatchEvent(new MouseEvent('mousedown', {bubbles:true}));
+                    el.dispatchEvent(new MouseEvent('mouseup', {bubbles:true}));
+                    el.dispatchEvent(new MouseEvent('click', {bubbles:true}));
+                } catch (e) {
+                    el.click();
+                }
                 return true;
             }
         }
@@ -858,6 +878,19 @@ def _click_option_by_signature(driver, item_index: int, option: Dict[str, str], 
     if clicked:
         sleep_fn(1.2)
     return bool(clicked)
+
+
+def _is_category_selected(driver, item_index: int, target_keyword: str, *, allow_other: bool = False) -> bool:
+    selected = _read_selected_category_value(driver, item_index)
+    if not selected:
+        return False
+    selected_norm = _normalize_option_text(selected)
+    target_norm = _normalize_option_text(target_keyword)
+    if allow_other and "その他" in selected:
+        return True
+    if selected_norm == target_norm:
+        return True
+    return bool(target_norm and (target_norm in selected_norm or selected_norm in target_norm))
 
 
 def select_category_by_typing(driver, item_index: int, target_label: str, *, sleep_fn, scroll_and_click) -> bool:
@@ -956,12 +989,15 @@ def find_best_option_by_arrow(
     _log_dropdown_options(stage, target_keyword, options)
     selected = _choose_option_with_priority(options, target_keyword)
     if selected and _click_option_by_signature(driver, item_index, selected, sleep_fn=sleep_fn):
-        return True
+        if _is_category_selected(driver, item_index, target_keyword, allow_other=False):
+            return True
+        print(f"  [category][{stage}] clicked but selection not applied yet, retrying...")
     if fallback_other:
         other = _choose_option_with_priority(options, "その他")
         if other and _click_option_by_signature(driver, item_index, other, sleep_fn=sleep_fn):
-            print(f"  [category][{stage}] fallback selected: その他")
-            return True
+            if _is_category_selected(driver, item_index, "その他", allow_other=True):
+                print(f"  [category][{stage}] fallback selected: その他")
+                return True
 
     try:
         for _ in range(len(target_keyword)):
@@ -991,7 +1027,8 @@ def find_best_option_by_arrow(
         if focused and target_keyword in focused:
             combo.send_keys(Keys.ENTER)
             sleep_fn(1.5)
-            return True
+            if _is_category_selected(driver, item_index, target_keyword, allow_other=False):
+                return True
         if focused:
             if focused in seen and len(seen) > 2 and focused == seen[0]:
                 break

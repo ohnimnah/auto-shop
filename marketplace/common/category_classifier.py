@@ -48,6 +48,7 @@ CATEGORY_FALLBACK_RULES: List[Tuple[str, List[str], StandardCategory]] = [
     ("denim_pants", ["청바지", "denim", "jeans"], StandardCategory.PANTS_DENIM),
     ("jogger_pants", ["조거", "jogger", "sweatpants", "track pants"], StandardCategory.PANTS_JOGGER),
     ("sneakers", ["sneakers", "sneaker", "운동화", "스니커즈"], StandardCategory.SHOES_SNEAKER),
+    ("sports_shoes", ["인도어화", "스포츠화", "코트화", "풋살화", "배드민턴화", "핸드볼화"], StandardCategory.SHOES_SNEAKER),
     ("sandals", ["슬리퍼", "샌들", "sandal", "slide"], StandardCategory.SHOES_SANDAL),
     ("hoodie", ["hoodie", "후드", "후디", "맨투맨", "sweatshirt"], StandardCategory.TOP_HOODIE),
     ("dress", ["dress", "드레스", "원피스"], StandardCategory.DRESS),
@@ -77,6 +78,7 @@ FORCE_CATEGORY_MAP: Dict[Tuple[str, ...], StandardCategory] = {
     ("이너프리", "innerfree", "inner", "이너", "innerwear", "underwear"): StandardCategory.INNER_UNDERWEAR,
     ("bra", "브라", "sports bra", "sportsbra", "padded", "panty", "panties", "팬티"): StandardCategory.INNER_UNDERWEAR,
     ("홈웨어", "homewear", "잠옷", "파자마", "pajama", "loungewear", "lounge wear"): StandardCategory.HOME_PAJAMA,
+    ("인도어화", "스포츠화", "코트화", "풋살화", "배드민턴화", "핸드볼화", "실내화"): StandardCategory.SHOES_SNEAKER,
 }
 
 

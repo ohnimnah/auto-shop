@@ -43,7 +43,12 @@ class AutomationPage(BasePage):
         log_view.insert("1.0", log_text)
         log_view.configure(state=tk.DISABLED)
 
-        action_card, action_body = self.build_panel_card(right, "감시 제어", level="mid", min_height=ACTION_PANEL_HEIGHT)
+        action_card, action_body = self.build_panel_card(
+            right,
+            "감시 제어",
+            level="mid",
+            min_height=max(ACTION_PANEL_HEIGHT, 360),
+        )
         action_card.grid(row=0, column=0, sticky="ew", pady=(0, SECTION_GAP))
         action_body.grid_columnconfigure(0, weight=1)
         self.controller._quick_button(
