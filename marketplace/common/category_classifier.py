@@ -14,6 +14,7 @@ import os
 import re
 from typing import Dict, List, Optional, Tuple
 
+from config.config_service import load_config as load_profile_config
 from marketplace.buyma.standard_category import StandardCategory, build_combined_text
 from marketplace.common.runtime import get_runtime_data_dir
 from marketplace.common import sheet_source as sheet_source_mod
@@ -232,6 +233,17 @@ def _resolve_spreadsheet_id_from_runtime() -> str:
         return ""
 
 
+def _resolve_category_sheet_name(default_name: str = DEFAULT_CLASSIFIER_SHEET) -> str:
+    try:
+        profile_name = (os.environ.get("AUTO_SHOP_PROFILE") or "default").strip() or "default"
+        config = load_profile_config(profile_name)
+        tabs_cfg = ((config.get("spreadsheet") or {}).get("tabs") or {})
+        configured = str(tabs_cfg.get("category") or "").strip()
+        return configured or default_name
+    except Exception:
+        return default_name
+
+
 def _to_standard_category(raw: str) -> Optional[StandardCategory]:
     text = (raw or "").strip()
     if not text:
@@ -399,7 +411,14 @@ def classify_standard_category_from_sheet(
         fallback_std = classify_category(product_name, brand)
         return fallback_std, {"reason": "no_spreadsheet_id_fallback", "standard_category": fallback_std.value}
 
-    rules = _get_rules(spreadsheet_id=spreadsheet_id, sheet_name=sheet_name)
+    resolved_sheet_name = sheet_name
+    if sheet_name == DEFAULT_CLASSIFIER_SHEET:
+        resolved_sheet_name = _resolve_category_sheet_name(DEFAULT_CLASSIFIER_SHEET)
+
+    rules = _get_rules(spreadsheet_id=spreadsheet_id, sheet_name=resolved_sheet_name)
+    if not rules and resolved_sheet_name != DEFAULT_CLASSIFIER_SHEET:
+        rules = _get_rules(spreadsheet_id=spreadsheet_id, sheet_name=DEFAULT_CLASSIFIER_SHEET)
+        resolved_sheet_name = DEFAULT_CLASSIFIER_SHEET
     if not rules:
         fallback_std = classify_category(product_name, brand)
         return fallback_std, {"reason": "no_rules_fallback", "standard_category": fallback_std.value}
@@ -435,7 +454,6 @@ def classify_standard_category_from_sheet(
     return resolved, {
         "reason": "matched",
         "matched_keyword": matched_keyword,
-        "sheet_name": sheet_name,
+        "sheet_name": resolved_sheet_name,
         "standard_category": resolved.value,
     }
-

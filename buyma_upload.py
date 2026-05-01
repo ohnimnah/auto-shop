@@ -125,6 +125,16 @@ UPLOAD_COLUMNS = dict(DEFAULT_UPLOAD_COLUMNS)
 UPLOAD_MAX_DATA_COLUMN = "Y"
 
 
+def _get_candidate_sheet_name() -> str:
+    profile_name = (os.environ.get("AUTO_SHOP_PROFILE") or "default").strip() or "default"
+    try:
+        config = load_profile_config(profile_name)
+        tabs_cfg = ((config.get("spreadsheet") or {}).get("tabs") or {})
+        return str(tabs_cfg.get("category_mapping_candidates") or CATEGORY_MAPPING_CANDIDATES_SHEET).strip() or CATEGORY_MAPPING_CANDIDATES_SHEET
+    except Exception:
+        return CATEGORY_MAPPING_CANDIDATES_SHEET
+
+
 def _normalize_upload_columns(raw_columns: Any) -> Dict[str, str]:
     if not isinstance(raw_columns, dict):
         return {}
@@ -590,6 +600,7 @@ def _quote_sheet_name(sheet_name: str) -> str:
 
 
 def _ensure_category_mapping_candidates_sheet(service) -> None:
+    candidate_sheet_name = _get_candidate_sheet_name()
     metadata = service.spreadsheets().get(
         spreadsheetId=SPREADSHEET_ID,
         fields="sheets(properties(sheetId,title))",
@@ -600,7 +611,7 @@ def _ensure_category_mapping_candidates_sheet(service) -> None:
         for s in sheets
     }
 
-    if CATEGORY_MAPPING_CANDIDATES_SHEET not in title_to_id:
+    if candidate_sheet_name not in title_to_id:
         service.spreadsheets().batchUpdate(
             spreadsheetId=SPREADSHEET_ID,
             body={
@@ -608,7 +619,7 @@ def _ensure_category_mapping_candidates_sheet(service) -> None:
                     {
                         "addSheet": {
                             "properties": {
-                                "title": CATEGORY_MAPPING_CANDIDATES_SHEET,
+                                "title": candidate_sheet_name,
                             }
                         }
                     }
@@ -619,7 +630,7 @@ def _ensure_category_mapping_candidates_sheet(service) -> None:
     last_col = column_index_to_letter(len(CATEGORY_MAPPING_CANDIDATES_COLUMNS) - 1)
     service.spreadsheets().values().update(
         spreadsheetId=SPREADSHEET_ID,
-        range=f"'{_quote_sheet_name(CATEGORY_MAPPING_CANDIDATES_SHEET)}'!A1:{last_col}1",
+        range=f"'{_quote_sheet_name(candidate_sheet_name)}'!A1:{last_col}1",
         valueInputOption="RAW",
         body={"values": [CATEGORY_MAPPING_CANDIDATES_COLUMNS]},
     ).execute()
@@ -684,10 +695,11 @@ def _is_duplicate_candidate_within_24h(
     *,
     recent_limit: int = 1000,
 ) -> bool:
+    candidate_sheet_name = _get_candidate_sheet_name()
     last_col = column_index_to_letter(len(CATEGORY_MAPPING_CANDIDATES_COLUMNS) - 1)
     response = service.spreadsheets().values().get(
         spreadsheetId=SPREADSHEET_ID,
-        range=f"'{_quote_sheet_name(CATEGORY_MAPPING_CANDIDATES_SHEET)}'!A2:{last_col}",
+        range=f"'{_quote_sheet_name(candidate_sheet_name)}'!A2:{last_col}",
     ).execute()
     rows = response.get("values", [])
     if not rows:
@@ -717,6 +729,7 @@ def _is_duplicate_candidate_within_24h(
 
 def _append_category_candidate_row(service, row_data: Dict[str, str], category_diag: Dict[str, Any]) -> None:
     _ensure_category_mapping_candidates_sheet(service)
+    candidate_sheet_name = _get_candidate_sheet_name()
 
     product_name = (row_data.get("product_name_kr") or "").strip()
     candidate: Dict[str, str] = {
@@ -749,7 +762,7 @@ def _append_category_candidate_row(service, row_data: Dict[str, str], category_d
     row_values = [candidate.get(col, "") for col in CATEGORY_MAPPING_CANDIDATES_COLUMNS]
     service.spreadsheets().values().append(
         spreadsheetId=SPREADSHEET_ID,
-        range=f"'{_quote_sheet_name(CATEGORY_MAPPING_CANDIDATES_SHEET)}'!A:A",
+        range=f"'{_quote_sheet_name(candidate_sheet_name)}'!A:A",
         valueInputOption="USER_ENTERED",
         insertDataOption="INSERT_ROWS",
         body={"values": [row_values]},
