@@ -39,6 +39,8 @@ class SettingsPage(BasePage):
         self.active_tab = tk.StringVar(value="general")
         self.last_saved_config: dict | None = None
         self.available_sheet_tabs: list[str] = []
+        self._sheet_tabs_auto_loaded = False
+        self._suspend_page_scroll = False
         self.sheet_validation_rows: list[tuple[str, str, str, str, str]] = []
         self.validation_after_id: str | None = None
         self.tab_buttons: dict[str, tk.Widget] = {}
@@ -256,6 +258,8 @@ class SettingsPage(BasePage):
             "advanced": self._build_advanced_tab,
         }[self.active_tab.get()]
         builder(left, right)
+        if self.active_tab.get() == "general":
+            self.after_idle(self._maybe_autoload_google_sheet_tabs)
         self.after_idle(self._refresh_content_scroll_region)
 
     def _on_content_configure(self, _event=None) -> None:
@@ -283,6 +287,11 @@ class SettingsPage(BasePage):
         self.content_canvas.unbind_all("<Button-5>")
 
     def _on_mousewheel(self, event) -> None:
+        event_widget = getattr(event, "widget", None)
+        if not self._is_widget_in_scroll_region(event_widget):
+            return
+        if self._suspend_page_scroll or self._is_combobox_dropdown_active() or self._is_combobox_popup_widget(event_widget):
+            return
         try:
             if getattr(event, "num", None) == 4:
                 delta = -1
@@ -294,6 +303,111 @@ class SettingsPage(BasePage):
             self.content_canvas.yview_scroll(delta, "units")
         except Exception:
             pass
+
+    def _suspend_scroll_for_dropdown(self) -> None:
+        self._suspend_page_scroll = True
+
+    def _resume_scroll_after_dropdown(self, _event=None) -> None:
+        self.after(120, lambda: setattr(self, "_suspend_page_scroll", False))
+
+    def _is_widget_in_scroll_region(self, widget: tk.Widget | None) -> bool:
+        if widget is None:
+            return False
+        current = widget
+        for _ in range(20):
+            if current is self.content_canvas or current is self.content_viewport or current is self.content:
+                return True
+            try:
+                parent_name = current.winfo_parent()
+                if not parent_name:
+                    break
+                current = current.nametowidget(parent_name)
+            except Exception:
+                break
+        return False
+
+    def _is_combobox_popup_widget(self, widget: tk.Widget | None) -> bool:
+        if widget is None:
+            return False
+        current = widget
+        for _ in range(12):
+            try:
+                widget_class = str(current.winfo_class() or "")
+                widget_path = str(current).lower()
+            except Exception:
+                return False
+            if widget_class in {"Listbox", "TCombobox"}:
+                return True
+            if "popdown" in widget_path:
+                return True
+            try:
+                parent_name = current.winfo_parent()
+                if not parent_name:
+                    break
+                current = current.nametowidget(parent_name)
+            except Exception:
+                break
+        return False
+
+    def _is_combobox_dropdown_active(self) -> bool:
+        try:
+            pointer_x = self.winfo_pointerx()
+            pointer_y = self.winfo_pointery()
+            widget = self.winfo_containing(pointer_x, pointer_y)
+            if widget is None:
+                return False
+            return self._is_combobox_popup_widget(widget)
+        except Exception:
+            return False
+        return False
+
+    def _build_auto_card(self, parent: tk.Widget, title: str, *, title_suffix: str = "") -> tuple[tk.Frame, tk.Frame]:
+        card = self.controller._panel(parent, padx=12, pady=10)
+        card.grid_columnconfigure(0, weight=1)
+        header = tk.Frame(card, bg=self.controller.theme["panel"])
+        header.grid(row=0, column=0, sticky="ew", pady=(0, 8))
+        header.grid_columnconfigure(0, weight=1)
+        tk.Label(
+            header,
+            text=title,
+            bg=self.controller.theme["panel"],
+            fg=self.controller.theme["text"],
+            font=("Segoe UI", 10, "bold"),
+        ).grid(row=0, column=0, sticky="w")
+        if title_suffix:
+            tk.Label(
+                header,
+                text=title_suffix,
+                bg=self.controller.theme["panel"],
+                fg=self.controller.theme["muted"],
+                font=("Segoe UI", 8),
+            ).grid(row=0, column=1, sticky="e")
+        body = tk.Frame(card, bg=self.controller.theme["panel"])
+        body.grid(row=1, column=0, sticky="nsew")
+        body.grid_columnconfigure(0, weight=1)
+        return card, body
+
+    def _combo_values_for(self, current_value: str) -> list[str]:
+        values = [value.strip() for value in self.available_sheet_tabs if value and value.strip()]
+        current = current_value.strip()
+        if current and current not in values:
+            values.insert(0, current)
+        return values
+
+    def _update_sheet_combobox_values(self) -> None:
+        for key, combo in self.sheet_comboboxes.items():
+            combo.configure(values=self._combo_values_for(self.general_tab_vars[key].get()))
+
+    def _maybe_autoload_google_sheet_tabs(self) -> None:
+        if self._sheet_tabs_auto_loaded or self.available_sheet_tabs:
+            return
+        if not self.controller._is_valid_spreadsheet_id(self.spreadsheet_id_var.get()):
+            return
+        credentials_path = os.path.abspath(os.path.expanduser(self.service_account_path_var.get().strip()))
+        if not credentials_path or not os.path.isfile(credentials_path):
+            return
+        self._sheet_tabs_auto_loaded = True
+        self.load_google_sheet_tabs(silent=True)
 
     def _build_action_bar(self, parent: tk.Widget) -> None:
         parent.grid_columnconfigure(0, weight=1)
@@ -505,7 +619,7 @@ class SettingsPage(BasePage):
         )
 
     def _build_google_sheet_card(self, parent: tk.Widget, row: int) -> None:
-        card, body = self.build_panel_card(parent, "Google Sheets", min_height=158, level="mid")
+        card, body = self._build_auto_card(parent, "Google Sheets")
         card.grid(row=row, column=0, sticky="ew", pady=(0, SECTION_GAP))
         self._build_entry_row(body, 0, "Spreadsheet ID", self.spreadsheet_id_var)
         self._build_entry_row(body, 2, "서비스 계정 JSON 경로", self.service_account_path_var, button_text="파일 선택", button_command=self._choose_service_account_file)
@@ -514,24 +628,24 @@ class SettingsPage(BasePage):
         self.controller._mini_button(button_row, "탭 목록 불러오기", lambda: self.controller.dispatch_ui_action("설정: 탭 목록 불러오기", self.load_google_sheet_tabs, category="settings"), "#1e3350", "#294565").pack(side=tk.RIGHT)
 
     def _build_sheet_tabs_card(self, parent: tk.Widget, row: int) -> None:
-        card, body = self.build_panel_card(parent, "Sheet Tabs", min_height=240, level="mid")
+        card, body = self._build_auto_card(parent, "Sheet Tabs")
         card.grid(row=row, column=0, sticky="ew", pady=(0, SECTION_GAP))
         body.grid_columnconfigure(0, weight=1, uniform="sheet_tabs")
         body.grid_columnconfigure(1, weight=1, uniform="sheet_tabs")
         for idx, (key, label) in enumerate(self.GENERAL_TAB_FIELDS):
             col = idx % 2
             block_row = (idx // 2) * 2
-            combo = self._build_combo_field(body, block_row, col, label, self.general_tab_vars[key], values=self.available_sheet_tabs or [self.general_tab_vars[key].get().strip()])
+            combo = self._build_combo_field(body, block_row, col, label, self.general_tab_vars[key], values=self._combo_values_for(self.general_tab_vars[key].get()))
             self.sheet_comboboxes[key] = combo
 
     def _build_paths_card(self, parent: tk.Widget, row: int, column: int, *, padx: tuple[int, int]) -> None:
-        card, body = self.build_panel_card(parent, "Paths", min_height=150, level="mid")
+        card, body = self._build_auto_card(parent, "Paths")
         card.grid(row=row, column=column, sticky="ew", padx=padx)
         self._build_entry_row(body, 0, "images_dir", self.images_dir_var, button_text="폴더 선택", button_command=lambda: self._choose_directory(self.images_dir_var))
         self._build_entry_row(body, 2, "log_dir", self.log_dir_var, button_text="폴더 선택", button_command=lambda: self._choose_directory(self.log_dir_var))
 
     def _build_buyma_card(self, parent: tk.Widget, row: int, column: int, *, padx: tuple[int, int]) -> None:
-        card, body = self.build_panel_card(parent, "BUYMA Account", min_height=150, level="mid")
+        card, body = self._build_auto_card(parent, "BUYMA Account")
         card.grid(row=row, column=column, sticky="ew", padx=padx)
         body.grid_columnconfigure(0, weight=1, uniform="buyma")
         body.grid_columnconfigure(1, weight=1, uniform="buyma")
@@ -541,7 +655,7 @@ class SettingsPage(BasePage):
         self.controller._mini_button(body, "연결 테스트", lambda: self.controller.dispatch_ui_action("설정: BUYMA 연결 테스트", self.test_buyma_credentials, category="settings"), "#1e3350", "#294565").grid(row=2, column=1, sticky="e", pady=(6, 0))
 
     def _build_status_panel(self, parent: tk.Widget) -> None:
-        card, body = self.build_panel_card(parent, "연결 상태", min_height=212, level="mid")
+        card, body = self._build_auto_card(parent, "연결 상태")
         card.grid(row=0, column=0, sticky="ew", pady=(0, SECTION_GAP))
         self._build_status_row(body, 0, "Google Sheets 연결", self.connection_status_var, self.connection_color_var)
         self._build_status_row(body, 1, "권한 상태", self.permission_status_var, self.permission_color_var)
@@ -549,7 +663,7 @@ class SettingsPage(BasePage):
         tk.Label(body, textvariable=self.validation_summary_var, bg=self.controller.theme["panel"], fg=self.controller.theme["muted"], font=("Segoe UI", 8), wraplength=320, justify=tk.LEFT).grid(row=3, column=0, sticky="ew", pady=(8, 0))
 
     def _build_sheet_validation_panel(self, parent: tk.Widget) -> None:
-        card, body = self.build_panel_card(parent, "시트 탭 검증 결과", min_height=260, level="bottom")
+        card, body = self._build_auto_card(parent, "시트 탭 검증 결과")
         card.grid(row=1, column=0, sticky="nsew", pady=(0, SECTION_GAP))
         body.grid_columnconfigure(0, weight=1)
         body.grid_rowconfigure(0, weight=1)
@@ -570,14 +684,14 @@ class SettingsPage(BasePage):
         self._render_validation_rows()
 
     def _build_info_panel(self, parent: tk.Widget, *, title: str, body_rows: list[tuple[str, tk.StringVar]], row: int = 2) -> None:
-        card, body = self.build_panel_card(parent, title, min_height=150, level="mid")
+        card, body = self._build_auto_card(parent, title)
         card.grid(row=row, column=0, sticky="nsew")
         for idx, (label, var) in enumerate(body_rows):
             tk.Label(body, text=label, bg=self.controller.theme["panel"], fg=self.controller.theme["muted"], font=("Segoe UI", 8, "bold")).grid(row=idx * 2, column=0, sticky="w", pady=(0 if idx == 0 else 8, 2))
             tk.Label(body, textvariable=var, bg=self.controller.theme["panel"], fg=self.controller.theme["text"], font=("Segoe UI", 9), wraplength=320, justify=tk.LEFT).grid(row=idx * 2 + 1, column=0, sticky="w")
 
     def _build_form_card(self, parent: tk.Widget, row: int, title: str, fields: list[tuple[str, tk.StringVar]], *, columns: int = 1) -> None:
-        card, body = self.build_panel_card(parent, title, min_height=152 if columns > 1 else 168, level="mid")
+        card, body = self._build_auto_card(parent, title)
         card.grid(row=row, column=0, sticky="ew", pady=(0, SECTION_GAP))
         for col in range(columns):
             body.grid_columnconfigure(col, weight=1)
@@ -587,7 +701,7 @@ class SettingsPage(BasePage):
             self._build_inline_entry(body, block_row, col, label, variable)
 
     def _build_targets_card(self, parent: tk.Widget, row: int) -> None:
-        card, body = self.build_panel_card(parent, "크롤링 대상", min_height=190, level="mid")
+        card, body = self._build_auto_card(parent, "크롤링 대상")
         card.grid(row=row, column=0, sticky="ew", pady=(0, SECTION_GAP))
         options = [
             ("카테고리 페이지", self.crawling_vars["category_pages"]),
@@ -600,13 +714,13 @@ class SettingsPage(BasePage):
         self._build_entry_row(body, len(options), "키워드", self.crawling_vars["keyword"])
 
     def _build_toggle_card(self, parent: tk.Widget, row: int, title: str, fields: list[tuple[str, tk.BooleanVar]]) -> None:
-        card, body = self.build_panel_card(parent, title, min_height=176, level="mid")
+        card, body = self._build_auto_card(parent, title)
         card.grid(row=row, column=0, sticky="ew", pady=(0, SECTION_GAP))
         for idx, (label, variable) in enumerate(fields):
             self._build_switch(body, idx, label, variable)
 
     def _build_telegram_card(self, parent: tk.Widget, row: int) -> None:
-        card, body = self.build_panel_card(parent, "Telegram", min_height=176, level="mid")
+        card, body = self._build_auto_card(parent, "Telegram")
         card.grid(row=row, column=0, sticky="ew", pady=(0, SECTION_GAP))
         self._build_switch(body, 0, "사용 여부", self.notification_vars["telegram_enabled"])
         self._build_entry_row(body, 1, "Bot Token", self.notification_vars["telegram_bot_token"])
@@ -614,14 +728,14 @@ class SettingsPage(BasePage):
         self.controller._mini_button(body, "알림 테스트", lambda: self.controller.dispatch_ui_action("설정: Telegram 테스트", self.test_telegram_notification, category="settings"), "#1e3350", "#294565").grid(row=5, column=0, sticky="e", pady=(8, 0))
 
     def _build_email_card(self, parent: tk.Widget, row: int) -> None:
-        card, body = self.build_panel_card(parent, "이메일 알림", min_height=176, level="mid")
+        card, body = self._build_auto_card(parent, "이메일 알림")
         card.grid(row=row, column=0, sticky="ew", pady=(0, SECTION_GAP))
         self._build_switch(body, 0, "사용 여부", self.notification_vars["email_enabled"])
         self._build_entry_row(body, 1, "이메일 주소", self.notification_vars["email_address"])
         self._build_entry_row(body, 3, "비밀번호", self.notification_vars["email_password"], show="*")
 
     def _build_action_only_card(self, parent: tk.Widget, row: int, title: str, buttons: list[tuple[str, object, str, str]]) -> None:
-        card, body = self.build_panel_card(parent, title, min_height=176, level="mid")
+        card, body = self._build_auto_card(parent, title)
         card.grid(row=row, column=0, sticky="ew", pady=(0, SECTION_GAP))
         for idx, (label, callback, bg, active) in enumerate(buttons):
             self.controller._mini_button(body, label, lambda cb=callback: self.controller.dispatch_ui_action(f"설정: {label}", cb, category="settings"), bg, active).grid(row=idx, column=0, sticky="ew", pady=(0, 6 if idx < len(buttons) - 1 else 0))
@@ -647,8 +761,18 @@ class SettingsPage(BasePage):
         wrap.grid(row=row, column=column, sticky="ew", padx=(0, 8) if column == 0 else (8, 0), pady=(0, 8))
         wrap.grid_columnconfigure(0, weight=1)
         tk.Label(wrap, text=label, bg=self.controller.theme["panel"], fg=self.controller.theme["muted"], font=("Segoe UI", 8, "bold")).grid(row=0, column=0, sticky="w", pady=(0, 4))
-        combo = ttk.Combobox(wrap, textvariable=variable, values=[value for value in values if value], state="normal")
+        combo = ttk.Combobox(
+            wrap,
+            textvariable=variable,
+            values=[value for value in values if value],
+            state="readonly",
+            postcommand=self._suspend_scroll_for_dropdown,
+        )
         combo.grid(row=1, column=0, sticky="ew")
+        combo.bind("<<ComboboxSelected>>", self._resume_scroll_after_dropdown, add="+")
+        combo.bind("<FocusOut>", self._resume_scroll_after_dropdown, add="+")
+        combo.bind("<Escape>", self._resume_scroll_after_dropdown, add="+")
+        combo.bind("<Return>", self._resume_scroll_after_dropdown, add="+")
         return combo
 
     def _build_check(self, parent: tk.Widget, row: int, label: str, variable: tk.BooleanVar) -> None:
@@ -806,6 +930,7 @@ class SettingsPage(BasePage):
         self._set_bool(self.advanced_vars["ai_category"], adv_flags.get("ai_category", False))
 
         self.available_sheet_tabs = [value.get().strip() for value in self.general_tab_vars.values() if value.get().strip()]
+        self._sheet_tabs_auto_loaded = False
         self._set_pending_statuses()
         self._run_live_validation()
 
@@ -995,7 +1120,7 @@ class SettingsPage(BasePage):
         except Exception:
             return True
 
-    def load_google_sheet_tabs(self) -> bool:
+    def load_google_sheet_tabs(self, *, silent: bool = False) -> bool:
         issues = self._validate_inputs(full=False)
         if issues:
             self.validation_summary_var.set(issues[0])
@@ -1011,8 +1136,7 @@ class SettingsPage(BasePage):
             spreadsheet = service.spreadsheets().get(spreadsheetId=self.controller._normalize_spreadsheet_id(self.spreadsheet_id_var.get())).execute()
             sheets = spreadsheet.get("sheets", [])
             self.available_sheet_tabs = [str(item.get("properties", {}).get("title") or "").strip() for item in sheets if str(item.get("properties", {}).get("title") or "").strip()]
-            for combo in self.sheet_comboboxes.values():
-                combo.configure(values=self.available_sheet_tabs)
+            self._update_sheet_combobox_values()
             self.connection_color_var.set(self.controller.theme["green"])
             self.connection_status_var.set("✔ 탭 목록 로드 성공")
             self.validation_summary_var.set(f"{len(self.available_sheet_tabs)}개 탭을 불러왔습니다.")
@@ -1021,7 +1145,8 @@ class SettingsPage(BasePage):
             self.connection_color_var.set(self.controller.theme["red"])
             self.connection_status_var.set("✖ 탭 목록 로드 실패")
             self.validation_summary_var.set(f"탭 목록 로드 실패: {exc}")
-            messagebox.showerror("탭 목록 불러오기 실패", f"Google Sheets 탭 목록을 불러오지 못했습니다.\n\n{exc}")
+            if not silent:
+                messagebox.showerror("탭 목록 불러오기 실패", f"Google Sheets 탭 목록을 불러오지 못했습니다.\n\n{exc}")
             return False
 
     def test_google_sheet_connection(self) -> bool:
@@ -1041,8 +1166,7 @@ class SettingsPage(BasePage):
             sheets = spreadsheet.get("sheets", [])
             by_title = {str(item.get("properties", {}).get("title") or "").strip(): item for item in sheets}
             self.available_sheet_tabs = list(by_title.keys())
-            for combo in self.sheet_comboboxes.values():
-                combo.configure(values=self.available_sheet_tabs)
+            self._update_sheet_combobox_values()
 
             self.connection_color_var.set(self.controller.theme["green"])
             self.permission_color_var.set(self.controller.theme["green"])
