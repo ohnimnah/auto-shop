@@ -516,6 +516,8 @@ class AutoShopLauncher(tk.Tk):
     def _build_pipeline_section(self, parent: tk.Frame) -> None:
         card = self._grid_card(parent, "파이프라인 진행 현황", row=2, pady=(0, 12))
         steps = list(self.state.pipeline_steps)
+        if not steps:
+            steps = self.dashboard_data.build_pipeline_from_runtime(self.state.product_rows)
         for idx in range(len(steps)):
             card.grid_columnconfigure(idx, weight=1, uniform="pipeline")
         card.grid_rowconfigure(0, weight=1)
@@ -879,6 +881,8 @@ class AutoShopLauncher(tk.Tk):
             sticky="nsew",
             padx=(0 if col == 0 else 5, 0 if col == total - 1 else 5),
         )
+        box.grid_propagate(False)
+        box.configure(height=92)
         tk.Label(box, text=title, bg=bg, fg=accent, font=("Segoe UI", 9, "bold")).pack(anchor="w")
         self.pipeline_progress_vars[key] = tk.StringVar(value=f"{metric}    {int(ratio * 100)}%")
         self.pipeline_ratios[key] = ratio
@@ -888,13 +892,17 @@ class AutoShopLauncher(tk.Tk):
         canvas.pack(fill=tk.X)
         self.pipeline_canvas_widgets[key] = canvas
         canvas.bind("<Configure>", lambda _e, k=key: self._draw_progress(k, self.pipeline_ratios.get(k, 0.0), self.pipeline_colors.get(k, self.theme["blue"])))
-        self.after(50, lambda k=key: self._draw_progress(k, self.pipeline_ratios.get(k, 0.0), self.pipeline_colors.get(k, self.theme["blue"])))
+        canvas.bind("<Map>", lambda _e, k=key: self.after_idle(lambda: self._draw_progress(k, self.pipeline_ratios.get(k, 0.0), self.pipeline_colors.get(k, self.theme["blue"]))))
+        self.after_idle(lambda k=key: self._draw_progress(k, self.pipeline_ratios.get(k, 0.0), self.pipeline_colors.get(k, self.theme["blue"])))
 
     def _draw_progress(self, key: str, ratio: float, accent: str) -> None:
         canvas = self.pipeline_canvas_widgets.get(key)
         if not canvas or not canvas.winfo_exists():
             return
         width = max(1, canvas.winfo_width())
+        if width <= 2:
+            self.after(50, lambda: self._draw_progress(key, ratio, accent))
+            return
         canvas.delete("all")
         canvas.create_rectangle(0, 0, width, 5, fill="#21334d", outline="")
         canvas.create_rectangle(0, 0, int(width * max(0.0, min(1.0, ratio))), 5, fill=accent, outline="")
