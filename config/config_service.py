@@ -42,14 +42,28 @@ def default_config() -> dict[str, Any]:
     return {
         "spreadsheet": {
             "id": DEFAULT_SPREADSHEET_ID,
+            "credentials_path": "",
             "tabs": {
                 "product_input": DEFAULT_SHEET_NAME,
                 "category": "카테고리",
                 "candidate": "후보 상품",
                 "scout_queue": "목록 페이지 url",
                 "log": "log",
+                "category_mapping_candidates": "category_mapping_candidates",
             },
-        }
+        },
+        "paths": {
+            "images_dir": "",
+            "log_dir": "",
+        },
+        "buyma": {
+            "email": "",
+        },
+        "runtime": {
+            "max_workers": 1,
+            "retry_count": 3,
+            "timeout_seconds": 120,
+        },
     }
 
 
@@ -91,12 +105,18 @@ def _legacy_to_config(legacy: dict[str, Any]) -> dict[str, Any]:
         "candidate": str(legacy.get("candidate_sheet_name") or "").strip(),
         "scout_queue": str(legacy.get("queue_sheet_name") or "").strip(),
         "log": str(legacy.get("log_sheet_name") or "").strip(),
+        "category_mapping_candidates": str(legacy.get("category_mapping_candidates_sheet_name") or "").strip(),
     }
     return {
         "spreadsheet": {
             "id": str(legacy.get("spreadsheet_id") or "").strip(),
+            "credentials_path": str(legacy.get("credentials_path") or "").strip(),
             "tabs": {key: value for key, value in tabs.items() if value},
-        }
+        },
+        "paths": {
+            "images_dir": str(legacy.get("images_dir") or "").strip(),
+            "log_dir": str(legacy.get("log_dir") or "").strip(),
+        },
     }
 
 
@@ -123,3 +143,12 @@ def load_config(profile_name: str = DEFAULT_PROFILE_NAME, *, create_if_missing: 
             pass
 
     return config
+
+
+def save_config(profile_name: str, config: dict[str, Any]) -> str:
+    profile = _sanitize_profile_name(profile_name)
+    config_path = get_profile_config_path(profile)
+    os.makedirs(get_profile_config_dir(profile), exist_ok=True)
+    with open(config_path, "w", encoding="utf-8") as file:
+        json.dump(config, file, ensure_ascii=False, indent=2)
+    return config_path
