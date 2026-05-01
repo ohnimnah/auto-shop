@@ -17,6 +17,7 @@ from tkinter import ttk
 from core.action_runner import ActionRunner
 from core.command_builder import CommandBuilder
 from core.process_manager import ProcessManager, build_default_env
+from config.config_service import load_config as load_profile_config
 from services.buyma_service import BuymaCredentialService
 from services.dashboard_data_service import DashboardDataService
 from services.log_store import FileLogWriter
@@ -129,6 +130,7 @@ class AutoShopLauncher(tk.Tk):
         self.log_queue: queue.Queue[LogEvent] = queue.Queue()
         self.state_queue: queue.Queue[AppStateChange] = queue.Queue()
         self.profile_name = get_saved_profile_name()
+        self.profile_config = load_profile_config(self.profile_name, create_if_missing=True)
         self.data_dir = get_default_data_dir(self.profile_name)
         self.sheet_config_path = os.path.join(self.data_dir, "sheets_config.json")
         self.state = AppState()

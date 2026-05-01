@@ -48,6 +48,7 @@ from selenium.webdriver.common.keys import Keys
 from google.oauth2.service_account import Credentials
 from googleapiclient.discovery import build
 from category_correction import correct_buyma_category
+from config.config_service import load_config as load_profile_config
 from marketplace.common import sheet_source as common_sheet_source_mod
 from marketplace.common.runtime import get_runtime_data_dir as common_get_runtime_data_dir
 from marketplace.buyma import category as buyma_category_mod
@@ -191,6 +192,19 @@ def _load_sheet_runtime_config() -> None:
             UPLOAD_MAX_DATA_COLUMN = max_column
     except Exception as e:
         print(f"시트 설정 로드 실패: {e}")
+
+    profile_name = (os.environ.get("AUTO_SHOP_PROFILE") or "default").strip() or "default"
+    profile_config = load_profile_config(profile_name, create_if_missing=True)
+    spreadsheet_cfg = profile_config.get("spreadsheet") or {}
+    tabs_cfg = spreadsheet_cfg.get("tabs") or {}
+
+    config_spreadsheet_id = common_sheet_source_mod.extract_spreadsheet_id(spreadsheet_cfg.get("id") or "")
+    if config_spreadsheet_id:
+        SPREADSHEET_ID = config_spreadsheet_id
+
+    product_input_sheet = str(tabs_cfg.get("product_input") or "").strip()
+    if product_input_sheet:
+        SHEET_NAME = product_input_sheet
 
 
 _load_sheet_runtime_config()

@@ -67,6 +67,7 @@ from config.app_config import (
     get_default_data_dir,
     get_default_images_dir,
 )
+from config.config_service import load_config as load_profile_config
 from constants.status import (
     STATUS_CRAWLED,
     STATUS_CRAWLING,
@@ -215,6 +216,32 @@ def _load_sheet_runtime_config() -> None:
             ROW_START = rstart
     except Exception as e:
         print(f"시트 설정 로드 실패: {e}")
+
+    profile_name = (os.environ.get("AUTO_SHOP_PROFILE") or "default").strip() or "default"
+    profile_config = load_profile_config(profile_name, create_if_missing=True)
+    spreadsheet_cfg = profile_config.get("spreadsheet") or {}
+    tabs_cfg = spreadsheet_cfg.get("tabs") or {}
+
+    config_spreadsheet_id = str(spreadsheet_cfg.get("id") or "").strip()
+    if config_spreadsheet_id:
+        sid = config_spreadsheet_id
+        m = re.search(r'/spreadsheets/d/([a-zA-Z0-9-_]+)', sid)
+        if m:
+            sid = m.group(1)
+        else:
+            m2 = re.search(r'(?:^|/)d/([a-zA-Z0-9-_]+)', sid)
+            if m2:
+                sid = m2.group(1)
+        if sid:
+            SPREADSHEET_ID = sid
+
+    product_input_sheet = str(tabs_cfg.get("product_input") or "").strip()
+    if product_input_sheet:
+        SHEET_NAME = product_input_sheet
+
+    scout_queue_sheet = str(tabs_cfg.get("scout_queue") or "").strip()
+    if scout_queue_sheet:
+        LISTING_QUEUE_SHEET_NAME = scout_queue_sheet
 
 
 _load_sheet_runtime_config()

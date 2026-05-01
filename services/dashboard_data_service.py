@@ -9,6 +9,7 @@ from datetime import datetime
 from functools import lru_cache
 from typing import Iterable
 
+from config.config_service import load_config as load_profile_config
 from core.process_manager import ProcessManager
 from services.pipeline_service import LauncherPipelineService
 from services.system_checker import SystemChecker
@@ -184,6 +185,8 @@ class DashboardDataService:
         profile_name = os.path.basename(self.data_dir.rstrip(os.sep))
         if profile_name == ".auto_shop":
             profile_name = "default"
+        profile_config = load_profile_config(profile_name)
+        tabs_cfg = ((profile_config.get("spreadsheet") or {}).get("tabs") or {})
         return {
             "user_name": profile_name,
             "profile_name": profile_name,
@@ -191,8 +194,8 @@ class DashboardDataService:
             "log_level": "INFO",
             "sheet_enabled": bool(self._has_sheet_source()),
             "spreadsheet_id": self.system_checker.normalize_spreadsheet_id(config.get("spreadsheet_id", "")),
-            "sheet_name": (config.get("sheet_name") or "").strip(),
-            "log_sheet_name": (config.get("log_sheet_name") or "log").strip(),
+            "sheet_name": str((tabs_cfg.get("product_input") or config.get("sheet_name") or "")).strip(),
+            "log_sheet_name": str((tabs_cfg.get("log") or config.get("log_sheet_name") or "log")).strip(),
             "images_dir": self._safe_path(config.get("images_dir") or ""),
             "log_dir": self._safe_path(os.path.join(self.data_dir, "logs")),
             "buyma_email": self.system_checker.load_buyma_email(),
