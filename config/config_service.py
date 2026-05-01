@@ -64,6 +64,94 @@ def default_config() -> dict[str, Any]:
             "retry_count": 3,
             "timeout_seconds": 120,
         },
+        "crawling": {
+            "base": {
+                "max_pages": 5,
+                "delay_seconds": 3,
+                "retry_count": 3,
+                "timeout": 30,
+            },
+            "targets": {
+                "category_pages": True,
+                "product_detail_pages": True,
+                "brand_pages": False,
+                "keyword_search": False,
+                "keyword": "",
+            },
+            "filters": {
+                "min_price": 0,
+                "max_price": 10000000,
+                "min_reviews": 0,
+                "min_sales": 0,
+            },
+            "options": {
+                "download_images": True,
+                "generate_thumbnails": True,
+                "save_html": False,
+                "dedupe": True,
+            },
+        },
+        "upload": {
+            "base": {
+                "batch_size": 1,
+                "max_workers": 1,
+                "retry_count": 3,
+            },
+            "category_mapping": {
+                "source_category": "",
+                "target_buyma_category": "",
+            },
+            "price": {
+                "markup_percent": 0,
+                "minimum_margin": 0,
+                "rounding_rule": "100엔",
+            },
+            "options": {
+                "validate_before_upload": True,
+                "retry_failed": True,
+                "save_logs": True,
+                "auto_price": True,
+            },
+        },
+        "notification": {
+            "telegram": {
+                "enabled": False,
+                "bot_token": "",
+                "chat_id": "",
+            },
+            "events": {
+                "job_start": True,
+                "job_complete": True,
+                "job_error": True,
+                "important_only": False,
+            },
+            "email": {
+                "enabled": False,
+                "address": "",
+                "password": "",
+            },
+            "schedule": {
+                "start_time": "09:00",
+                "end_time": "22:00",
+                "timezone": "Asia/Seoul",
+            },
+        },
+        "advanced": {
+            "system_paths": {
+                "python_path": "",
+                "chrome_path": "",
+            },
+            "execution": {
+                "max_workers": 1,
+                "cpu_limit": 80,
+                "memory_limit": 2048,
+            },
+            "feature_flags": {
+                "async_mode": False,
+                "smart_retry": True,
+                "ai_category": False,
+            },
+        },
     }
 
 
