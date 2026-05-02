@@ -16,6 +16,16 @@ def normalize_actual_size_for_upload(value: str) -> str:
     return text
 
 
+def is_blank_or_zero_measure_value(value: str) -> bool:
+    text = (value or "").strip()
+    if not text:
+        return True
+    try:
+        return float(text.replace(",", "")) == 0.0
+    except Exception:
+        return False
+
+
 def extract_actual_measure_map(actual_size_text: str) -> Dict[str, str]:
     if not actual_size_text:
         return {}
@@ -25,7 +35,7 @@ def extract_actual_measure_map(actual_size_text: str) -> Dict[str, str]:
     for key, val in re.findall(r"([가-힣A-Za-z ]{1,20})\s*[:：]?\s*(-?\d+(?:\.\d+)?)", normalized):
         clean_key = key.strip()
         clean_val = val.strip()
-        if clean_key and clean_val and clean_key not in pairs:
+        if clean_key and not is_blank_or_zero_measure_value(clean_val) and clean_key not in pairs:
             pairs[clean_key] = clean_val
     return pairs
 
@@ -47,7 +57,10 @@ def extract_actual_size_rows(actual_size_text: str) -> Dict[str, Dict[str, str]]
             measure_match = re.match(r"^(.+?)\s+(-?\d+(?:\.\d+)?)$", part)
             if not measure_match:
                 continue
-            measure_map[measure_match.group(1).strip()] = measure_match.group(2).strip()
+            key = measure_match.group(1).strip()
+            value = measure_match.group(2).strip()
+            if key and not is_blank_or_zero_measure_value(value):
+                measure_map[key] = value
         if measure_map:
             rows[size_name] = measure_map
     return rows
@@ -60,9 +73,10 @@ MEASURE_ALIASES: Dict[str, List[str]] = {
     "소매길이": ["소매길이", "袖丈", "裄丈", "sleeve"],
     "허리단면": ["허리단면", "허리", "ウエスト", "胴囲", "waist"],
     "엉덩이단면": ["엉덩이단면", "엉덩이", "ヒップ", "hip"],
-    "허벅지단면": ["허벅지단면", "허벅지", "ワタリ", "もも", "thigh"],
+    "허벅지단면": ["허벅지단면", "허벅지", "ワタリ", "もも", "もも周り", "thigh"],
     "밑위": ["밑위", "股上", "rise"],
-    "밑단단면": ["밑단단면", "밑단", "裾幅", "hem"],
+    "밑아래": ["밑아래", "안쪽기장", "인심", "股下", "inseam"],
+    "밑단단면": ["밑단단면", "밑단", "裾幅", "すそ", "すそ周り", "hem"],
     "발길이": ["발길이", "足長", "アウトソール"],
     "발볼": ["발볼", "足幅", "ワイズ", "幅"],
     "굽높이": ["굽높이", "힐", "ヒール高", "heel"],
@@ -77,15 +91,19 @@ def pick_measure_value_by_label(label_text: str, measure_map: Dict[str, str]) ->
         return ""
 
     for key, value in measure_map.items():
-        if key and key.lower() in lowered_label:
+        if key and key.lower() in lowered_label and not is_blank_or_zero_measure_value(value):
             return value
 
     for base_key, aliases in MEASURE_ALIASES.items():
         if not any(alias.lower() in lowered_label for alias in aliases):
             continue
         if base_key in measure_map:
-            return measure_map[base_key]
+            value = measure_map[base_key]
+            if not is_blank_or_zero_measure_value(value):
+                return value
         for alias in aliases:
             if alias in measure_map:
-                return measure_map[alias]
+                value = measure_map[alias]
+                if not is_blank_or_zero_measure_value(value):
+                    return value
     return ""

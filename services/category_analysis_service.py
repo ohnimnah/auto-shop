@@ -18,7 +18,7 @@ STOPWORDS = {
     "black", "white", "ivory", "navy", "blue", "red",
     "new", "official", "authentic", "women", "men",
     "무료배송", "정품", "공식",
-    "value", "카인다미", "kindame", "free", "volume", "hip",
+    "value", "free", "volume", "hip",
 }
 CATEGORY_HINTS = {
     "dress": ("원피스", StandardCategory.DRESS),

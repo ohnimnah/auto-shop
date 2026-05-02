@@ -46,6 +46,7 @@ class ClassificationRule:
 CATEGORY_FALLBACK_RULES: List[Tuple[str, List[str], StandardCategory]] = [
     ("long_sleeve_tshirt", ["긴팔", "long sleeve", "ls tee"], StandardCategory.TOP_LONG_SLEEVE),
     ("short_sleeve_tshirt", ["반팔", "short sleeve", "t-shirt", "tee"], StandardCategory.TOP_TSHIRT),
+    ("shorts", ["숏팬츠", "반바지", "shorts", "short pants", "half pants"], StandardCategory.PANTS_SHORTS),
     ("denim_pants", ["청바지", "denim", "jeans"], StandardCategory.PANTS_DENIM),
     ("jogger_pants", ["조거", "jogger", "sweatpants", "track pants"], StandardCategory.PANTS_JOGGER),
     ("sneakers", ["sneakers", "sneaker", "운동화", "스니커즈"], StandardCategory.SHOES_SNEAKER),
@@ -68,7 +69,6 @@ CATEGORY_FALLBACK_RULES: List[Tuple[str, List[str], StandardCategory]] = [
     ("homewear", ["홈웨어", "homewear", "lounge wear", "loungewear", "잠옷", "파자마", "pajama"], StandardCategory.HOME_PAJAMA),
     ("innerwear", ["이너", "이너프리", "inner", "innerwear", "underwear", "속옷", "속바지", "브라", "bra", "팬티", "panty", "panties", "padded"], StandardCategory.INNER_UNDERWEAR),
     ("seamless_innerwear", ["심리스", "seamless", "seamless inner", "심리스 이너"], StandardCategory.INNER_UNDERWEAR),
-    ("shapewear", ["보정", "보정속옷", "골반뽕", "힙업", "볼륨업", "volume up", "hip padded", "shaper", "shapewear"], StandardCategory.INNER_UNDERWEAR),
     ("leggings", ["레깅스", "leggings", "legging"], StandardCategory.PANTS_LEGGINGS),
     ("loafer", ["loafer"], StandardCategory.SHOES_LOAFER),
 ]
@@ -81,6 +81,13 @@ FORCE_CATEGORY_MAP: Dict[Tuple[str, ...], StandardCategory] = {
     ("홈웨어", "homewear", "잠옷", "파자마", "pajama", "loungewear", "lounge wear"): StandardCategory.HOME_PAJAMA,
     ("인도어화", "스포츠화", "코트화", "풋살화", "배드민턴화", "핸드볼화", "실내화"): StandardCategory.SHOES_SNEAKER,
 }
+
+MUSINSA_CATEGORY_OVERRIDES: List[Tuple[Tuple[str, ...], StandardCategory]] = [
+    (("바지", "반바지"), StandardCategory.PANTS_SHORTS),
+    (("팬츠", "반바지"), StandardCategory.PANTS_SHORTS),
+    (("bottom", "short"), StandardCategory.PANTS_SHORTS),
+    (("pants", "short"), StandardCategory.PANTS_SHORTS),
+]
 
 
 def _normalize_text(text: str) -> str:
@@ -117,6 +124,15 @@ def _contains_keyword(text: str, keyword: str) -> bool:
     return any(compact_keyword in token.replace(" ", "") for token in tokens if token)
 
 
+def _resolve_from_musinsa_category_text(text: str) -> Optional[StandardCategory]:
+    normalized = _normalize_text(text)
+    compact = normalized.replace(" ", "")
+    for keywords, category in MUSINSA_CATEGORY_OVERRIDES:
+        if all(_contains_keyword(normalized, keyword) or keyword.replace(" ", "") in compact for keyword in keywords):
+            return category
+    return None
+
+
 def fallback_category(name: str, brand: str) -> str:
     clean_name = normalize_product_name(name)
     text = _normalize_text(f"{clean_name} {brand}")
@@ -135,6 +151,13 @@ def classify_category_with_reason(
     force_text = f"{clean_name} {(brand or '').lower()}".strip()
     result: StandardCategory | None = None
     reason = "unresolved"
+
+    # If the caller already resolved a concrete category from sheet/mapping,
+    # keep it as highest priority to avoid accidental force-map overrides
+    # (e.g. shorts being flipped to homewear by noisy keywords).
+    if existing_category is not None and existing_category != StandardCategory.ETC:
+        return existing_category, "existing_category"
+
     for keywords, category in FORCE_CATEGORY_MAP.items():
         if any(_contains_keyword(force_text, keyword) for keyword in keywords):
             result = category
@@ -406,6 +429,19 @@ def classify_standard_category_from_sheet(
     sheet_name: str = DEFAULT_CLASSIFIER_SHEET,
 ) -> Tuple[Optional[StandardCategory], Dict[str, str]]:
     """Return (standard_category_or_none, debug_meta)."""
+    musinsa_category_text = build_combined_text(
+        musinsa_large or "",
+        musinsa_middle or "",
+        musinsa_small or "",
+        "",
+    )
+    category_override = _resolve_from_musinsa_category_text(musinsa_category_text)
+    if category_override is not None:
+        return category_override, {
+            "reason": "musinsa_category_override",
+            "standard_category": category_override.value,
+        }
+
     spreadsheet_id = _resolve_spreadsheet_id_from_runtime()
     if not spreadsheet_id:
         fallback_std = classify_category(product_name, brand)

@@ -1092,6 +1092,15 @@ def fill_size_edit_details(
     pick_measure_value_by_label_fn,
 ) -> int:
     """Fill BUYMA size edit dialogs with parsed actual-size measurements."""
+    def _has_fillable_measure_value(value: str) -> bool:
+        text = (value or "").strip()
+        if not text:
+            return False
+        try:
+            return float(text.replace(",", "")) != 0.0
+        except Exception:
+            return True
+
     all_rows = extract_actual_size_rows_fn(actual_size_text)
     fallback_pairs = extract_actual_measure_map_fn(actual_size_text)
     if not all_rows and not fallback_pairs:
@@ -1264,7 +1273,7 @@ def fill_size_edit_details(
                         if not inputs:
                             continue
                         target = next((i for i in inputs if i.get_attribute("disabled") is None), None)
-                        if not target or not picked_value:
+                        if not target or not _has_fillable_measure_value(picked_value):
                             continue
                         target_id = target.get_attribute("id") or target.get_attribute("name") or str(id(target))
                         if target_id in used_inputs:
@@ -1279,23 +1288,7 @@ def fill_size_edit_details(
                         continue
 
                 if local_filled == 0 and selected_pairs:
-                    try:
-                        values_in_order = list(selected_pairs.values())
-                        if not visible_inputs:
-                            visible_inputs = [
-                                i for i in row_scope.find_elements(By.CSS_SELECTOR, "input[type='text'], input[type='number'], textarea")
-                                if i.get_attribute("disabled") is None
-                            ]
-                        for idx, inp in enumerate(visible_inputs):
-                            if idx >= len(values_in_order):
-                                break
-                            scroll_and_click(driver, inp)
-                            inp.send_keys(Keys.CONTROL, "a")
-                            inp.send_keys(Keys.BACKSPACE)
-                            inp.send_keys(values_in_order[idx])
-                            local_filled += 1
-                    except Exception:
-                        pass
+                    print("  [actual-size] label matching failed; skip order-based numeric fill")
 
                 if local_filled > 0:
                     filled_count += local_filled
