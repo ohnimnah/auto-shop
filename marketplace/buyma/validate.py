@@ -20,6 +20,13 @@ def is_blank_or_zero_measure_value(value: str) -> bool:
     text = (value or "").strip()
     if not text:
         return True
+    return is_zero_measure_value(text)
+
+
+def is_zero_measure_value(value: str) -> bool:
+    text = (value or "").strip()
+    if not text:
+        return False
     try:
         return float(text.replace(",", "")) == 0.0
     except Exception:
@@ -32,10 +39,11 @@ def extract_actual_measure_map(actual_size_text: str) -> Dict[str, str]:
 
     pairs: Dict[str, str] = {}
     normalized = actual_size_text.replace("\n", " ").replace("\r", " ")
-    for key, val in re.findall(r"([가-힣A-Za-z ]{1,20})\s*[:：]?\s*(-?\d+(?:\.\d+)?)", normalized):
+    label_pattern = r"([가-힣A-Za-z一-龯ぁ-んァ-ンー\s]{1,30})"
+    for key, val in re.findall(label_pattern + r"\s*[:：]?\s*(-?\d+(?:\.\d+)?)", normalized):
         clean_key = key.strip()
         clean_val = val.strip()
-        if clean_key and not is_blank_or_zero_measure_value(clean_val) and clean_key not in pairs:
+        if clean_key and clean_val and clean_key not in pairs:
             pairs[clean_key] = clean_val
     return pairs
 
@@ -59,7 +67,7 @@ def extract_actual_size_rows(actual_size_text: str) -> Dict[str, Dict[str, str]]
                 continue
             key = measure_match.group(1).strip()
             value = measure_match.group(2).strip()
-            if key and not is_blank_or_zero_measure_value(value):
+            if key and value:
                 measure_map[key] = value
         if measure_map:
             rows[size_name] = measure_map
@@ -67,8 +75,8 @@ def extract_actual_size_rows(actual_size_text: str) -> Dict[str, Dict[str, str]]
 
 
 MEASURE_ALIASES: Dict[str, List[str]] = {
-    "총장": ["총장", "着丈", "総丈", "全長", "length"],
-    "어깨너비": ["어깨너비", "肩幅", "shoulder"],
+    "총장": ["총장", "기장", "着丈", "総丈", "全長", "length"],
+    "어깨너비": ["어깨너비", "어깨", "肩幅", "shoulder"],
     "가슴단면": ["가슴단면", "가슴", "身幅", "胸囲", "バスト", "chest"],
     "소매길이": ["소매길이", "袖丈", "裄丈", "sleeve"],
     "허리단면": ["허리단면", "허리", "ウエスト", "胴囲", "waist"],
@@ -86,24 +94,36 @@ MEASURE_ALIASES: Dict[str, List[str]] = {
 def pick_measure_value_by_label(label_text: str, measure_map: Dict[str, str]) -> str:
     if not measure_map:
         return ""
-    lowered_label = (label_text or "").strip().lower()
-    if not lowered_label:
+
+    def _norm(value: str) -> str:
+        return re.sub(r"\s+", "", (value or "").strip().lower())
+
+    normalized_label = _norm(label_text)
+    if not normalized_label:
+        return ""
+
+    def _value_for_aliases(aliases: List[str]) -> str:
+        normalized_aliases = [_norm(alias) for alias in aliases if _norm(alias)]
+        for key, value in measure_map.items():
+            if not (value or "").strip():
+                continue
+            normalized_key = _norm(key)
+            if any(alias in normalized_key or normalized_key in alias for alias in normalized_aliases):
+                return value
         return ""
 
     for key, value in measure_map.items():
-        if key and key.lower() in lowered_label and not is_blank_or_zero_measure_value(value):
+        if _norm(key) in normalized_label and (value or "").strip():
             return value
 
     for base_key, aliases in MEASURE_ALIASES.items():
-        if not any(alias.lower() in lowered_label for alias in aliases):
+        normalized_aliases = [_norm(alias) for alias in aliases if _norm(alias)]
+
+        if not any(alias in normalized_label or normalized_label in alias for alias in normalized_aliases):
             continue
-        if base_key in measure_map:
-            value = measure_map[base_key]
-            if not is_blank_or_zero_measure_value(value):
-                return value
-        for alias in aliases:
-            if alias in measure_map:
-                value = measure_map[alias]
-                if not is_blank_or_zero_measure_value(value):
-                    return value
+
+        value = _value_for_aliases([base_key, *aliases])
+        if value:
+            return value
+
     return ""

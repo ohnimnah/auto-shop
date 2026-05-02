@@ -1101,6 +1101,32 @@ def fill_size_edit_details(
         except Exception:
             return True
 
+    def _is_zero_measure_value(value: str) -> bool:
+        text = (value or "").strip()
+        if not text:
+            return False
+        try:
+            return float(text.replace(",", "")) == 0.0
+        except Exception:
+            return False
+
+    def _normalize_measure_label(value: str) -> str:
+        return re.sub(r"\s+", "", (value or "").strip().lower())
+
+    def _safe_measure_log(value) -> str:
+        return str(value).encode("ascii", "backslashreplace").decode("ascii")
+
+    def _log_measure(label: str, selected_pairs: dict, matched: str, skip: str = "") -> None:
+        keys = list((selected_pairs or {}).keys())
+        message = (
+            f"  [measure] label={_safe_measure_log(label)} "
+            f"normalized={_safe_measure_log(_normalize_measure_label(label))} "
+            f"keys={_safe_measure_log(keys)} matched={_safe_measure_log(matched or '')}"
+        )
+        if skip:
+            message += f" skip={skip}"
+        print(message)
+
     all_rows = extract_actual_size_rows_fn(actual_size_text)
     fallback_pairs = extract_actual_measure_map_fn(actual_size_text)
     if not all_rows and not fallback_pairs:
@@ -1183,7 +1209,14 @@ def fill_size_edit_details(
 
                 if not current_size_key and btn_idx < len(ordered_size_keys):
                     current_size_key = ordered_size_keys[btn_idx]
-                selected_pairs = all_rows.get(current_size_key) or (next(iter(all_rows.values())) if all_rows else fallback_pairs)
+                    print(f"  [actual-size] size key fallback by row index: '{current_size_key}'")
+                selected_pairs = all_rows.get(current_size_key)
+                if not selected_pairs and all_rows:
+                    first_key = next(iter(all_rows.keys()))
+                    selected_pairs = all_rows[first_key]
+                    print(f"  [actual-size] size key fallback to first row: '{first_key}'")
+                if not selected_pairs:
+                    selected_pairs = fallback_pairs
                 print(f"  [actual-size] open edit: size_key='{current_size_key or 'N/A'}' pairs={len(selected_pairs or {})}")
                 before_handles = set(driver.window_handles)
                 before_modal_count = len(driver.find_elements(By.CSS_SELECTOR, "[role='dialog'], .ReactModal__Content, .bmm-c-modal"))
@@ -1260,7 +1293,11 @@ def fill_size_edit_details(
                         pass
                 print(f"  [actual-size] dialog inputs: {len(visible_inputs)}")
                 row_scope = driver if active_frame is not None else dialog
-                rows = row_scope.find_elements(By.CSS_SELECTOR, "tr, .bmm-c-field, .bmm-c-form-table__table tbody tr")
+                rows = row_scope.find_elements(
+                    By.CSS_SELECTOR,
+                    "tr, .bmm-c-field, .bmm-c-form-table__table tbody tr, .sell-size-detail-form__item",
+                )
+                print(f"  [actual-size] label rows: {len(rows)}")
                 local_filled = 0
                 used_inputs = set()
                 for row in rows:
@@ -1271,13 +1308,23 @@ def fill_size_edit_details(
                         picked_value = pick_measure_value_by_label_fn(label, selected_pairs)
                         inputs = row.find_elements(By.CSS_SELECTOR, "input[type='text'], input[type='number'], textarea")
                         if not inputs:
+                            _log_measure(label, selected_pairs, picked_value, "no_input")
                             continue
                         target = next((i for i in inputs if i.get_attribute("disabled") is None), None)
-                        if not target or not _has_fillable_measure_value(picked_value):
+                        if not target:
+                            _log_measure(label, selected_pairs, picked_value, "no_target")
+                            continue
+                        if picked_value is None or str(picked_value).strip() == "":
+                            _log_measure(label, selected_pairs, "", "no_match")
+                            continue
+                        if _is_zero_measure_value(picked_value):
+                            _log_measure(label, selected_pairs, picked_value, "zero_skip")
                             continue
                         target_id = target.get_attribute("id") or target.get_attribute("name") or str(id(target))
                         if target_id in used_inputs:
+                            _log_measure(label, selected_pairs, picked_value, "already_used")
                             continue
+                        _log_measure(label, selected_pairs, picked_value)
                         scroll_and_click(driver, target)
                         target.send_keys(Keys.CONTROL, "a")
                         target.send_keys(Keys.BACKSPACE)
