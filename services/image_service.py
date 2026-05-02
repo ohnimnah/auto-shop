@@ -13,6 +13,8 @@ from bs4 import BeautifulSoup
 from config.app_config import BRAND_COLUMN, BRAND_EN_COLUMN
 from services.crawler_service import normalize_image_source as svc_normalize_image_source
 
+DEFAULT_THUMBNAIL_FOOTER_SUFFIX = "angduss k-closet"
+
 
 def sanitize_path_component(value: str) -> str:
     """Sanitize filename/foldername component."""
@@ -39,6 +41,42 @@ def build_thumbnail_brand(existing_values: Dict[str, str]) -> str:
     return brand or "BRAND"
 
 
+def get_thumbnail_footer_suffix() -> str:
+    """Return thumbnail footer suffix from env/config, or fallback default."""
+    env_value = (os.environ.get("AUTO_SHOP_THUMBNAIL_FOOTER_SUFFIX") or "").strip()
+    if env_value:
+        return env_value
+
+    env_data_dir = (os.environ.get("AUTO_SHOP_DATA_DIR") or "").strip()
+    if env_data_dir:
+        data_dir = os.path.abspath(os.path.expanduser(env_data_dir))
+    else:
+        local_app_data = os.environ.get("LOCALAPPDATA", "").strip()
+        if local_app_data:
+            data_dir = os.path.join(local_app_data, "auto_shop")
+        else:
+            data_dir = os.path.join(os.path.expanduser("~"), ".auto_shop")
+    cfg_path = os.path.join(data_dir, "sheets_config.json")
+    try:
+        if os.path.exists(cfg_path):
+            import json
+
+            with open(cfg_path, "r", encoding="utf-8") as f:
+                cfg = json.load(f)
+            if isinstance(cfg, dict):
+                configured = (cfg.get("thumbnail_footer_suffix") or "").strip()
+                if configured:
+                    return configured
+    except Exception:
+        pass
+    return DEFAULT_THUMBNAIL_FOOTER_SUFFIX
+
+
+def compose_thumbnail_footer(brand: str) -> str:
+    suffix = get_thumbnail_footer_suffix()
+    return f"{brand} / {suffix}"
+
+
 def create_thumbnail_for_folder(folder_path: str, brand: str) -> bool:
     """Create thumbnail for a folder by running make_thumbnails.py."""
     folder = os.path.abspath(os.path.expanduser(folder_path))
@@ -47,7 +85,7 @@ def create_thumbnail_for_folder(folder_path: str, brand: str) -> bool:
         return False
 
     style = "split"
-    footer = f"{brand} / angduss k-closet"
+    footer = compose_thumbnail_footer(brand)
     project_root = os.path.dirname(os.path.dirname(__file__))
     thumbnail_script_path = os.path.join(project_root, "make_thumbnails.py")
     command = [

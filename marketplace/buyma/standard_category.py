@@ -118,6 +118,7 @@ MIDDLE_BAGS_WOMEN = "バッグ・カバン"
 MIDDLE_BAGS_MEN = "バッグ・カバン"
 MIDDLE_ACCESSORIES_WOMEN = "ファッション雑貨・小物"
 MIDDLE_ACCESSORIES_MEN = "ファッション雑貨・小物"
+MIDDLE_HATS = "帽子"
 MIDDLE_WATCH = "腕時計"
 
 
@@ -175,9 +176,9 @@ STANDARD_CATEGORY_SPECS = {
     StandardCategory.BAG_BACKPACK: StandardCategorySpec(StandardCategory.BAG_BACKPACK, MIDDLE_BAGS_WOMEN, MIDDLE_BAGS_MEN, "バックパック・リュック", ("백팩", "리ュック", "backpack", "rucksack")),
     StandardCategory.BAG_CLUTCH: StandardCategorySpec(StandardCategory.BAG_CLUTCH, MIDDLE_BAGS_WOMEN, MIDDLE_BAGS_MEN, "クラッチバッグ", ("클러치", "clutch")),
     StandardCategory.BAG_WALLET: StandardCategorySpec(StandardCategory.BAG_WALLET, "財布・小物", "財布・雑貨", "財布・コインケース", ("지갑", "wallet", "card holder")),
-    StandardCategory.ACC_CAP: StandardCategorySpec(StandardCategory.ACC_CAP, MIDDLE_ACCESSORIES_WOMEN, MIDDLE_ACCESSORIES_MEN, "キャップ", ("캡", "볼캡", "cap", "baseball cap")),
-    StandardCategory.ACC_HAT: StandardCategorySpec(StandardCategory.ACC_HAT, MIDDLE_ACCESSORIES_WOMEN, MIDDLE_ACCESSORIES_MEN, "ハット", ("모자", "버킷햇", "hat", "bucket hat")),
-    StandardCategory.ACC_BEANIE: StandardCategorySpec(StandardCategory.ACC_BEANIE, MIDDLE_ACCESSORIES_WOMEN, MIDDLE_ACCESSORIES_MEN, "ニットキャップ・ビーニー", ("비니", "beanie")),
+    StandardCategory.ACC_CAP: StandardCategorySpec(StandardCategory.ACC_CAP, MIDDLE_HATS, MIDDLE_HATS, "キャップ", ("캡", "볼캡", "cap", "baseball cap")),
+    StandardCategory.ACC_HAT: StandardCategorySpec(StandardCategory.ACC_HAT, MIDDLE_HATS, MIDDLE_HATS, "ハット", ("모자", "버킷햇", "hat", "bucket hat")),
+    StandardCategory.ACC_BEANIE: StandardCategorySpec(StandardCategory.ACC_BEANIE, MIDDLE_HATS, MIDDLE_HATS, "ニットキャップ・ビーニー", ("비니", "beanie")),
     StandardCategory.ACC_BELT: StandardCategorySpec(StandardCategory.ACC_BELT, MIDDLE_ACCESSORIES_WOMEN, MIDDLE_ACCESSORIES_MEN, "ベルト", ("벨트", "belt")),
     StandardCategory.ACC_SCARF: StandardCategorySpec(StandardCategory.ACC_SCARF, MIDDLE_ACCESSORIES_WOMEN, MIDDLE_ACCESSORIES_MEN, "マフラー・ストール", ("머플러", "스카프", "scarf", "muffler")),
     StandardCategory.ACC_JEWELRY: StandardCategorySpec(StandardCategory.ACC_JEWELRY, "アクセサリー", "アクセサリー", "", ("목걸이", "반지", "귀걸이", "팔찌", "necklace", "ring", "earring", "bracelet")),

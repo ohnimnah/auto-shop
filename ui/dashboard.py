@@ -38,6 +38,7 @@ from ui.theme import CONTENT_PAD_X, CONTENT_PAD_Y, KPI_CARD_HEIGHT
 SCRIPT_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 DEFAULT_PROFILE_NAME = "default"
 PROFILE_CONFIG_FILENAME = "launcher_profile.json"
+DEFAULT_THUMBNAIL_FOOTER_SUFFIX = "angduss k-closet"
 
 
 def resolve_python_executable() -> str:
@@ -1904,6 +1905,11 @@ class AutoShopLauncher(tk.Tk):
             messagebox.showerror("저장 실패", f"시트 설정 저장 실패: {e}")
             return False
 
+    def _get_thumbnail_footer_suffix(self) -> str:
+        cfg = self._load_sheet_config()
+        configured = (cfg.get("thumbnail_footer_suffix") or "").strip()
+        return configured or DEFAULT_THUMBNAIL_FOOTER_SUFFIX
+
     def configure_images_directory(self) -> bool:
         current_dir = self._get_configured_images_dir()
         selected_dir = filedialog.askdirectory(
@@ -1929,6 +1935,25 @@ class AutoShopLauncher(tk.Tk):
 
         self.logger.emit(f"이미지 저장 경로 설정 완료: {selected_dir}\n", category="settings")
         messagebox.showinfo("이미지 경로 저장", f"앞으로 이미지 저장 기본 경로로 사용합니다.\n{selected_dir}")
+        return True
+
+    def configure_thumbnail_footer_suffix(self) -> bool:
+        current = self._load_sheet_config()
+        current_suffix = (current.get("thumbnail_footer_suffix") or "").strip() or DEFAULT_THUMBNAIL_FOOTER_SUFFIX
+        value = simpledialog.askstring(
+            "썸네일 푸터 문구",
+            "브랜드 뒤에 붙는 고정 문구를 입력하세요.\n예: angduss k-closet",
+            initialvalue=current_suffix,
+            parent=self,
+        )
+        if value is None:
+            return False
+        suffix = value.strip() or DEFAULT_THUMBNAIL_FOOTER_SUFFIX
+        current["thumbnail_footer_suffix"] = suffix
+        if not self._save_sheet_config(current):
+            return False
+        self.logger.emit(f"썸네일 푸터 문구 저장: {suffix}\n", category="settings")
+        messagebox.showinfo("저장 완료", f"썸네일 푸터 문구를 저장했습니다.\n{suffix}")
         return True
 
     def _has_sheet_config(self) -> bool:
@@ -2008,6 +2033,7 @@ class AutoShopLauncher(tk.Tk):
             "row_start": 2,
             "images_dir": (current.get("images_dir") or "").strip(),
             "queue_sheet_url": (queue_sheet_url or "").strip(),
+            "thumbnail_footer_suffix": (current.get("thumbnail_footer_suffix") or "").strip(),
         }
         if not self._save_sheet_config(config):
             return False
@@ -2155,7 +2181,7 @@ class AutoShopLauncher(tk.Tk):
             self.logger.emit(f"썸네일 레이아웃 자동 선택: {style}\n", category="thumbnail")
 
         python_cmd = resolve_python_executable()
-        footer = f"{brand} / angduss k-closet"
+        footer = f"{brand} / {self._get_thumbnail_footer_suffix()}"
         command = [
             python_cmd,
             os.path.join(SCRIPT_DIR, "make_thumbnails.py"),
