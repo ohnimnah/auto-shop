@@ -19,6 +19,36 @@ from state.app_state import AppState, AppStateChange, DashboardMetrics, LogEvent
 DONE_WORDS = ("완료", "성공", "출품", "업로드 완료", "정상")
 ERROR_WORDS = ("실패", "오류", "error", "보류", "미칭", "exception")
 WAITING_WORDS = ("대기", "준비", "미처리", "pending", "")
+SCOUT_DONE_WORDS = ("수집완료", "수집 완료", "수집 성공", "정찰완료", "정찰 완료", "정찰 성공", "완료", "성공")
+SCOUT_RECENT_EXCLUDE_WORDS = (
+    "이미지",
+    "썸네일",
+    "다운로드",
+    "저장",
+    "업로드",
+    "출품",
+    "대기",
+    "준비",
+    "보류",
+    "실패",
+    "오류",
+    "error",
+    "exception",
+)
+UPLOAD_DONE_WORDS = ("출품완료", "출품 완료", "업로드 완료", "업로드 성공", "등록 완료", "buyma 완료")
+UPLOAD_RECENT_EXCLUDE_WORDS = (
+    "이미지",
+    "썸네일",
+    "다운로드",
+    "저장",
+    "대기",
+    "준비",
+    "보류",
+    "실패",
+    "오류",
+    "error",
+    "exception",
+)
 SHEET_COL_NAME_KR = 4  # E열 (0-based)
 SHEET_COL_PRICE_BUYMA = 12  # M열 (0-based)
 SHEET_COL_MUSINSA_SUBCATEGORY = 24  # Y열 (0-based, 무신사 소분류)
@@ -103,7 +133,7 @@ class DashboardDataService:
                 ("수집 실패", failed, "실패 / 오류 상태"),
                 ("진행 중", running, "현재 정찰 프로세스"),
             ],
-            "recent_rows": valid_products[:10],
+            "recent_rows": list(reversed([row for row in valid_products if self._is_scout_done_row(row)][-10:])),
             "category_rows": categories[:6],
             "category_rows_all": categories,
             "ratio": min(1.0, collected / max(1, len(valid_products))),
@@ -140,7 +170,8 @@ class DashboardDataService:
         other_ratio = sum(1 for row in products if "기타" in row.category or "その他" in row.category) / max(1, len(products))
         reasons = self._group_count([row for row in products if self._is_error(row.state)], lambda row: row.state or "오류")
         recovery_stats = self._load_upload_recovery_stats()
-        recent_rows = list(reversed(valid_products[-20:]))
+        uploaded_rows = [row for row in valid_products if self._is_upload_done_row(row)]
+        recent_rows = list(reversed(uploaded_rows[-20:]))
         return {
             "metrics": [
                 ("업로드 시도", uploaded + failed, "완료 + 실패 기준"),
@@ -506,6 +537,18 @@ class DashboardDataService:
     def _is_waiting(self, state: str) -> bool:
         text = str(state or "").lower()
         return not self._is_done(text) and not self._is_error(text) and any(word.lower() in text for word in WAITING_WORDS)
+
+    def _is_scout_done_row(self, row: ProductRow) -> bool:
+        text = f"{row.state} {row.action}".lower()
+        if any(word.lower() in text for word in SCOUT_RECENT_EXCLUDE_WORDS):
+            return False
+        return any(word.lower() in text for word in SCOUT_DONE_WORDS)
+
+    def _is_upload_done_row(self, row: ProductRow) -> bool:
+        text = f"{row.state} {row.action}".lower()
+        if any(word.lower() in text for word in UPLOAD_RECENT_EXCLUDE_WORDS):
+            return False
+        return any(word.lower() in text for word in UPLOAD_DONE_WORDS)
 
     def _is_today(self, value: str) -> bool:
         text = str(value or "").strip()

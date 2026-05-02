@@ -144,6 +144,41 @@ class DashboardDataServiceTests(unittest.TestCase):
             self.assertEqual(metrics.done, 1)
             self.assertEqual(metrics.error, 1)
 
+    def test_upload_recent_rows_include_only_uploaded_products(self):
+        with self._workspace_tempdir() as temp_dir:
+            state = AppState()
+            service = self._service(temp_dir, state=state)
+            rows = [
+                service._product_from_mapping({"상태": "이미지 저장 완료", "상품명": "Image"}, "1", "local"),
+                service._product_from_mapping({"상태": "썸네일완료", "상품명": "Thumb"}, "2", "local"),
+                service._product_from_mapping({"상태": "보류", "상품명": "Hold"}, "3", "local"),
+                service._product_from_mapping({"상태": "출품완료", "상품명": "Uploaded A"}, "4", "local"),
+                service._product_from_mapping({"상태": "업로드 완료", "상품명": "Uploaded B"}, "5", "local"),
+            ]
+            state.set_product_rows(rows)
+
+            overview = service.get_upload_overview()
+
+            self.assertEqual([row.name for row in overview["recent_rows"]], ["Uploaded B", "Uploaded A"])
+
+    def test_scout_recent_rows_include_only_collected_products(self):
+        with self._workspace_tempdir() as temp_dir:
+            state = AppState()
+            service = self._service(temp_dir, state=state)
+            rows = [
+                service._product_from_mapping({"상태": "수집완료", "상품명": "Collected A"}, "1", "local"),
+                service._product_from_mapping({"상태": "이미지 저장 완료", "상품명": "Image"}, "2", "local"),
+                service._product_from_mapping({"상태": "썸네일완료", "상품명": "Thumb"}, "3", "local"),
+                service._product_from_mapping({"상태": "보류", "상품명": "Hold"}, "4", "local"),
+                service._product_from_mapping({"상태": "출품완료", "상품명": "Uploaded"}, "5", "local"),
+                service._product_from_mapping({"상태": "정찰 완료", "상품명": "Collected B"}, "6", "local"),
+            ]
+            state.set_product_rows(rows)
+
+            overview = service.get_scout_overview()
+
+            self.assertEqual([row.name for row in overview["recent_rows"]], ["Collected B", "Collected A"])
+
     def test_log_event_updates_state_and_pipeline(self):
         with self._workspace_tempdir() as temp_dir:
             state = AppState()
