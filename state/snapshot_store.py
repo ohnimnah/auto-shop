@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import os
 import threading
+import time
 from datetime import datetime
 from typing import Any
 
@@ -38,10 +39,27 @@ class StateSnapshotStore:
     def save(self, state: AppState) -> None:
         payload = state.to_snapshot()
         payload["saved_at"] = datetime.now().isoformat(timespec="seconds")
-        os.makedirs(os.path.dirname(self.path), exist_ok=True)
+        parent = os.path.dirname(self.path)
+        os.makedirs(parent, exist_ok=True)
+        serialized = json.dumps(payload, ensure_ascii=False, indent=2)
+        tmp_path = os.path.join(parent, f".launcher_state_snapshot.tmp.{os.getpid()}.{int(time.time()*1000)}")
         with self._lock:
-            with open(self.path, "w", encoding="utf-8") as file:
-                json.dump(payload, file, ensure_ascii=False, indent=2)
+            with open(tmp_path, "w", encoding="utf-8") as file:
+                file.write(serialized)
+                file.flush()
+                os.fsync(file.fileno())
+            try:
+                os.replace(tmp_path, self.path)
+            finally:
+                if os.path.exists(tmp_path):
+                    try:
+                        os.remove(tmp_path)
+                    except Exception:
+                        pass
 
     def handle_change(self, state: AppState, _change: AppStateChange) -> None:
-        self.save(state)
+        try:
+            self.save(state)
+        except Exception:
+            # Snapshot persistence should never crash the launcher.
+            return

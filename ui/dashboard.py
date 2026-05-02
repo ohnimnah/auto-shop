@@ -269,6 +269,9 @@ class AutoShopLauncher(tk.Tk):
             # Queue delivery can be slightly out-of-order; always reflect latest state.
             self._set_running_ui(bool(self.state.current_action))
             self._refresh_action_button_labels()
+            if not self.state.current_action:
+                # Action completion: immediately resync overview tables/cards.
+                self.refresh_dashboard_data()
         elif key == "today_processed":
             self.today_processed_var.set(str(value))
         elif key == "today_success":
@@ -764,6 +767,20 @@ class AutoShopLauncher(tk.Tk):
         self.nav_buttons[text] = label
         if command:
             label.bind("<Button-1>", lambda _event: command())
+            label.bind(
+                "<Enter>",
+                lambda _event, name=text, widget=label: widget.configure(
+                    bg=self.theme["blue_2"] if name == self.state.active_view else self.theme["blue"],
+                    fg="#ffffff",
+                ),
+            )
+            label.bind(
+                "<Leave>",
+                lambda _event, name=text, widget=label: widget.configure(
+                    bg=self.theme["blue_2"] if name == self.state.active_view else self.theme["sidebar"],
+                    fg="#ffffff" if name == self.state.active_view else "#d5e0ee",
+                ),
+            )
 
     def _set_sidebar_active(self, active_name: str) -> None:
         for name, label in self.nav_buttons.items():

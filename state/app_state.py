@@ -84,6 +84,7 @@ class ProductRow:
     sheet: str
     updated: str
     action: str
+    image_paths: str = ""
 
 
 @dataclass

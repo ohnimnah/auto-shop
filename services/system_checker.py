@@ -7,10 +7,15 @@ import os
 import re
 import shutil
 import subprocess
+import threading
+import time
 from datetime import datetime
 
 from app.security.credential_store import KeyringCredentialStore
 from services.runtime_environment import RuntimeCheckResult, check_runtime_environment
+
+
+_SHEET_CONFIG_WRITE_LOCK = threading.Lock()
 
 
 class SystemChecker:
@@ -61,8 +66,40 @@ class SystemChecker:
 
     def save_sheet_config(self, config: dict) -> bool:
         os.makedirs(self.data_dir, exist_ok=True)
-        with open(self.sheet_config_path, "w", encoding="utf-8") as file:
-            json.dump(config, file, ensure_ascii=False, indent=2)
+        config_dir = os.path.dirname(self.sheet_config_path) or self.data_dir
+        new_content = json.dumps(config, ensure_ascii=False, indent=2)
+
+        with _SHEET_CONFIG_WRITE_LOCK:
+            if os.path.exists(self.sheet_config_path):
+                try:
+                    with open(self.sheet_config_path, "r", encoding="utf-8") as existing_file:
+                        if existing_file.read() == new_content:
+                            return True
+                except Exception:
+                    pass
+
+            tmp_path = os.path.join(config_dir, f".sheets_config.tmp.{os.getpid()}.{int(time.time()*1000)}")
+            with open(tmp_path, "w", encoding="utf-8") as file:
+                file.write(new_content)
+                file.flush()
+                os.fsync(file.fileno())
+
+            last_error: Exception | None = None
+            for _ in range(30):
+                try:
+                    os.replace(tmp_path, self.sheet_config_path)
+                    last_error = None
+                    break
+                except PermissionError as exc:
+                    last_error = exc
+                    time.sleep(0.2)
+            if last_error is not None:
+                try:
+                    if os.path.exists(tmp_path):
+                        os.remove(tmp_path)
+                except Exception:
+                    pass
+                raise last_error
         return True
 
     def normalize_spreadsheet_id(self, raw_value: str) -> str:

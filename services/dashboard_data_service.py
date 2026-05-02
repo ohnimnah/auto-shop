@@ -133,12 +133,14 @@ class DashboardDataService:
 
     def get_upload_overview(self) -> dict:
         products = self.state.product_rows
+        valid_products = [row for row in products if self._is_valid_product_row(row)]
         uploaded = sum(1 for row in products if self._matches_words(row.state, ("출품", "업로드 완료", "출품완료", "완료")))
         failed = sum(1 for row in products if self._matches_words(row.state, ("업로드 실패", "출품 실패", "오류", "보류")))
         waiting = sum(1 for row in products if self._matches_words(row.state, ("업로드 대기", "대기", "준비")))
         other_ratio = sum(1 for row in products if "기타" in row.category or "その他" in row.category) / max(1, len(products))
         reasons = self._group_count([row for row in products if self._is_error(row.state)], lambda row: row.state or "오류")
         recovery_stats = self._load_upload_recovery_stats()
+        recent_rows = list(reversed(valid_products[-20:]))
         return {
             "metrics": [
                 ("업로드 시도", uploaded + failed, "완료 + 실패 기준"),
@@ -147,7 +149,7 @@ class DashboardDataService:
                 ("보류 중", waiting, "업로드 대기 상태"),
             ],
             "success_ratio": uploaded / max(1, uploaded + failed),
-            "recent_rows": products[:10],
+            "recent_rows": recent_rows,
             "failure_reasons": reasons[:6],
             "category_failures": failed,
             "other_ratio": other_ratio,
@@ -405,6 +407,7 @@ class DashboardDataService:
             sheet=sheet,
             updated=pick("updated", "최종 업데이트", "updated_at", "timestamp") or datetime.now().strftime("%H:%M:%S"),
             action="재실행 / 열기" if self._is_error(state) else "실행 / 열기",
+            image_paths=get(13) or pick("image_paths", "이미지경로", "image_path"),
         )
 
     def _product_from_sequence(self, row: list[str], fallback_no: str, sheet: str) -> ProductRow:
@@ -429,6 +432,7 @@ class DashboardDataService:
             sheet=sheet,
             updated=get(6) or datetime.now().strftime("%H:%M:%S"),
             action="재실행 / 열기" if self._is_error(state) else "실행 / 열기",
+            image_paths=get(13),
         )
 
     def _canonical_name(self, text: str) -> str:

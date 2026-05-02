@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import json
 import os
+import threading
+import time
 from copy import deepcopy
 from typing import Any
 
@@ -12,6 +14,7 @@ from config.app_config import DEFAULT_SHEET_NAME, DEFAULT_SPREADSHEET_ID
 
 DEFAULT_PROFILE_NAME = "default"
 CONFIG_FILENAME = "config.json"
+_CONFIG_WRITE_LOCK = threading.Lock()
 
 
 def _runtime_root_dir() -> str:
@@ -236,7 +239,40 @@ def load_config(profile_name: str = DEFAULT_PROFILE_NAME, *, create_if_missing: 
 def save_config(profile_name: str, config: dict[str, Any]) -> str:
     profile = _sanitize_profile_name(profile_name)
     config_path = get_profile_config_path(profile)
-    os.makedirs(get_profile_config_dir(profile), exist_ok=True)
-    with open(config_path, "w", encoding="utf-8") as file:
-        json.dump(config, file, ensure_ascii=False, indent=2)
+    config_dir = get_profile_config_dir(profile)
+    os.makedirs(config_dir, exist_ok=True)
+    new_content = json.dumps(config, ensure_ascii=False, indent=2)
+
+    with _CONFIG_WRITE_LOCK:
+        if os.path.exists(config_path):
+            try:
+                with open(config_path, "r", encoding="utf-8") as existing_file:
+                    if existing_file.read() == new_content:
+                        return config_path
+            except Exception:
+                pass
+
+        tmp_path = os.path.join(config_dir, f".{CONFIG_FILENAME}.tmp.{os.getpid()}.{int(time.time()*1000)}")
+        with open(tmp_path, "w", encoding="utf-8") as file:
+            file.write(new_content)
+            file.flush()
+            os.fsync(file.fileno())
+
+        last_error: Exception | None = None
+        for _ in range(30):
+            try:
+                os.replace(tmp_path, config_path)
+                last_error = None
+                break
+            except PermissionError as exc:
+                last_error = exc
+                time.sleep(0.2)
+        if last_error is not None:
+            try:
+                if os.path.exists(tmp_path):
+                    os.remove(tmp_path)
+            except Exception:
+                pass
+            raise last_error
+
     return config_path

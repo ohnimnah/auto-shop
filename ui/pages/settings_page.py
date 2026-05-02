@@ -792,7 +792,15 @@ class SettingsPage(BasePage):
         tk.Label(wrap, text=label, bg=self.controller.theme["panel"], fg=self.controller.theme["text"], font=("Segoe UI", 9, "bold")).grid(row=0, column=0, sticky="w")
         status = tk.Label(wrap, textvariable=value_var, bg=self.controller.theme["panel"], fg=self.controller.theme["muted"], font=("Segoe UI", 9))
         status.grid(row=1, column=0, sticky="w", pady=(2, 0))
-        color_var.trace_add("write", lambda *_args, target=status, source=color_var: target.configure(fg=source.get()))
+        def _sync_status_color(*_args, target=status, source=color_var) -> None:
+            try:
+                if target.winfo_exists():
+                    target.configure(fg=source.get())
+            except tk.TclError:
+                # Widget already destroyed during tab/page rerender.
+                return
+
+        color_var.trace_add("write", _sync_status_color)
 
     def _bind_live_validation(self) -> None:
         for variable in self._iter_all_vars():
@@ -1149,7 +1157,7 @@ class SettingsPage(BasePage):
                 messagebox.showerror("탭 목록 불러오기 실패", f"Google Sheets 탭 목록을 불러오지 못했습니다.\n\n{exc}")
             return False
 
-    def test_google_sheet_connection(self) -> bool:
+    def test_google_sheet_connection(self, *, silent: bool = False) -> bool:
         issues = self._validate_inputs(full=False)
         if issues:
             self.validation_summary_var.set(issues[0])
@@ -1206,7 +1214,8 @@ class SettingsPage(BasePage):
             self.validation_summary_var.set(f"Google Sheets 연결 실패: {exc}")
             self.sheet_validation_rows = [(self.general_tab_vars[key].get().strip() or key, "오류", "-", "-", "") for key, _label in self.GENERAL_TAB_FIELDS]
             self._render_validation_rows()
-            messagebox.showerror("연결 실패", f"Google Sheets 연결 확인에 실패했습니다.\n\n{exc}")
+            if not silent:
+                messagebox.showerror("연결 실패", f"Google Sheets 연결 확인에 실패했습니다.\n\n{exc}")
             return False
 
     def test_buyma_credentials(self) -> bool:
@@ -1293,6 +1302,12 @@ class SettingsPage(BasePage):
                 self.controller.buyma_credentials.save(email, password)
 
             config_path = save_config(self.controller.profile_name, config)
+        except Exception as exc:
+            self.validation_summary_var.set(f"설정 저장 실패(config.json): {exc}")
+            messagebox.showerror("저장 실패", f"config.json 저장에 실패했습니다.\n\n{exc}")
+            return False
+
+        try:
             self.controller.profile_config = deepcopy(config)
             self.last_saved_config = deepcopy(config)
             self.buyma_password_var.set("")
@@ -1315,16 +1330,19 @@ class SettingsPage(BasePage):
                     "credentials_path": config["spreadsheet"].get("credentials_path", ""),
                 }
             )
-            self.controller._save_sheet_config(legacy)
+            if not self.controller._save_sheet_config(legacy):
+                self.validation_summary_var.set("설정 저장 실패(sheets_config.json)")
+                return False
+            self.test_google_sheet_connection(silent=True)
             self.controller.refresh_first_run_wizard()
             self.controller._refresh_system_status_labels()
-            self.validation_summary_var.set("설정을 저장했습니다. 일부 런타임 옵션은 다음 작업부터 반영됩니다.")
+            self.validation_summary_var.set("설정을 저장했습니다. 일부 옵션은 다음 작업부터 반영됩니다.")
             if show_message:
                 messagebox.showinfo("설정 저장", f"설정을 저장했습니다.\n{config_path}")
             return True
         except Exception as exc:
-            self.validation_summary_var.set(f"설정 저장 실패: {exc}")
-            messagebox.showerror("저장 실패", f"config.json 저장에 실패했습니다.\n\n{exc}")
+            self.validation_summary_var.set(f"설정 적용 후처리 실패: {exc}")
+            messagebox.showerror("저장 실패", f"설정 후처리 중 오류가 발생했습니다.\n\n{exc}")
             return False
 
     def apply_config(self) -> bool:
