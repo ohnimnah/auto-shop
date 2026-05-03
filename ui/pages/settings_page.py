@@ -71,6 +71,7 @@ class SettingsPage(BasePage):
         self.service_account_path_var = tk.StringVar()
         self.images_dir_var = tk.StringVar()
         self.log_dir_var = tk.StringVar()
+        self.thumbnail_footer_suffix_var = tk.StringVar()
         self.buyma_email_var = tk.StringVar()
         self.buyma_password_var = tk.StringVar()
         self.general_tab_vars = {key: tk.StringVar() for key, _label in self.GENERAL_TAB_FIELDS}
@@ -643,6 +644,7 @@ class SettingsPage(BasePage):
         card.grid(row=row, column=column, sticky="ew", padx=padx)
         self._build_entry_row(body, 0, "images_dir", self.images_dir_var, button_text="폴더 선택", button_command=lambda: self._choose_directory(self.images_dir_var))
         self._build_entry_row(body, 2, "log_dir", self.log_dir_var, button_text="폴더 선택", button_command=lambda: self._choose_directory(self.log_dir_var))
+        self._build_entry_row(body, 4, "thumbnail_footer_suffix", self.thumbnail_footer_suffix_var)
 
     def _build_buyma_card(self, parent: tk.Widget, row: int, column: int, *, padx: tuple[int, int]) -> None:
         card, body = self._build_auto_card(parent, "BUYMA Account")
@@ -814,6 +816,7 @@ class SettingsPage(BasePage):
         yield self.service_account_path_var
         yield self.images_dir_var
         yield self.log_dir_var
+        yield self.thumbnail_footer_suffix_var
         yield self.buyma_email_var
         yield self.buyma_password_var
         for variable in self.general_tab_vars.values():
@@ -865,6 +868,11 @@ class SettingsPage(BasePage):
             self.general_tab_vars[key].set(str(tabs.get(key) or "").strip())
         self.images_dir_var.set(str(paths.get("images_dir") or "").strip() or self.controller._get_configured_images_dir())
         self.log_dir_var.set(str(paths.get("log_dir") or "").strip() or os.path.join(self.controller.data_dir, "logs"))
+        footer_suffix = str(paths.get("thumbnail_footer_suffix") or "").strip()
+        if not footer_suffix:
+            legacy_cfg = self.controller._load_sheet_config()
+            footer_suffix = str((legacy_cfg or {}).get("thumbnail_footer_suffix") or "").strip()
+        self.thumbnail_footer_suffix_var.set(footer_suffix)
         self.buyma_email_var.set(str(buyma.get("email") or "").strip() or self.controller.buyma_credentials.load_email())
         self.buyma_password_var.set("")
 
@@ -972,6 +980,7 @@ class SettingsPage(BasePage):
             {
                 "images_dir": self.images_dir_var.get().strip(),
                 "log_dir": self.log_dir_var.get().strip(),
+                "thumbnail_footer_suffix": self.thumbnail_footer_suffix_var.get().strip(),
             }
         )
         current.setdefault("buyma", {}).update({"email": self.buyma_email_var.get().strip()})
@@ -1327,6 +1336,7 @@ class SettingsPage(BasePage):
                     "category_mapping_candidates_sheet_name": config["spreadsheet"]["tabs"]["category_mapping_candidates"],
                     "images_dir": config["paths"]["images_dir"],
                     "log_dir": config["paths"]["log_dir"],
+                    "thumbnail_footer_suffix": config["paths"].get("thumbnail_footer_suffix", ""),
                     "credentials_path": config["spreadsheet"].get("credentials_path", ""),
                 }
             )
