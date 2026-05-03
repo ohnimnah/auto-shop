@@ -158,6 +158,12 @@ def classify_category_with_reason(
     if existing_category is not None and existing_category != StandardCategory.ETC:
         return existing_category, "existing_category"
 
+    # Guardrail: denim/jeans product names should not be flipped to innerwear
+    # by broad body-shape keywords such as "골반뽕", "볼륨업".
+    denim_tokens = ("청바지", "데님", "jeans", "denim", "부츠컷", "bootcut")
+    if any(_contains_keyword(force_text, token) for token in denim_tokens):
+        return StandardCategory.PANTS_DENIM, "denim_keyword_override"
+
     for keywords, category in FORCE_CATEGORY_MAP.items():
         if any(_contains_keyword(force_text, keyword) for keyword in keywords):
             result = category
