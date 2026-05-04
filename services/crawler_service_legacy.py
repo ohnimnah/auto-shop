@@ -50,7 +50,11 @@ def build_image_folder_name(row_num: int, row_start: int, product_name: str) -> 
 
 
 def find_product_price_candidates_from_state(data) -> List[int]:
-    """Recursively collect actual sale/list price candidates from mss_state."""
+    """Recursively collect effective product price candidates from mss_state.
+
+    When Musinsa exposes a discount amount, use ``base price - discount``.
+    For example: salePrice 38,000 and couponDcPrice 3,800 -> 34,200.
+    """
     key_priority = (
         "saleprice",
         "goodsprice",
@@ -70,17 +74,57 @@ def find_product_price_candidates_from_state(data) -> List[int]:
         "benefitprice",
         "maxbenefitprice",
     )
+    discount_key_tokens = (
+        "dcprice",
+        "discountamount",
+        "discountamt",
+        "coupondiscountamount",
+        "coupondiscountprice",
+    )
     found = []
+    all_base_prices: List[int] = []
+    all_discount_amounts: List[int] = []
+
+    def _numeric(value) -> int | None:
+        if isinstance(value, (int, float)):
+            iv = int(value)
+            return iv if iv >= 0 else None
+        return None
+
+    def _collect_dict_values(obj: dict, tokens: tuple[str, ...], *, excluded: tuple[str, ...] = ()) -> List[int]:
+        values: List[int] = []
+        for key, value in obj.items():
+            lk = str(key).lower().replace("_", "")
+            if excluded and any(token in lk for token in excluded):
+                continue
+            if any(token in lk for token in tokens):
+                iv = _numeric(value)
+                if iv is not None:
+                    values.append(iv)
+        return values
 
     def walk(obj):
         if isinstance(obj, dict):
+            base_prices = _collect_dict_values(obj, key_priority, excluded=excluded_key_tokens)
+            discount_amounts = _collect_dict_values(obj, discount_key_tokens)
+            for base_price in base_prices:
+                for discount_amount in discount_amounts:
+                    effective_price = base_price - discount_amount
+                    if 1000 <= effective_price <= base_price:
+                        found.append((-1, effective_price))
+            all_base_prices.extend([value for value in base_prices if value >= 1000])
+            all_discount_amounts.extend([value for value in discount_amounts if value > 0])
+
             for k, v in obj.items():
                 lk = str(k).lower().replace("_", "")
                 if any(token in lk for token in excluded_key_tokens):
+                    iv = _numeric(v)
+                    if iv is not None and any(token in lk for token in discount_key_tokens):
+                        all_discount_amounts.append(iv)
                     walk(v)
                     continue
-                if isinstance(v, (int, float)):
-                    iv = int(v)
+                iv = _numeric(v)
+                if iv is not None:
                     if iv >= 1000:
                         for idx, key in enumerate(key_priority):
                             if key in lk:
@@ -92,6 +136,11 @@ def find_product_price_candidates_from_state(data) -> List[int]:
                 walk(item)
 
     walk(data)
+    for base_price in all_base_prices:
+        for discount_amount in all_discount_amounts:
+            effective_price = base_price - discount_amount
+            if 1000 <= effective_price <= base_price:
+                found.append((-1, effective_price))
     found.sort(key=lambda x: (x[0], x[1]))
     return [v for _, v in found]
 

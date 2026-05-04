@@ -4,7 +4,7 @@ from services.crawler_service_legacy import find_product_price_candidates_from_s
 
 
 class CrawlerStatePriceTests(unittest.TestCase):
-    def test_ignores_coupon_discount_amount_when_sale_price_exists(self):
+    def test_uses_base_price_minus_coupon_discount_amount(self):
         state = {
             "couponDcPrice": 3800,
             "goodsPrice": {
@@ -15,7 +15,7 @@ class CrawlerStatePriceTests(unittest.TestCase):
             },
         }
 
-        self.assertEqual(find_product_price_candidates_from_state(state)[0], 38000)
+        self.assertEqual(find_product_price_candidates_from_state(state)[0], 34200)
 
 
 if __name__ == "__main__":
