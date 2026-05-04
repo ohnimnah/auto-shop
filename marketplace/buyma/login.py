@@ -91,15 +91,6 @@ def load_buyma_credentials() -> Tuple[Optional[str], Optional[str]]:
         return None, None
 
 
-def prompt_buyma_credentials() -> Tuple[str, str]:
-    print("\nEnter BUYMA login credentials (first time only):")
-    email = input("  Email: ").strip()
-    password = input("  Password: ").strip()
-    if email and password:
-        save_buyma_credentials(email, password)
-    return email, password
-
-
 def _make_profile_dir() -> str:
     profile_dir = CHROME_PROFILE_DIR
     try:
@@ -228,12 +219,9 @@ def wait_for_buyma_login(
     driver,
     *,
     safe_input_fn: Callable[[str], str],
-    scroll_and_click_fn: Callable,
     wait_scale: float = 0.6,
 ) -> bool:
     email, password = load_buyma_credentials()
-    if not email or not password:
-        email, password = prompt_buyma_credentials()
 
     force_relogin = os.environ.get("AUTO_SHOP_FORCE_BUYMA_RELOGIN", "0").strip().lower() in {
         "1",
@@ -253,6 +241,11 @@ def wait_for_buyma_login(
         if current_url != BUYMA_SELL_URL:
             _ensure_buyma_page(driver, BUYMA_SELL_URL, wait_scale=wait_scale)
         return True
+
+    if not email or not password:
+        current_url = _ensure_buyma_page(driver, BUYMA_LOGIN_URL, wait_scale=wait_scale)
+        if not _is_buyma_url(current_url):
+            print("BUYMA login page did not open correctly. Please check the browser window.")
 
     if email and password:
         print("Trying auto login...")

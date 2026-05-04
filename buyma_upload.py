@@ -843,7 +843,6 @@ def wait_for_buyma_login(driver) -> bool:
     return buyma_login_mod.wait_for_buyma_login(
         driver,
         safe_input_fn=_safe_input,
-        scroll_and_click_fn=_scroll_and_click,
         wait_scale=WAIT_SCALE,
     )
 
