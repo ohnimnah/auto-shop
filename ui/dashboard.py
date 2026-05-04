@@ -17,6 +17,7 @@ from tkinter import ttk
 from core.action_runner import ActionRunner
 from core.command_builder import CommandBuilder
 from core.process_manager import ProcessManager, build_default_env
+from app.security import KeyringTokenStore
 from config.config_service import load_config as load_profile_config
 from services.buyma_service import BuymaCredentialService
 from services.dashboard_data_service import DashboardDataService
@@ -147,6 +148,10 @@ class AutoShopLauncher(tk.Tk):
             get_images_dir=self._get_configured_images_dir,
         )
         self.buyma_credentials = BuymaCredentialService(self.system_checker.get_buyma_credentials_target_path())
+        self.telegram_token_store = KeyringTokenStore(
+            service_name="auto_shop.telegram",
+            account_key=f"{self.profile_name}.bot_token",
+        )
         self.command_builder = CommandBuilder(
             script_dir=SCRIPT_DIR,
             resolve_python_executable=resolve_python_executable,

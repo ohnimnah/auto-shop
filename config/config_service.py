@@ -119,7 +119,6 @@ def default_config() -> dict[str, Any]:
         "notification": {
             "telegram": {
                 "enabled": False,
-                "bot_token": "",
                 "chat_id": "",
             },
             "events": {

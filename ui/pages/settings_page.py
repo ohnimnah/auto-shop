@@ -732,7 +732,7 @@ class SettingsPage(BasePage):
         card, body = self._build_auto_card(parent, "Telegram")
         card.grid(row=row, column=0, sticky="ew", pady=(0, SECTION_GAP))
         self._build_switch(body, 0, "사용 여부", self.notification_vars["telegram_enabled"])
-        self._build_entry_row(body, 1, "Bot Token", self.notification_vars["telegram_bot_token"])
+        self._build_entry_row(body, 1, "Bot Token", self.notification_vars["telegram_bot_token"], show="*")
         self._build_entry_row(body, 3, "Chat ID", self.notification_vars["telegram_chat_id"])
         self.controller._mini_button(body, "알림 테스트", lambda: self.controller.dispatch_ui_action("설정: Telegram 테스트", self.test_telegram_notification, category="settings"), "#1e3350", "#294565").grid(row=5, column=0, sticky="e", pady=(8, 0))
 
@@ -927,7 +927,10 @@ class SettingsPage(BasePage):
         notify_email = notification.get("email") or {}
         notify_schedule = notification.get("schedule") or {}
         self._set_bool(self.notification_vars["telegram_enabled"], notify_telegram.get("enabled", False))
-        self._set_var(self.notification_vars["telegram_bot_token"], notify_telegram.get("bot_token", ""))
+        legacy_token = str(notify_telegram.get("bot_token") or "").strip()
+        if legacy_token:
+            self.controller.telegram_token_store.save(legacy_token)
+        self._set_var(self.notification_vars["telegram_bot_token"], self.controller.telegram_token_store.load() or legacy_token)
         self._set_var(self.notification_vars["telegram_chat_id"], notify_telegram.get("chat_id", ""))
         self._set_bool(self.notification_vars["notify_start"], notify_events.get("job_start", True))
         self._set_bool(self.notification_vars["notify_complete"], notify_events.get("job_complete", True))
@@ -962,6 +965,9 @@ class SettingsPage(BasePage):
 
     def _set_bool(self, variable: tk.BooleanVar, value: object) -> None:
         variable.set(bool(value))
+
+    def _get_telegram_bot_token(self) -> str:
+        return self.notification_vars["telegram_bot_token"].get().strip() or self.controller.telegram_token_store.load()
 
     def _set_pending_statuses(self) -> None:
         muted = self.controller.theme["muted"]
@@ -1046,7 +1052,6 @@ class SettingsPage(BasePage):
         current["notification"] = {
             "telegram": {
                 "enabled": self.notification_vars["telegram_enabled"].get(),
-                "bot_token": self.notification_vars["telegram_bot_token"].get().strip(),
                 "chat_id": self.notification_vars["telegram_chat_id"].get().strip(),
             },
             "events": {
@@ -1118,7 +1123,7 @@ class SettingsPage(BasePage):
                 if self._invalid_int(var):
                     issues.append(f"{label}는 숫자여야 합니다.")
             if self.notification_vars["telegram_enabled"].get():
-                if not self.notification_vars["telegram_bot_token"].get().strip():
+                if not self._get_telegram_bot_token():
                     issues.append("Telegram을 쓰려면 Bot Token이 필요합니다.")
                 if not self.notification_vars["telegram_chat_id"].get().strip():
                     issues.append("Telegram을 쓰려면 Chat ID가 필요합니다.")
@@ -1254,7 +1259,7 @@ class SettingsPage(BasePage):
             self.telegram_status_var.set("비활성")
             messagebox.showwarning("Telegram 테스트", "Telegram 알림이 비활성화되어 있습니다.")
             return False
-        token = self.notification_vars["telegram_bot_token"].get().strip()
+        token = self._get_telegram_bot_token()
         chat_id = self.notification_vars["telegram_chat_id"].get().strip()
         if not token or not chat_id:
             self.telegram_status_var.set("토큰/채팅 ID 필요")
@@ -1319,6 +1324,12 @@ class SettingsPage(BasePage):
             password = self.buyma_password_var.get().strip()
             if email and password:
                 self.controller.buyma_credentials.save(email, password)
+
+            telegram_token = self.notification_vars["telegram_bot_token"].get().strip()
+            if telegram_token:
+                self.controller.telegram_token_store.save(telegram_token)
+            elif not self.notification_vars["telegram_enabled"].get():
+                self.controller.telegram_token_store.delete()
 
             config_path = save_config(self.controller.profile_name, config)
         except Exception as exc:

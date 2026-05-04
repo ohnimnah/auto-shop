@@ -19,6 +19,10 @@ except Exception:  # pragma: no cover
         def get_password(cls, service: str, account: str) -> str | None:
             return cls._bag.get((service, account))
 
+        @classmethod
+        def delete_password(cls, service: str, account: str) -> None:
+            cls._bag.pop((service, account), None)
+
     keyring = _FallbackKeyring()  # type: ignore
 
 
@@ -63,3 +67,31 @@ class KeyringCredentialStore:
 
     def exists(self) -> bool:
         return self.load() is not None
+
+
+class KeyringTokenStore:
+    """Stores a single secret token in the OS keyring."""
+
+    def __init__(self, *, service_name: str, account_key: str) -> None:
+        self.service_name = service_name
+        self.account_key = account_key
+
+    def save(self, token: str) -> None:
+        token = (token or "").strip()
+        if token:
+            keyring.set_password(self.service_name, self.account_key, token)
+
+    def delete(self) -> None:
+        try:
+            keyring.delete_password(self.service_name, self.account_key)
+        except Exception:
+            pass
+
+    def load(self) -> str:
+        try:
+            return (keyring.get_password(self.service_name, self.account_key) or "").strip()
+        except Exception:
+            return ""
+
+    def exists(self) -> bool:
+        return bool(self.load())
