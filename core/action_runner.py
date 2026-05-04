@@ -2,11 +2,18 @@
 
 from __future__ import annotations
 
+import time
 from typing import Callable
 
 from core.errors import AppError, ErrorCode
 from core.process_manager import ProcessManager
 from services.pipeline_service import LauncherPipelineService
+from services.telegram_service import (
+    notify_critical_error,
+    notify_emergency_stop,
+    notify_job_finished,
+    notify_job_started,
+)
 from state.app_state import AppLogger, AppState, LogEvent
 
 
@@ -30,6 +37,9 @@ class ActionRunner:
         self.ensure_ready = ensure_ready
         self.pipeline_service = pipeline_service or LauncherPipelineService()
         self.team_watch_actions = dict(self.pipeline_service.team_watch_actions)
+        self._job_started_at: float = 0.0
+        self._job_name: str = ""
+        self._team_started_at: dict[str, float] = {}
 
     def run(self, action: str) -> bool:
         if self.process_manager.is_running():
@@ -56,15 +66,20 @@ class ActionRunner:
             )
         except AppError as exc:
             self._log_error(exc.code, f"실행 실패: {exc.message}\n", category="process")
+            notify_critical_error("ActionRunner.run", exc.message)
             self.state.set_status("실행 실패")
             self.state.mark_current_stage_done(False)
             return False
         except Exception as exc:
             self._log(f"실행 실패: {exc}\n", level="ERROR", category="process")
+            notify_critical_error("ActionRunner.run", exc)
             self.state.set_status("실행 실패")
             self.state.mark_current_stage_done(False)
             return False
         if started:
+            self._job_started_at = time.time()
+            self._job_name = self._job_label(action)
+            notify_job_started(self._job_name)
             self.state.set_status("작전 진행중")
         return started
 
@@ -80,24 +95,32 @@ class ActionRunner:
         self._log("\n" + "=" * 70 + "\n", category="process")
         self._log(f"실행: {' '.join(command)}\n", category="process")
         try:
-            return self.process_manager.start(
+            started = self.process_manager.start(
                 command,
                 on_line=lambda line: self._handle_line(action, line),
                 on_done=self._handle_done,
             )
+            if started:
+                self._job_started_at = time.time()
+                self._job_name = self._job_label(action)
+                notify_job_started(self._job_name)
+            return started
         except AppError as exc:
             self._log_error(exc.code, f"실행 실패: {exc.message}\n", category="process")
+            notify_critical_error("ActionRunner.run_command", exc.message)
             self.state.set_status("실행 실패")
             self.state.mark_current_stage_done(False)
             return False
         except Exception as exc:
             self._log(f"실행 실패: {exc}\n", level="ERROR", category="process")
+            notify_critical_error("ActionRunner.run_command", exc)
             self.state.set_status("실행 실패")
             self.state.mark_current_stage_done(False)
             return False
 
     def stop(self) -> None:
         self._log("\n중지 요청 전송...\n", category="process")
+        notify_emergency_stop(f"{self._job_name or '현재 작업'} 중지 요청")
         self.state.mark_current_stage_done(False)
         try:
             self.process_manager.stop()
@@ -122,23 +145,30 @@ class ActionRunner:
         command = self.command_builder(action)
         self._log(f"워커 실행: {' '.join(command)}\n", category=team_key)
         try:
-            return self.process_manager.start_team(
+            started = self.process_manager.start_team(
                 team_key,
                 command,
                 on_line=lambda line: self._log(line, category=team_key),
                 on_done=lambda code: self._handle_team_done(team_key, code),
             )
+            if started:
+                self._team_started_at[team_key] = time.time()
+                notify_job_started(self._team_label(team_key))
+            return started
         except AppError as exc:
             self._log_error(exc.code, f"워커 실행 실패: {exc.message}\n", category=team_key)
+            notify_critical_error(f"ActionRunner.start_team_watch.{team_key}", exc.message)
             self.state.set_stage_status(team_key, "실패")
             return False
         except Exception as exc:
             self._log(f"워커 실행 실패: {exc}\n", level="ERROR", category=team_key)
+            notify_critical_error(f"ActionRunner.start_team_watch.{team_key}", exc)
             self.state.set_stage_status(team_key, "실패")
             return False
 
     def stop_team_watch(self, team_key: str) -> None:
         self.state.set_team_watch_enabled(team_key, False)
+        notify_emergency_stop(f"{self._team_label(team_key)} 중지 요청")
         try:
             self.process_manager.stop_team(team_key)
         except AppError as exc:
@@ -147,6 +177,7 @@ class ActionRunner:
         self._log("팀 감시 중지\n", category=team_key)
 
     def stop_all(self) -> None:
+        notify_emergency_stop("전체 작업 중지 요청")
         try:
             self.process_manager.stop()
             self.process_manager.stop_all_teams()
@@ -166,6 +197,11 @@ class ActionRunner:
     def _handle_done(self, return_code: int) -> None:
         success = return_code == 0
         self._log(f"\n작업 종료 (code: {return_code})\n", category="process")
+        job_name = self._job_name or self._job_label(self.state.current_action)
+        duration = max(0, time.time() - self._job_started_at) if self._job_started_at else 0
+        notify_job_finished(job_name, 1 if success else 0, 0 if success else 1, duration)
+        if not success:
+            notify_critical_error(job_name, f"작업이 비정상 종료되었습니다. code={return_code}")
         self.state.record_process_done(success)
         self.state.mark_current_stage_done(success)
         current_stage = self.state.current_stage_key
@@ -173,9 +209,16 @@ class ActionRunner:
             self.state.set_stage_status(current_stage, "감시중")
         self.state.set_current_action("", "")
         self.state.set_status("대기중")
+        self._job_started_at = 0.0
+        self._job_name = ""
 
     def _handle_team_done(self, team_key: str, return_code: int) -> None:
         self._log(f"워커 종료 (code: {return_code})\n", category=team_key)
+        duration = max(0, time.time() - self._team_started_at.pop(team_key, 0))
+        success = return_code == 0
+        notify_job_finished(self._team_label(team_key), 1 if success else 0, 0 if success else 1, duration)
+        if not success:
+            notify_critical_error(self._team_label(team_key), f"워커가 비정상 종료되었습니다. code={return_code}")
         enabled = self.state.team_watch_enabled.get(team_key, False)
         policy = self.pipeline_service.watch_policy
         if policy.should_count_failure(return_code, enabled):
@@ -199,3 +242,24 @@ class ActionRunner:
 
     def _log_error(self, code: ErrorCode, message: str, *, level: str = "ERROR", category: str = "runner") -> None:
         self.logger.log(LogEvent(level=level, category=category, message=f"[{code.value}] {message}"))
+
+    def _job_label(self, action: str) -> str:
+        return {
+            "install": "필수 설치",
+            "run": "정찰",
+            "collect-listings": "목록 수집",
+            "watch": "정찰 감시",
+            "watch-images": "이미지 감시",
+            "watch-thumbnails": "썸네일 감시",
+            "watch-upload": "BUYMA 업로드 감시",
+            "save-images": "이미지 저장",
+            "upload-review": "BUYMA 업로드 검토",
+            "upload-auto": "BUYMA 업로드",
+        }.get(action, action or "Auto Shop 작업")
+
+    def _team_label(self, team_key: str) -> str:
+        return {
+            "assets": "이미지 감시",
+            "design": "썸네일 감시",
+            "sales": "BUYMA 업로드 감시",
+        }.get(team_key, team_key)

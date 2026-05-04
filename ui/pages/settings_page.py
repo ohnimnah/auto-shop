@@ -6,6 +6,7 @@ import os
 import shutil
 import ssl
 import tkinter as tk
+import urllib.error
 import urllib.parse
 import urllib.request
 from copy import deepcopy
@@ -1280,6 +1281,16 @@ class SettingsPage(BasePage):
             self.telegram_status_var.set("전송 성공")
             messagebox.showinfo("Telegram 테스트", "테스트 메시지를 전송했습니다.")
             return True
+        except urllib.error.HTTPError as exc:
+            detail = exc.read().decode("utf-8", "replace")
+            try:
+                payload = json.loads(detail)
+                detail = str(payload.get("description") or detail)
+            except Exception:
+                pass
+            self.telegram_status_var.set("전송 실패")
+            messagebox.showerror("Telegram 테스트 실패", f"테스트 메시지를 보내지 못했습니다.\n\nHTTP {exc.code}: {detail}")
+            return False
         except Exception as exc:
             self.telegram_status_var.set("전송 실패")
             messagebox.showerror("Telegram 테스트 실패", f"테스트 메시지를 보내지 못했습니다.\n\n{exc}")

@@ -48,10 +48,11 @@ class ProcessManagerTests(unittest.TestCase):
         self.assertFalse(manager.is_team_running("assets"))
 
     def test_default_env_forces_utf8_output(self):
-        env = build_default_env("/tmp/data", "/tmp/images")
+        env = build_default_env("/tmp/data", "/tmp/images", "operator-a")
 
         self.assertEqual(env["PYTHONIOENCODING"], "utf-8")
         self.assertEqual(env["PYTHONUTF8"], "1")
+        self.assertEqual(env["AUTO_SHOP_PROFILE"], "operator-a")
 
 
 if __name__ == "__main__":

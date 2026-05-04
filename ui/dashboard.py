@@ -159,7 +159,7 @@ class AutoShopLauncher(tk.Tk):
         )
         self.process_manager = ProcessManager(
             cwd=SCRIPT_DIR,
-            env_factory=lambda: build_default_env(self.data_dir, self._get_configured_images_dir()),
+            env_factory=lambda: build_default_env(self.data_dir, self._get_configured_images_dir(), self.profile_name),
         )
         self.action_runner = ActionRunner(
             script_dir=SCRIPT_DIR,

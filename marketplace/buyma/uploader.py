@@ -16,6 +16,7 @@ from marketplace.buyma.failure_tracking import capture_failure_artifacts
 from marketplace.buyma.mapper import buyma_title_units
 from marketplace.buyma.retry_ops import safe_click
 from marketplace.common.interfaces import MarketplaceRow, MarketplaceUploader
+from services.telegram_service import notify_upload_failed, notify_upload_success
 try:
     from selenium.webdriver.common.by import By
     from selenium.webdriver.common.keys import Keys
@@ -64,6 +65,27 @@ except Exception:  # pragma: no cover
 from utils.structured_logger import get_logger, log_event
 
 
+def _notification_product(row_data: MarketplaceRow, category_diag: Dict[str, Any] | None = None) -> Dict[str, Any]:
+    diag = category_diag or {}
+    category = (
+        diag.get("actual_selected_child_category")
+        or diag.get("target_buyma_child_category")
+        or diag.get("actual_selected_middle_category")
+        or diag.get("target_buyma_middle_category")
+        or row_data.get("musinsa_category_small")
+        or row_data.get("musinsa_category_middle")
+        or ""
+    )
+    return {
+        "product_name": row_data.get("product_name_kr") or row_data.get("product_name_en") or "",
+        "product_name_kr": row_data.get("product_name_kr") or "",
+        "brand": row_data.get("brand_en") or row_data.get("brand") or "",
+        "price": row_data.get("buyma_price") or "",
+        "buyma_price": row_data.get("buyma_price") or "",
+        "category": category,
+    }
+
+
 def upload_products(
     *,
     specific_row: int = 0,
@@ -110,6 +132,7 @@ def upload_products(
     try:
         if not wait_for_buyma_login(driver):
             print("로그인 실패. 종료합니다.")
+            notify_upload_failed({"product_name": "BUYMA 업로드", "brand": "", "buyma_price": "", "category": ""}, "BUYMA 로그인 실패")
             return
 
         processed = 0
@@ -142,6 +165,7 @@ def upload_products(
                 last = retry_exc.last_attempt.exception()
                 error_text = str(last or retry_exc)
                 capture_failure_artifacts(driver, int(row_num), "fill_buyma_form", error_text, retry_count=3)
+                notify_upload_failed(_notification_product(row_data), error_text)
                 log_event(
                     logger,
                     logging.ERROR,
@@ -156,6 +180,7 @@ def upload_products(
                 continue
             except Exception as exc:
                 capture_failure_artifacts(driver, int(row_num), "fill_buyma_form", str(exc), retry_count=0)
+                notify_upload_failed(_notification_product(row_data), exc)
                 log_event(
                     logger,
                     logging.ERROR,
@@ -195,6 +220,7 @@ def upload_products(
                     ):
                         print(f"  {row_num}행 상태 업데이트: {status_completed}")
                     category_diag["final_result"] = "success"
+                    notify_upload_success(_notification_product(row_data, category_diag))
                 elif upload_mode == "auto":
                     if update_cell_by_header(
                         service,
@@ -207,9 +233,11 @@ def upload_products(
                         print(f"  {row_num}행 상태 업데이트: 오류")
                     if not category_diag.get("final_result"):
                         category_diag["final_result"] = "failed"
+                    notify_upload_failed(_notification_product(row_data, category_diag), "BUYMA 제출 완료 확인 실패")
             elif fill_result == "manual_review":
                 print(f"  {row_num}행은 상품명 등 수동 확인이 필요합니다. 현재 브라우저 화면을 확인해주세요.")
                 category_diag["final_result"] = "manual_review"
+                notify_upload_failed(_notification_product(row_data, category_diag), "상품명 등 수동 확인 필요")
                 keep_browser_open = True
                 if append_category_candidate:
                     try:
@@ -222,6 +250,7 @@ def upload_products(
             else:
                 print(f"  {row_num}행 상품입력 실패. 건너뜁니다")
                 capture_failure_artifacts(driver, int(row_num), "fill_result_error", fill_result, retry_count=0)
+                notify_upload_failed(_notification_product(row_data, category_diag), fill_result)
                 log_event(
                     logger,
                     logging.ERROR,
@@ -1133,4 +1162,3 @@ class BuymaUploaderAdapter(MarketplaceUploader):
             max_items=max_items,
             interactive=interactive,
         )
-
