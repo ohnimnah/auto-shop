@@ -17,6 +17,13 @@ from config.config_service import get_profile_config_path, load_config, save_con
 from ui.pages.base_page import BasePage, SECTION_GAP
 
 
+def _same_file(source_path: str, target_path: str) -> bool:
+    try:
+        return os.path.samefile(source_path, target_path)
+    except OSError:
+        return os.path.abspath(source_path) == os.path.abspath(target_path)
+
+
 class SettingsPage(BasePage):
     TAB_SPECS = (
         ("general", "기본 설정"),
@@ -1303,7 +1310,10 @@ class SettingsPage(BasePage):
             credentials_path = self.service_account_path_var.get().strip()
             if credentials_path and os.path.isfile(os.path.abspath(os.path.expanduser(credentials_path))):
                 os.makedirs(self.controller.data_dir, exist_ok=True)
-                shutil.copy2(os.path.abspath(os.path.expanduser(credentials_path)), self.controller._get_credentials_target_path())
+                source_path = os.path.abspath(os.path.expanduser(credentials_path))
+                target_path = self.controller._get_credentials_target_path()
+                if not _same_file(source_path, target_path):
+                    shutil.copy2(source_path, target_path)
 
             email = self.buyma_email_var.get().strip()
             password = self.buyma_password_var.get().strip()
