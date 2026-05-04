@@ -756,7 +756,7 @@ def process_sheet_once(
         "STATUS_CRAWLED": STATUS_CRAWLED,
         "CRAWLER_ROW_DELAY_SECONDS": CRAWLER_ROW_DELAY_SECONDS,
         "BATCH_FLUSH_SIZE": 60,
-        "BATCH_FLUSH_ROWS": 10,
+        "BATCH_FLUSH_ROWS": 5,
         "BATCH_FLUSH_CELLS": 140,
     }
     return svc_process_sheet_once(
