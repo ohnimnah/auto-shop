@@ -49,6 +49,53 @@ def build_image_folder_name(row_num: int, row_start: int, product_name: str) -> 
     return f"{display_index}. {safe_name}"
 
 
+def find_product_price_candidates_from_state(data) -> List[int]:
+    """Recursively collect actual sale/list price candidates from mss_state."""
+    key_priority = (
+        "saleprice",
+        "goodsprice",
+        "discountprice",
+        "currentprice",
+        "normalprice",
+        "listprice",
+    )
+    excluded_key_tokens = (
+        "dcprice",
+        "discountamount",
+        "discountamt",
+        "discountrate",
+        "couponprice",
+        "couponappliedprice",
+        "couponapplyprice",
+        "benefitprice",
+        "maxbenefitprice",
+    )
+    found = []
+
+    def walk(obj):
+        if isinstance(obj, dict):
+            for k, v in obj.items():
+                lk = str(k).lower().replace("_", "")
+                if any(token in lk for token in excluded_key_tokens):
+                    walk(v)
+                    continue
+                if isinstance(v, (int, float)):
+                    iv = int(v)
+                    if iv >= 1000:
+                        for idx, key in enumerate(key_priority):
+                            if key in lk:
+                                found.append((idx, iv))
+                                break
+                walk(v)
+        elif isinstance(obj, list):
+            for item in obj:
+                walk(item)
+
+    walk(data)
+    found.sort(key=lambda x: (x[0], x[1]))
+    return [v for _, v in found]
+
+
 def normalize_image_source(src: str) -> str:
     """Normalize image URL to a downloadable Musinsa CDN URL."""
     if not src:
@@ -1257,43 +1304,6 @@ def scrape_musinsa_product(
         text = (value or "").strip()
         return text in {"", "\uac00\uaca9 \ubbf8\ud655\uc778", "?? ???", "?????????"}
 
-    def _find_price_candidates_from_state(data) -> List[int]:
-        """Recursively collect coupon/benefit/sale/normal price candidates from mss_state."""
-        key_priority = (
-            "maxbenefitprice",
-            "benefitprice",
-            "couponappliedprice",
-            "couponapplyprice",
-            "coupondcprice",
-            "couponprice",
-            "saleprice",
-            "discountprice",
-            "currentprice",
-            "normalprice",
-            "listprice",
-        )
-        found = []  # (priority_index, value)
-
-        def walk(obj):
-            if isinstance(obj, dict):
-                for k, v in obj.items():
-                    lk = str(k).lower().replace("_", "")
-                    if isinstance(v, (int, float)):
-                        iv = int(v)
-                        if iv >= 1000:
-                            for idx, key in enumerate(key_priority):
-                                if key in lk:
-                                    found.append((idx, iv))
-                                    break
-                    walk(v)
-            elif isinstance(obj, list):
-                for item in obj:
-                    walk(item)
-
-        walk(data)
-        found.sort(key=lambda x: (x[0], x[1]))
-        return [v for _, v in found]
-
     try:
         print(f"    페이지 로드 중... {url}")
         driver.get(url)
@@ -1399,8 +1409,8 @@ def scrape_musinsa_product(
         if not size_text:
             size_text = extract_sizes(soup, opt_kind_cd)
 
-        # 0) structured state price (coupon/benefit/sale/normal priority)
-        state_price_candidates = _find_price_candidates_from_state(mss_state)
+        # 0) structured state price (sale/list price priority; excludes discount amounts)
+        state_price_candidates = find_product_price_candidates_from_state(mss_state)
         if state_price_candidates:
             price_text = format_price(state_price_candidates[0])
         else:

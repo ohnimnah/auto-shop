@@ -1130,11 +1130,8 @@ class SettingsPage(BasePage):
                     issues.append("Telegram을 쓰려면 Chat ID가 필요합니다.")
         entered_email = self.buyma_email_var.get().strip()
         entered_password = self.buyma_password_var.get().strip()
-        current_email = self.controller.buyma_credentials.load_email().strip()
         if entered_password and not entered_email:
             issues.append("BUYMA 비밀번호를 입력했다면 이메일도 함께 입력해 주세요.")
-        if entered_email and not entered_password and entered_email != current_email:
-            issues.append("BUYMA 이메일을 변경하려면 비밀번호도 함께 입력해 주세요.")
         return issues
 
     def _as_int(self, var: tk.StringVar, default: int) -> int:
@@ -1278,6 +1275,7 @@ class SettingsPage(BasePage):
                 payload = json.loads(response.read().decode("utf-8", "replace"))
             if not payload.get("ok"):
                 raise RuntimeError(str(payload))
+            self.controller.telegram_token_store.save(token)
             self.telegram_status_var.set("전송 성공")
             messagebox.showinfo("Telegram 테스트", "테스트 메시지를 전송했습니다.")
             return True
