@@ -256,12 +256,15 @@ def initialize_runtime_paths(data_dir: str = "", credentials_file: str = ""):
     global DATA_DIR, IMAGES_ROOT, CREDENTIALS_PATH
 
     env_data_dir = os.environ.get('AUTO_SHOP_DATA_DIR', '').strip()
+    env_images_dir = os.environ.get('AUTO_SHOP_IMAGES_DIR', '').strip()
     selected_data_dir = (data_dir or env_data_dir or DATA_DIR).strip()
     selected_data_dir = os.path.abspath(os.path.expanduser(selected_data_dir))
 
     DATA_DIR = selected_data_dir
-    # --data-dir가 명시적으로 지정된 경우에만 images 경로도 그 하위로 이동
-    if data_dir or env_data_dir:
+    if env_images_dir:
+        IMAGES_ROOT = os.path.abspath(os.path.expanduser(env_images_dir))
+    # --data-dir만 명시된 경우에는 images 경로도 그 하위로 이동
+    elif data_dir or env_data_dir:
         IMAGES_ROOT = os.path.join(DATA_DIR, 'images')
     else:
         IMAGES_ROOT = get_default_images_dir()
