@@ -1414,7 +1414,7 @@ class SettingsPage(BasePage):
 
     def _clear_log_files(self) -> bool:
         try:
-            logs_dir = os.path.join(self.controller.data_dir, "logs")
+            logs_dir = self.controller._get_configured_log_dir()
             if os.path.isdir(logs_dir):
                 for name in os.listdir(logs_dir):
                     path = os.path.join(logs_dir, name)

@@ -6,6 +6,7 @@ import json
 import os
 import threading
 from datetime import datetime
+from typing import Callable
 
 from state.app_state import LogEvent
 
@@ -13,12 +14,13 @@ from state.app_state import LogEvent
 class FileLogWriter:
     """Append structured launcher logs as JSON lines."""
 
-    def __init__(self, log_dir: str) -> None:
+    def __init__(self, log_dir: str | Callable[[], str]) -> None:
         self.log_dir = log_dir
         self._lock = threading.RLock()
 
     def handle(self, event: LogEvent) -> None:
-        os.makedirs(self.log_dir, exist_ok=True)
+        log_dir = self._resolve_log_dir()
+        os.makedirs(log_dir, exist_ok=True)
         path = self._path_for(event.timestamp)
         payload = {
             "timestamp": event.timestamp.isoformat(timespec="seconds"),
@@ -32,4 +34,9 @@ class FileLogWriter:
                 file.write(line + "\n")
 
     def _path_for(self, timestamp: datetime) -> str:
-        return os.path.join(self.log_dir, f"launcher-{timestamp:%Y-%m-%d}.log")
+        return os.path.join(self._resolve_log_dir(), f"launcher-{timestamp:%Y-%m-%d}.log")
+
+    def _resolve_log_dir(self) -> str:
+        if callable(self.log_dir):
+            return os.path.abspath(os.path.expanduser(self.log_dir()))
+        return os.path.abspath(os.path.expanduser(self.log_dir))

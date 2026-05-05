@@ -7,7 +7,7 @@ import os
 import re
 from datetime import datetime
 from functools import lru_cache
-from typing import Iterable
+from typing import Callable, Iterable
 
 from config.config_service import load_config as load_profile_config
 from core.process_manager import ProcessManager
@@ -87,6 +87,7 @@ class DashboardDataService:
         process_manager: ProcessManager,
         system_checker: SystemChecker,
         pipeline_service: LauncherPipelineService,
+        get_log_dir: Callable[[], str] | None = None,
     ) -> None:
         self.data_dir = data_dir
         self.script_dir = script_dir
@@ -94,6 +95,7 @@ class DashboardDataService:
         self.process_manager = process_manager
         self.system_checker = system_checker
         self.pipeline_service = pipeline_service
+        self.get_log_dir = get_log_dir or (lambda: os.path.join(self.data_dir, "logs"))
 
     def refresh(self) -> None:
         self.clear_caches()
@@ -230,7 +232,7 @@ class DashboardDataService:
             "sheet_name": str((tabs_cfg.get("product_input") or config.get("sheet_name") or "")).strip(),
             "log_sheet_name": str((tabs_cfg.get("log") or config.get("log_sheet_name") or "log")).strip(),
             "images_dir": self._safe_path(config.get("images_dir") or ""),
-            "log_dir": self._safe_path(os.path.join(self.data_dir, "logs")),
+            "log_dir": self._safe_path(self.get_log_dir()),
             "buyma_email": self.system_checker.load_buyma_email(),
             "buyma_credentials_path": self._safe_path(self.system_checker.get_buyma_credentials_target_path()),
             "max_concurrency": "1",
@@ -607,7 +609,7 @@ class DashboardDataService:
         return os.path.abspath(os.path.expanduser(path))
 
     def _load_recent_log_lines(self, *, limit: int = 30, categories: set[str] | None = None) -> list[str]:
-        path = os.path.join(self.data_dir, "logs", f"launcher-{datetime.now():%Y-%m-%d}.log")
+        path = os.path.join(self.get_log_dir(), f"launcher-{datetime.now():%Y-%m-%d}.log")
         if not os.path.exists(path):
             return []
         lines: list[str] = []

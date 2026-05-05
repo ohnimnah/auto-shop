@@ -139,7 +139,7 @@ class AutoShopLauncher(tk.Tk):
         self.snapshot_store = StateSnapshotStore(os.path.join(self.data_dir, "launcher_state_snapshot.json"))
         self.snapshot_store.load_into(self.state)
         self.logger = AppLogger()
-        self.file_log_writer = FileLogWriter(os.path.join(self.data_dir, "logs"))
+        self.file_log_writer = FileLogWriter(self._get_configured_log_dir)
         self.system_checker = SystemChecker(
             script_dir=SCRIPT_DIR,
             data_dir=self.data_dir,
@@ -176,6 +176,7 @@ class AutoShopLauncher(tk.Tk):
             process_manager=self.process_manager,
             system_checker=self.system_checker,
             pipeline_service=self.action_runner.pipeline_service,
+            get_log_dir=self._get_configured_log_dir,
         )
         self.logger.subscribe(self._enqueue_log)
         self.logger.subscribe(self.file_log_writer.handle)
@@ -1131,7 +1132,7 @@ class AutoShopLauncher(tk.Tk):
         self.after(1000, self._update_clock)
 
     def _show_log_folder_hint(self) -> None:
-        messagebox.showinfo("로그 폴더", f"현재 작업 폴더:\n{SCRIPT_DIR}")
+        messagebox.showinfo("로그 폴더", f"현재 로그 폴더:\n{self._get_configured_log_dir()}")
 
     def _show_program_info(self) -> None:
         messagebox.showinfo("프로그램 정보", "물류 자동화 런처 1.0.0\nPython 기반 운영 대시보드")
@@ -1919,6 +1920,13 @@ class AutoShopLauncher(tk.Tk):
         if configured:
             return os.path.abspath(os.path.expanduser(configured))
         return get_default_images_dir()
+
+    def _get_configured_log_dir(self) -> str:
+        cfg = self._load_sheet_config()
+        configured = (cfg.get("log_dir") or "").strip()
+        if configured:
+            return os.path.abspath(os.path.expanduser(configured))
+        return os.path.join(self.data_dir, "logs")
 
     def _save_sheet_config(self, config: dict) -> bool:
         try:

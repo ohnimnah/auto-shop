@@ -64,6 +64,20 @@ class AppStateTests(unittest.TestCase):
             self.assertEqual(len(files), 1)
             self.assertIn('"message": "hello"', files[0].read_text(encoding="utf-8"))
 
+    def test_file_log_writer_uses_dynamic_log_dir(self):
+        with self._workspace_tempdir() as first_dir, self._workspace_tempdir() as second_dir:
+            current = {"path": first_dir}
+            writer = FileLogWriter(lambda: current["path"])
+
+            writer.handle(LogEvent(level="INFO", category="test", message="first"))
+            current["path"] = second_dir
+            writer.handle(LogEvent(level="INFO", category="test", message="second"))
+
+            first_files = list(__import__("pathlib").Path(first_dir).glob("launcher-*.log"))
+            second_files = list(__import__("pathlib").Path(second_dir).glob("launcher-*.log"))
+            self.assertEqual(len(first_files), 1)
+            self.assertEqual(len(second_files), 1)
+
 
 if __name__ == "__main__":
     unittest.main()
