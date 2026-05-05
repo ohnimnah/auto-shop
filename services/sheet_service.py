@@ -16,6 +16,22 @@ def column_index_to_letter(index: int) -> str:
     return result
 
 
+def column_letter_to_index(column: str) -> int:
+    """Convert a Google Sheets column letter to 0-based index."""
+    value = (column or "").strip().upper()
+    if not re.fullmatch(r"[A-Z]+", value):
+        return -1
+    result = 0
+    for char in value:
+        result = result * 26 + (ord(char) - 64)
+    return result - 1
+
+
+def max_column_letter(*columns: str) -> str:
+    indexes = [column_letter_to_index(column) for column in columns]
+    return column_index_to_letter(max([idx for idx in indexes if idx >= 0] or [24]))
+
+
 def get_sheet_header_map(service, spreadsheet_id: str, sheet_name: str, header_row: int) -> Dict[str, int]:
     """Read header row and return header-name -> column-index map."""
     try:
@@ -265,32 +281,42 @@ def get_existing_row_values(
     category_small_column: str,
 ) -> Dict[str, str]:
     """Read one row (A~Y) and map selected columns."""
+    columns = [
+        sequence_column, url_column, brand_column, brand_en_column, product_name_kr_column, product_name_en_column,
+        musinsa_sku_column, color_kr_column, color_en_column, size_column, actual_size_column, price_column,
+        buyma_sell_price_column, image_paths_column, shipping_cost_column, category_large_column,
+        category_middle_column, category_small_column,
+    ]
+    last_column = max_column_letter(*columns)
     try:
         result = service.spreadsheets().values().get(
             spreadsheetId=spreadsheet_id,
-            range=f"'{sheet_name}'!A{row_num}:Y{row_num}",
+            range=f"'{sheet_name}'!A{row_num}:{last_column}{row_num}",
         ).execute()
         rows = result.get("values", [])
         row = rows[0] if rows else []
+        def cell(column: str) -> str:
+            index = column_letter_to_index(column)
+            return row[index] if 0 <= index < len(row) else ""
         return {
-            sequence_column: row[0] if len(row) > 0 else "",
-            url_column: row[1] if len(row) > 1 else "",
-            brand_column: row[2] if len(row) > 2 else "",
-            brand_en_column: row[3] if len(row) > 3 else "",
-            product_name_kr_column: row[4] if len(row) > 4 else "",
-            product_name_en_column: row[5] if len(row) > 5 else "",
-            musinsa_sku_column: row[6] if len(row) > 6 else "",
-            color_kr_column: row[7] if len(row) > 7 else "",
-            color_en_column: row[8] if len(row) > 8 else "",
-            size_column: row[9] if len(row) > 9 else "",
-            actual_size_column: row[10] if len(row) > 10 else "",
-            price_column: row[11] if len(row) > 11 else "",
-            buyma_sell_price_column: row[12] if len(row) > 12 else "",
-            image_paths_column: row[13] if len(row) > 13 else "",
-            shipping_cost_column: row[14] if len(row) > 14 else "",
-            category_large_column: row[22] if len(row) > 22 else "",
-            category_middle_column: row[23] if len(row) > 23 else "",
-            category_small_column: row[24] if len(row) > 24 else "",
+            sequence_column: cell(sequence_column),
+            url_column: cell(url_column),
+            brand_column: cell(brand_column),
+            brand_en_column: cell(brand_en_column),
+            product_name_kr_column: cell(product_name_kr_column),
+            product_name_en_column: cell(product_name_en_column),
+            musinsa_sku_column: cell(musinsa_sku_column),
+            color_kr_column: cell(color_kr_column),
+            color_en_column: cell(color_en_column),
+            size_column: cell(size_column),
+            actual_size_column: cell(actual_size_column),
+            price_column: cell(price_column),
+            buyma_sell_price_column: cell(buyma_sell_price_column),
+            image_paths_column: cell(image_paths_column),
+            shipping_cost_column: cell(shipping_cost_column),
+            category_large_column: cell(category_large_column),
+            category_middle_column: cell(category_middle_column),
+            category_small_column: cell(category_small_column),
         }
     except Exception as e:
         print(f" {sheet_name} {row_num} existing row read failed: {e}")
@@ -324,36 +350,46 @@ def get_existing_rows_bulk(
     """Read multiple rows (A~Y) in one request and map selected columns."""
     if not row_numbers:
         return {}
+    columns = [
+        sequence_column, url_column, brand_column, brand_en_column, product_name_kr_column, product_name_en_column,
+        musinsa_sku_column, color_kr_column, color_en_column, size_column, actual_size_column, price_column,
+        buyma_sell_price_column, image_paths_column, shipping_cost_column, category_large_column,
+        category_middle_column, category_small_column,
+    ]
+    last_column = max_column_letter(*columns)
     min_row = min(row_numbers)
     max_row = max(row_numbers)
     try:
         result = service.spreadsheets().values().get(
             spreadsheetId=spreadsheet_id,
-            range=f"'{sheet_name}'!A{min_row}:Y{max_row}",
+            range=f"'{sheet_name}'!A{min_row}:{last_column}{max_row}",
         ).execute()
         values = result.get("values", [])
         row_map: Dict[int, Dict[str, str]] = {}
         for offset, row_num in enumerate(range(min_row, max_row + 1)):
             row_values = values[offset] if offset < len(values) else []
+            def cell(column: str, row=row_values) -> str:
+                index = column_letter_to_index(column)
+                return row[index] if 0 <= index < len(row) else ""
             row_map[row_num] = {
-                sequence_column: row_values[0] if len(row_values) > 0 else "",
-                url_column: row_values[1] if len(row_values) > 1 else "",
-                brand_column: row_values[2] if len(row_values) > 2 else "",
-                brand_en_column: row_values[3] if len(row_values) > 3 else "",
-                product_name_kr_column: row_values[4] if len(row_values) > 4 else "",
-                product_name_en_column: row_values[5] if len(row_values) > 5 else "",
-                musinsa_sku_column: row_values[6] if len(row_values) > 6 else "",
-                color_kr_column: row_values[7] if len(row_values) > 7 else "",
-                color_en_column: row_values[8] if len(row_values) > 8 else "",
-                size_column: row_values[9] if len(row_values) > 9 else "",
-                actual_size_column: row_values[10] if len(row_values) > 10 else "",
-                price_column: row_values[11] if len(row_values) > 11 else "",
-                buyma_sell_price_column: row_values[12] if len(row_values) > 12 else "",
-                image_paths_column: row_values[13] if len(row_values) > 13 else "",
-                shipping_cost_column: row_values[14] if len(row_values) > 14 else "",
-                category_large_column: row_values[22] if len(row_values) > 22 else "",
-                category_middle_column: row_values[23] if len(row_values) > 23 else "",
-                category_small_column: row_values[24] if len(row_values) > 24 else "",
+                sequence_column: cell(sequence_column),
+                url_column: cell(url_column),
+                brand_column: cell(brand_column),
+                brand_en_column: cell(brand_en_column),
+                product_name_kr_column: cell(product_name_kr_column),
+                product_name_en_column: cell(product_name_en_column),
+                musinsa_sku_column: cell(musinsa_sku_column),
+                color_kr_column: cell(color_kr_column),
+                color_en_column: cell(color_en_column),
+                size_column: cell(size_column),
+                actual_size_column: cell(actual_size_column),
+                price_column: cell(price_column),
+                buyma_sell_price_column: cell(buyma_sell_price_column),
+                image_paths_column: cell(image_paths_column),
+                shipping_cost_column: cell(shipping_cost_column),
+                category_large_column: cell(category_large_column),
+                category_middle_column: cell(category_middle_column),
+                category_small_column: cell(category_small_column),
             }
         return row_map
     except Exception as e:

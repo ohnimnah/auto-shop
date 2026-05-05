@@ -9,7 +9,7 @@ import time
 from copy import deepcopy
 from typing import Any
 
-from config.app_config import DEFAULT_SHEET_NAME, DEFAULT_SPREADSHEET_ID
+from config.app_config import DEFAULT_SHEET_COLUMNS, DEFAULT_SHEET_NAME, DEFAULT_SPREADSHEET_ID
 
 
 DEFAULT_PROFILE_NAME = "default"
@@ -59,6 +59,7 @@ def default_config() -> dict[str, Any]:
             "images_dir": "",
             "log_dir": "",
         },
+        "columns": dict(DEFAULT_SHEET_COLUMNS),
         "buyma": {
             "email": "",
         },
@@ -207,6 +208,7 @@ def _legacy_to_config(legacy: dict[str, Any]) -> dict[str, Any]:
             "images_dir": str(legacy.get("images_dir") or "").strip(),
             "log_dir": str(legacy.get("log_dir") or "").strip(),
         },
+        "columns": dict(legacy.get("columns") or legacy.get("upload_columns") or {}),
     }
 
 

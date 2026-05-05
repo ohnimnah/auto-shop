@@ -43,12 +43,36 @@ SIZE_COLUMN = "J"
 ACTUAL_SIZE_COLUMN = "K"
 PRICE_COLUMN = "L"
 BAIMA_SELL_PRICE_COLUMN = "M"
-IMAGE_PATHS_COLUMN = "N"
-SHIPPING_COST_COLUMN = "O"
-CATEGORY_LARGE_COLUMN = "W"
-CATEGORY_MIDDLE_COLUMN = "X"
-CATEGORY_SMALL_COLUMN = "Y"
+IMAGE_PATHS_COLUMN = "O"
+SHIPPING_COST_COLUMN = "P"
+CATEGORY_LARGE_COLUMN = "X"
+CATEGORY_MIDDLE_COLUMN = "Y"
+CATEGORY_SMALL_COLUMN = "Z"
+SHIPPING_TABLE_RANGE = "AA1:AC60"
 DEFAULT_ROW_START = 2
+
+DEFAULT_SHEET_COLUMNS = {
+    "sequence": SEQUENCE_COLUMN,
+    "url": URL_COLUMN,
+    "brand": BRAND_COLUMN,
+    "brand_en": BRAND_EN_COLUMN,
+    "product_name_kr": PRODUCT_NAME_KR_COLUMN,
+    "product_name_en": PRODUCT_NAME_EN_COLUMN,
+    "musinsa_sku": MUSINSA_SKU_COLUMN,
+    "color_kr": COLOR_KR_COLUMN,
+    "color_en": COLOR_EN_COLUMN,
+    "size": SIZE_COLUMN,
+    "actual_size": ACTUAL_SIZE_COLUMN,
+    "price": PRICE_COLUMN,
+    "buyma_price": BAIMA_SELL_PRICE_COLUMN,
+    "buyma_meta": "N",
+    "image_paths": IMAGE_PATHS_COLUMN,
+    "shipping_cost": SHIPPING_COST_COLUMN,
+    "category_large": CATEGORY_LARGE_COLUMN,
+    "category_middle": CATEGORY_MIDDLE_COLUMN,
+    "category_small": CATEGORY_SMALL_COLUMN,
+    "shipping_table_range": SHIPPING_TABLE_RANGE,
+}
 
 # 상품명 키워드 → 추정 무게(kg)
 KEYWORD_WEIGHT_RULES: List[Tuple[List[str], float]] = [

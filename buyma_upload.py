@@ -112,17 +112,17 @@ DEFAULT_UPLOAD_COLUMNS = {
     "actual_size": "K",
     "price_krw": "L",
     "buyma_price": "M",
-    "image_paths": "N",
-    "shipping_cost": "O",
+    "image_paths": "O",
+    "shipping_cost": "P",
     "category_legacy_large": "V",
     "category_legacy_middle": "W",
     "category_legacy_small": "X",
-    "musinsa_category_large": "W",
-    "musinsa_category_middle": "X",
-    "musinsa_category_small": "Y",
+    "musinsa_category_large": "X",
+    "musinsa_category_middle": "Y",
+    "musinsa_category_small": "Z",
 }
 UPLOAD_COLUMNS = dict(DEFAULT_UPLOAD_COLUMNS)
-UPLOAD_MAX_DATA_COLUMN = "Y"
+UPLOAD_MAX_DATA_COLUMN = "Z"
 
 
 def _get_candidate_sheet_name() -> str:
@@ -215,6 +215,31 @@ def _load_sheet_runtime_config() -> None:
     product_input_sheet = str(tabs_cfg.get("product_input") or "").strip()
     if product_input_sheet:
         SHEET_NAME = product_input_sheet
+
+    profile_columns = _normalize_upload_columns(
+        {
+            "url": (profile_config.get("columns") or {}).get("url"),
+            "brand": (profile_config.get("columns") or {}).get("brand"),
+            "brand_en": (profile_config.get("columns") or {}).get("brand_en"),
+            "product_name_kr": (profile_config.get("columns") or {}).get("product_name_kr"),
+            "product_name_en": (profile_config.get("columns") or {}).get("product_name_en"),
+            "musinsa_sku": (profile_config.get("columns") or {}).get("musinsa_sku"),
+            "color_kr": (profile_config.get("columns") or {}).get("color_kr"),
+            "color_en": (profile_config.get("columns") or {}).get("color_en"),
+            "size": (profile_config.get("columns") or {}).get("size"),
+            "actual_size": (profile_config.get("columns") or {}).get("actual_size"),
+            "price_krw": (profile_config.get("columns") or {}).get("price"),
+            "buyma_price": (profile_config.get("columns") or {}).get("buyma_price"),
+            "image_paths": (profile_config.get("columns") or {}).get("image_paths"),
+            "shipping_cost": (profile_config.get("columns") or {}).get("shipping_cost"),
+            "musinsa_category_large": (profile_config.get("columns") or {}).get("category_large"),
+            "musinsa_category_middle": (profile_config.get("columns") or {}).get("category_middle"),
+            "musinsa_category_small": (profile_config.get("columns") or {}).get("category_small"),
+        }
+    )
+    if profile_columns:
+        UPLOAD_COLUMNS = {**DEFAULT_UPLOAD_COLUMNS, **profile_columns}
+        UPLOAD_MAX_DATA_COLUMN = profile_columns.get("musinsa_category_small", UPLOAD_MAX_DATA_COLUMN)
 
 
 _load_sheet_runtime_config()

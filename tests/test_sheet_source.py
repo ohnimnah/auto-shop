@@ -15,14 +15,14 @@ DEFAULT_UPLOAD_COLUMNS = {
     "actual_size": "K",
     "price_krw": "L",
     "buyma_price": "M",
-    "image_paths": "N",
-    "shipping_cost": "O",
+    "image_paths": "O",
+    "shipping_cost": "P",
     "category_legacy_large": "V",
     "category_legacy_middle": "W",
     "category_legacy_small": "X",
-    "musinsa_category_large": "W",
-    "musinsa_category_middle": "X",
-    "musinsa_category_small": "Y",
+    "musinsa_category_large": "X",
+    "musinsa_category_middle": "Y",
+    "musinsa_category_small": "Z",
 }
 
 
@@ -38,17 +38,17 @@ class _FakeValues:
     def get(self, *, spreadsheetId, range):
         if range.endswith("1:1"):
             return _FakeRequest({"values": [["진행상태"]]})
-        row = [""] * 25
+        row = [""] * 26
         row[column_letter_to_index("B")] = "https://example.com/product"
         row[column_letter_to_index("C")] = "Brand KR"
         row[column_letter_to_index("D")] = "Brand EN"
         row[column_letter_to_index("E")] = "상품명"
         row[column_letter_to_index("M")] = "12300"
-        row[column_letter_to_index("N")] = "/tmp/images"
-        row[column_letter_to_index("O")] = "1200"
-        row[column_letter_to_index("W")] = "여성"
-        row[column_letter_to_index("X")] = "바지"
-        row[column_letter_to_index("Y")] = "데님"
+        row[column_letter_to_index("O")] = "/tmp/images"
+        row[column_letter_to_index("P")] = "1200"
+        row[column_letter_to_index("X")] = "여성"
+        row[column_letter_to_index("Y")] = "바지"
+        row[column_letter_to_index("Z")] = "데님"
         return _FakeRequest({"values": [row]})
 
 

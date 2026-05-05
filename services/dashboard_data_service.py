@@ -51,7 +51,7 @@ UPLOAD_RECENT_EXCLUDE_WORDS = (
 )
 SHEET_COL_NAME_KR = 4  # E열 (0-based)
 SHEET_COL_PRICE_BUYMA = 12  # M열 (0-based)
-SHEET_COL_MUSINSA_SUBCATEGORY = 24  # Y열 (0-based, 무신사 소분류)
+SHEET_COL_MUSINSA_SUBCATEGORY = 25  # Z열 (0-based, 무신사 소분류)
 SHEET_COL_CATEGORY_BUYMA = 11  # L열 (0-based, 보조)
 
 
@@ -440,7 +440,7 @@ class DashboardDataService:
             sheet=sheet,
             updated=pick("updated", "최종 업데이트", "updated_at", "timestamp") or datetime.now().strftime("%H:%M:%S"),
             action="재실행 / 열기" if self._is_error(state) else "실행 / 열기",
-            image_paths=get(13) or pick("image_paths", "이미지경로", "image_path"),
+            image_paths=get(14) or pick("image_paths", "이미지경로", "image_path"),
         )
 
     def _product_from_sequence(self, row: list[str], fallback_no: str, sheet: str) -> ProductRow:
@@ -465,7 +465,7 @@ class DashboardDataService:
             sheet=sheet,
             updated=get(6) or datetime.now().strftime("%H:%M:%S"),
             action="재실행 / 열기" if self._is_error(state) else "실행 / 열기",
-            image_paths=get(13),
+            image_paths=get(14),
         )
 
     def _canonical_name(self, text: str) -> str:

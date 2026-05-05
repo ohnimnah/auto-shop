@@ -39,6 +39,7 @@ from config.app_config import (
     DEFAULT_SHEET_GIDS,
     DEFAULT_SHEET_NAME,
     DEFAULT_SPREADSHEET_ID,
+    DEFAULT_SHEET_COLUMNS,
     DEFAULT_WEIGHT_KG,
     HEADLESS,
     HEADER_ROW,
@@ -56,6 +57,7 @@ from config.app_config import (
     PROGRESS_STATUS_HEADER,
     SEQUENCE_COLUMN,
     SHIPPING_COST_COLUMN,
+    SHIPPING_TABLE_RANGE,
     SIZE_COLUMN,
     STATUS_IMAGE_READY,
     STATUS_THUMBNAIL_READY,
@@ -160,6 +162,44 @@ LISTING_SEED_SHEET_NAME = ""
 def _load_sheet_runtime_config() -> None:
     """런처에서 저장한 시트 설정을 읽어 런타임 기본값을 덮어쓴다."""
     global SPREADSHEET_ID, SHEET_GIDS, SHEET_NAME, ROW_START, LISTING_QUEUE_SHEET_NAME, LISTING_QUEUE_SHEET_URL, LISTING_SEED_SHEET_NAME
+    global SEQUENCE_COLUMN, URL_COLUMN, BRAND_COLUMN, BRAND_EN_COLUMN, PRODUCT_NAME_KR_COLUMN, PRODUCT_NAME_EN_COLUMN
+    global MUSINSA_SKU_COLUMN, COLOR_KR_COLUMN, COLOR_EN_COLUMN, SIZE_COLUMN, ACTUAL_SIZE_COLUMN, PRICE_COLUMN
+    global BAIMA_SELL_PRICE_COLUMN, IMAGE_PATHS_COLUMN, SHIPPING_COST_COLUMN, CATEGORY_LARGE_COLUMN, CATEGORY_MIDDLE_COLUMN, CATEGORY_SMALL_COLUMN
+    global SHIPPING_TABLE_RANGE
+
+    def _apply_columns(raw_columns):
+        global SEQUENCE_COLUMN, URL_COLUMN, BRAND_COLUMN, BRAND_EN_COLUMN, PRODUCT_NAME_KR_COLUMN, PRODUCT_NAME_EN_COLUMN
+        global MUSINSA_SKU_COLUMN, COLOR_KR_COLUMN, COLOR_EN_COLUMN, SIZE_COLUMN, ACTUAL_SIZE_COLUMN, PRICE_COLUMN
+        global BAIMA_SELL_PRICE_COLUMN, IMAGE_PATHS_COLUMN, SHIPPING_COST_COLUMN, CATEGORY_LARGE_COLUMN, CATEGORY_MIDDLE_COLUMN, CATEGORY_SMALL_COLUMN
+        global SHIPPING_TABLE_RANGE
+        if not isinstance(raw_columns, dict):
+            return
+        normalized = {}
+        for key, default_value in DEFAULT_SHEET_COLUMNS.items():
+            raw_value = str(raw_columns.get(key) or "").strip().upper()
+            if key == "shipping_table_range":
+                normalized[key] = raw_value if re.fullmatch(r"[A-Z]+[0-9]+:[A-Z]+[0-9]+", raw_value) else default_value
+            else:
+                normalized[key] = raw_value if re.fullmatch(r"[A-Z]+", raw_value) else default_value
+        SEQUENCE_COLUMN = normalized["sequence"]
+        URL_COLUMN = normalized["url"]
+        BRAND_COLUMN = normalized["brand"]
+        BRAND_EN_COLUMN = normalized["brand_en"]
+        PRODUCT_NAME_KR_COLUMN = normalized["product_name_kr"]
+        PRODUCT_NAME_EN_COLUMN = normalized["product_name_en"]
+        MUSINSA_SKU_COLUMN = normalized["musinsa_sku"]
+        COLOR_KR_COLUMN = normalized["color_kr"]
+        COLOR_EN_COLUMN = normalized["color_en"]
+        SIZE_COLUMN = normalized["size"]
+        ACTUAL_SIZE_COLUMN = normalized["actual_size"]
+        PRICE_COLUMN = normalized["price"]
+        BAIMA_SELL_PRICE_COLUMN = normalized["buyma_price"]
+        IMAGE_PATHS_COLUMN = normalized["image_paths"]
+        SHIPPING_COST_COLUMN = normalized["shipping_cost"]
+        CATEGORY_LARGE_COLUMN = normalized["category_large"]
+        CATEGORY_MIDDLE_COLUMN = normalized["category_middle"]
+        CATEGORY_SMALL_COLUMN = normalized["category_small"]
+        SHIPPING_TABLE_RANGE = normalized["shipping_table_range"]
     local_app_data = os.environ.get('LOCALAPPDATA', '').strip()
     if local_app_data:
         data_dir = os.path.join(local_app_data, 'auto_shop')
@@ -214,6 +254,7 @@ def _load_sheet_runtime_config() -> None:
         rstart = cfg.get('row_start')
         if isinstance(rstart, int) and rstart >= 1:
             ROW_START = rstart
+        _apply_columns(cfg.get("columns") or cfg.get("upload_columns"))
     except Exception as e:
         print(f"시트 설정 로드 실패: {e}")
 
@@ -242,6 +283,8 @@ def _load_sheet_runtime_config() -> None:
     scout_queue_sheet = str(tabs_cfg.get("scout_queue") or "").strip()
     if scout_queue_sheet:
         LISTING_QUEUE_SHEET_NAME = scout_queue_sheet
+
+    _apply_columns(profile_config.get("columns") or {})
 
 
 _load_sheet_runtime_config()
@@ -392,7 +435,7 @@ def resolve_image_folder_from_paths(image_paths: str) -> str:
 
 def build_thumbnail_brand(existing_values: Dict[str, str]) -> str:
     """썸네일용 브랜드명을 우선순위대로 반환한다."""
-    return svc_build_thumbnail_brand(existing_values)
+    return (existing_values.get(BRAND_EN_COLUMN, "") or existing_values.get(BRAND_COLUMN, "") or "BRAND").strip()
 
 
 def create_thumbnail_for_folder(folder_path: str, brand: str) -> bool:
@@ -714,6 +757,7 @@ def process_sheet_once(
             service=svc,
             spreadsheet_id=SPREADSHEET_ID,
             sheet_name=target_sheet,
+            range_a1=SHIPPING_TABLE_RANGE,
         ),
         "estimate_weight": lambda product_name, opt_kind_cd: svc_estimate_weight(
             product_name=product_name,
@@ -761,6 +805,18 @@ def process_sheet_once(
         "BATCH_FLUSH_SIZE": 60,
         "BATCH_FLUSH_ROWS": 5,
         "BATCH_FLUSH_CELLS": 140,
+        "BRAND_COLUMN": BRAND_COLUMN,
+        "BRAND_EN_COLUMN": BRAND_EN_COLUMN,
+        "PRODUCT_NAME_KR_COLUMN": PRODUCT_NAME_KR_COLUMN,
+        "MUSINSA_SKU_COLUMN": MUSINSA_SKU_COLUMN,
+        "COLOR_KR_COLUMN": COLOR_KR_COLUMN,
+        "SIZE_COLUMN": SIZE_COLUMN,
+        "ACTUAL_SIZE_COLUMN": ACTUAL_SIZE_COLUMN,
+        "PRICE_COLUMN": PRICE_COLUMN,
+        "BUYMA_SELL_PRICE_COLUMN": BAIMA_SELL_PRICE_COLUMN,
+        "CATEGORY_LARGE_COLUMN": CATEGORY_LARGE_COLUMN,
+        "CATEGORY_MIDDLE_COLUMN": CATEGORY_MIDDLE_COLUMN,
+        "CATEGORY_SMALL_COLUMN": CATEGORY_SMALL_COLUMN,
     }
     return svc_process_sheet_once(
         service=service,

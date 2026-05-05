@@ -3,6 +3,7 @@ from __future__ import annotations
 import difflib
 import json
 import os
+import re
 import shutil
 import ssl
 import tkinter as tk
@@ -14,6 +15,7 @@ from datetime import datetime
 from tkinter import filedialog, messagebox, ttk
 from tkinter.scrolledtext import ScrolledText
 
+from config.app_config import DEFAULT_SHEET_COLUMNS
 from config.config_service import get_profile_config_path, load_config, save_config
 from ui.pages.base_page import BasePage, SECTION_GAP
 
@@ -40,6 +42,28 @@ class SettingsPage(BasePage):
         ("scout_queue", "scout_queue"),
         ("log", "log"),
         ("category_mapping_candidates", "category_mapping_candidates"),
+    )
+    COLUMN_FIELDS = (
+        ("sequence", "순서 컬럼"),
+        ("url", "링크 컬럼"),
+        ("brand", "브랜드 컬럼"),
+        ("brand_en", "영문 브랜드 컬럼"),
+        ("product_name_kr", "한국상품명 컬럼"),
+        ("product_name_en", "영문상품명 컬럼"),
+        ("musinsa_sku", "무신사품번 컬럼"),
+        ("color_kr", "색상 컬럼"),
+        ("color_en", "색상영문 컬럼"),
+        ("size", "사이즈 컬럼"),
+        ("actual_size", "실축사이즈 컬럼"),
+        ("price", "업로드상품가격 컬럼"),
+        ("buyma_price", "바이마판매가격 컬럼"),
+        ("buyma_meta", "바이마메타 컬럼"),
+        ("image_paths", "이미지경로 컬럼"),
+        ("shipping_cost", "해외배송료 컬럼"),
+        ("category_large", "무신사대분류 컬럼"),
+        ("category_middle", "무신사중분류 컬럼"),
+        ("category_small", "무신사소분류 컬럼"),
+        ("shipping_table_range", "배송비 산출표 범위"),
     )
 
     def __init__(self, parent: tk.Widget, controller) -> None:
@@ -83,6 +107,7 @@ class SettingsPage(BasePage):
         self.buyma_email_var = tk.StringVar()
         self.buyma_password_var = tk.StringVar()
         self.general_tab_vars = {key: tk.StringVar() for key, _label in self.GENERAL_TAB_FIELDS}
+        self.column_vars = {key: tk.StringVar() for key, _label in self.COLUMN_FIELDS}
 
         self.crawling_vars = {
             "max_pages": tk.StringVar(),
@@ -437,6 +462,7 @@ class SettingsPage(BasePage):
         lower.grid_columnconfigure(1, weight=1, uniform="general_lower")
         self._build_paths_card(lower, 0, 0, padx=(0, SECTION_GAP // 2))
         self._build_buyma_card(lower, 0, 1, padx=(SECTION_GAP // 2, 0))
+        self._build_columns_card(left, 3)
         self._build_status_panel(right)
         self._build_sheet_validation_panel(right)
         self._build_info_panel(right, title="작업 정보", body_rows=[("마지막 저장", self.last_saved_var), ("설정 파일 경로", self.config_path_var)])
@@ -654,6 +680,10 @@ class SettingsPage(BasePage):
         self._build_entry_row(body, 2, "log_dir", self.log_dir_var, button_text="폴더 선택", button_command=lambda: self._choose_directory(self.log_dir_var))
         self._build_entry_row(body, 4, "thumbnail_footer_suffix", self.thumbnail_footer_suffix_var)
 
+    def _build_columns_card(self, parent: tk.Widget, row: int) -> None:
+        fields = [(label, self.column_vars[key]) for key, label in self.COLUMN_FIELDS]
+        self._build_form_card(parent, row, "Sheet Columns", fields, columns=3)
+
     def _build_buyma_card(self, parent: tk.Widget, row: int, column: int, *, padx: tuple[int, int]) -> None:
         card, body = self._build_auto_card(parent, "BUYMA Account")
         card.grid(row=row, column=column, sticky="ew", padx=padx)
@@ -865,6 +895,7 @@ class SettingsPage(BasePage):
         paths = config.get("paths") or {}
         buyma = config.get("buyma") or {}
         tabs = spreadsheet.get("tabs") or {}
+        columns = {**DEFAULT_SHEET_COLUMNS, **(config.get("columns") or {})}
         crawling = config.get("crawling") or {}
         upload = config.get("upload") or {}
         notification = config.get("notification") or {}
@@ -874,6 +905,8 @@ class SettingsPage(BasePage):
         self.service_account_path_var.set(str(spreadsheet.get("credentials_path") or "").strip() or self.controller._get_available_credentials_path())
         for key, _label in self.GENERAL_TAB_FIELDS:
             self.general_tab_vars[key].set(str(tabs.get(key) or "").strip())
+        for key, _label in self.COLUMN_FIELDS:
+            self.column_vars[key].set(str(columns.get(key) or DEFAULT_SHEET_COLUMNS.get(key, "")).strip())
         self.images_dir_var.set(str(paths.get("images_dir") or "").strip() or self.controller._get_configured_images_dir())
         self.log_dir_var.set(str(paths.get("log_dir") or "").strip() or os.path.join(self.controller.data_dir, "logs"))
         footer_suffix = str(paths.get("thumbnail_footer_suffix") or "").strip()
@@ -970,6 +1003,25 @@ class SettingsPage(BasePage):
     def _get_telegram_bot_token(self) -> str:
         return self.notification_vars["telegram_bot_token"].get().strip() or self.controller.telegram_token_store.load()
 
+    def _max_column_letter(self, columns: dict) -> str:
+        max_index = 24
+        for key, value in columns.items():
+            if key == "shipping_table_range":
+                continue
+            text = str(value or "").strip().upper()
+            if not re.fullmatch(r"[A-Z]+", text):
+                continue
+            index = 0
+            for char in text:
+                index = index * 26 + (ord(char) - 64)
+            max_index = max(max_index, index - 1)
+        result = ""
+        current = max_index + 1
+        while current:
+            current, remainder = divmod(current - 1, 26)
+            result = chr(65 + remainder) + result
+        return result
+
     def _set_pending_statuses(self) -> None:
         muted = self.controller.theme["muted"]
         self.connection_color_var.set(muted)
@@ -997,6 +1049,9 @@ class SettingsPage(BasePage):
                 "thumbnail_footer_suffix": self.thumbnail_footer_suffix_var.get().strip(),
             }
         )
+        columns = current.setdefault("columns", {})
+        for key, _label in self.COLUMN_FIELDS:
+            columns[key] = self.column_vars[key].get().strip().upper()
         current.setdefault("buyma", {}).update({"email": self.buyma_email_var.get().strip()})
 
         current["crawling"] = {
@@ -1102,6 +1157,22 @@ class SettingsPage(BasePage):
         for key, label in self.GENERAL_TAB_FIELDS:
             if not self.general_tab_vars[key].get().strip():
                 issues.append(f"{label} 값을 입력해 주세요.")
+        seen_columns: dict[str, str] = {}
+        for key, label in self.COLUMN_FIELDS:
+            raw = self.column_vars[key].get().strip().upper()
+            if key == "shipping_table_range":
+                if not re.fullmatch(r"[A-Z]+[0-9]+:[A-Z]+[0-9]+", raw):
+                    issues.append(f"{label}는 Z1:AB60 같은 범위여야 합니다.")
+                continue
+            if key == "buyma_meta" and not raw:
+                continue
+            if not re.fullmatch(r"[A-Z]+", raw):
+                issues.append(f"{label}는 A, B, AA 같은 컬럼 문자여야 합니다.")
+                continue
+            if raw in seen_columns:
+                issues.append(f"{label}와 {seen_columns[raw]}가 같은 {raw}열을 사용합니다.")
+            else:
+                seen_columns[raw] = label
         for label, raw in (("images_dir", self.images_dir_var.get()), ("log_dir", self.log_dir_var.get())):
             path = os.path.abspath(os.path.expanduser(raw.strip()))
             if not path:
@@ -1355,6 +1426,7 @@ class SettingsPage(BasePage):
             self.diff_hint_var.set("저장된 설정과 동일합니다.")
 
             legacy = self.controller._load_sheet_config()
+            columns = config.get("columns", {})
             legacy.update(
                 {
                     "spreadsheet_id": config["spreadsheet"]["id"],
@@ -1368,6 +1440,27 @@ class SettingsPage(BasePage):
                     "log_dir": config["paths"]["log_dir"],
                     "thumbnail_footer_suffix": config["paths"].get("thumbnail_footer_suffix", ""),
                     "credentials_path": config["spreadsheet"].get("credentials_path", ""),
+                    "columns": columns,
+                    "upload_columns": {
+                        "url": columns.get("url", "B"),
+                        "brand": columns.get("brand", "C"),
+                        "brand_en": columns.get("brand_en", "D"),
+                        "product_name_kr": columns.get("product_name_kr", "E"),
+                        "product_name_en": columns.get("product_name_en", "F"),
+                        "musinsa_sku": columns.get("musinsa_sku", "G"),
+                        "color_kr": columns.get("color_kr", "H"),
+                        "color_en": columns.get("color_en", "I"),
+                        "size": columns.get("size", "J"),
+                        "actual_size": columns.get("actual_size", "K"),
+                        "price_krw": columns.get("price", "L"),
+                        "buyma_price": columns.get("buyma_price", "M"),
+                        "image_paths": columns.get("image_paths", "O"),
+                        "shipping_cost": columns.get("shipping_cost", "P"),
+                        "musinsa_category_large": columns.get("category_large", "X"),
+                        "musinsa_category_middle": columns.get("category_middle", "Y"),
+                        "musinsa_category_small": columns.get("category_small", "Z"),
+                    },
+                    "upload_max_data_column": self._max_column_letter(columns),
                 }
             )
             if not self.controller._save_sheet_config(legacy):
