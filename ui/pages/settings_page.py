@@ -1194,11 +1194,12 @@ class SettingsPage(BasePage):
             for label, var in numeric_checks:
                 if self._invalid_int(var):
                     issues.append(f"{label}는 숫자여야 합니다.")
-            if self.notification_vars["telegram_enabled"].get():
-                if not self._get_telegram_bot_token():
-                    issues.append("Telegram을 쓰려면 Bot Token이 필요합니다.")
-                if not self.notification_vars["telegram_chat_id"].get().strip():
-                    issues.append("Telegram을 쓰려면 Chat ID가 필요합니다.")
+            telegram_token = self.notification_vars["telegram_bot_token"].get().strip()
+            telegram_chat_id = self.notification_vars["telegram_chat_id"].get().strip()
+            if telegram_token and not telegram_chat_id:
+                issues.append("Telegram Bot Token을 입력했다면 Chat ID도 함께 입력해 주세요.")
+            if telegram_chat_id and not (telegram_token or self.controller.telegram_token_store.load()):
+                issues.append("Telegram Chat ID를 입력했다면 Bot Token도 함께 입력해 주세요.")
         entered_email = self.buyma_email_var.get().strip()
         entered_password = self.buyma_password_var.get().strip()
         if entered_password and not entered_email:
@@ -1408,8 +1409,6 @@ class SettingsPage(BasePage):
             telegram_token = self.notification_vars["telegram_bot_token"].get().strip()
             if telegram_token:
                 self.controller.telegram_token_store.save(telegram_token)
-            elif not self.notification_vars["telegram_enabled"].get():
-                self.controller.telegram_token_store.delete()
 
             config_path = save_config(self.controller.profile_name, config)
         except Exception as exc:
