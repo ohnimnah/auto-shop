@@ -91,6 +91,7 @@ def default_config() -> dict[str, Any]:
             "options": {
                 "download_images": True,
                 "generate_thumbnails": True,
+                "blur_faces": True,
                 "save_html": False,
                 "dedupe": True,
             },

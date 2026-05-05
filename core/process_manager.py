@@ -182,7 +182,12 @@ class ProcessManager:
             thread.join(timeout=5)
 
 
-def build_default_env(data_dir: str, images_dir: str, profile_name: str = "") -> dict[str, str]:
+def build_default_env(
+    data_dir: str,
+    images_dir: str,
+    profile_name: str = "",
+    thumbnail_blur_faces: bool | None = None,
+) -> dict[str, str]:
     env = os.environ.copy()
     env["PYTHONUNBUFFERED"] = "1"
     env["PYTHONIOENCODING"] = "utf-8"
@@ -191,6 +196,8 @@ def build_default_env(data_dir: str, images_dir: str, profile_name: str = "") ->
     env["AUTO_SHOP_DATA_DIR"] = data_dir
     if profile_name:
         env["AUTO_SHOP_PROFILE"] = profile_name
+    if thumbnail_blur_faces is not None:
+        env["AUTO_SHOP_THUMBNAIL_BLUR_FACES"] = "1" if thumbnail_blur_faces else "0"
     for proxy_key in ("HTTP_PROXY", "HTTPS_PROXY", "ALL_PROXY", "http_proxy", "https_proxy", "all_proxy"):
         env[proxy_key] = ""
     env["NO_PROXY"] = "*"

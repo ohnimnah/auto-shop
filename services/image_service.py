@@ -11,6 +11,7 @@ from typing import Dict, List
 from bs4 import BeautifulSoup
 
 from config.app_config import BRAND_COLUMN, BRAND_EN_COLUMN
+from config.config_service import DEFAULT_PROFILE_NAME, load_config
 from services.crawler_service import normalize_image_source as svc_normalize_image_source
 
 DEFAULT_THUMBNAIL_FOOTER_SUFFIX = "angduss k-closet"
@@ -77,6 +78,26 @@ def compose_thumbnail_footer(brand: str) -> str:
     return f"{brand} / {suffix}"
 
 
+def get_thumbnail_blur_faces_enabled() -> bool:
+    """Return whether generated thumbnails should blur detected faces."""
+    env_value = (os.environ.get("AUTO_SHOP_THUMBNAIL_BLUR_FACES") or "").strip().lower()
+    if env_value in {"1", "true", "yes", "on"}:
+        return True
+    if env_value in {"0", "false", "no", "off"}:
+        return False
+
+    profile_name = (os.environ.get("AUTO_SHOP_PROFILE") or DEFAULT_PROFILE_NAME).strip() or DEFAULT_PROFILE_NAME
+    try:
+        config = load_config(profile_name, create_if_missing=False)
+        options = ((config.get("crawling") or {}).get("options") or {})
+        if "blur_faces" in options:
+            return bool(options.get("blur_faces"))
+    except Exception:
+        pass
+
+    return True
+
+
 def create_thumbnail_for_folder(folder_path: str, brand: str) -> bool:
     """Create thumbnail for a folder by running make_thumbnails.py."""
     folder = os.path.abspath(os.path.expanduser(folder_path))
@@ -98,8 +119,9 @@ def create_thumbnail_for_folder(folder_path: str, brand: str) -> bool:
         brand,
         "--footer",
         footer,
-        "--blur-face",
     ]
+    if get_thumbnail_blur_faces_enabled():
+        command.append("--blur-face")
     try:
         completed = subprocess.run(
             command,

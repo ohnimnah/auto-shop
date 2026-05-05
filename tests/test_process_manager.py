@@ -54,6 +54,13 @@ class ProcessManagerTests(unittest.TestCase):
         self.assertEqual(env["PYTHONUTF8"], "1")
         self.assertEqual(env["AUTO_SHOP_PROFILE"], "operator-a")
 
+    def test_default_env_exports_thumbnail_blur_setting(self):
+        enabled_env = build_default_env("/tmp/data", "/tmp/images", "operator-a", thumbnail_blur_faces=True)
+        disabled_env = build_default_env("/tmp/data", "/tmp/images", "operator-a", thumbnail_blur_faces=False)
+
+        self.assertEqual(enabled_env["AUTO_SHOP_THUMBNAIL_BLUR_FACES"], "1")
+        self.assertEqual(disabled_env["AUTO_SHOP_THUMBNAIL_BLUR_FACES"], "0")
+
 
 if __name__ == "__main__":
     unittest.main()

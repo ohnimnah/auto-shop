@@ -159,7 +159,12 @@ class AutoShopLauncher(tk.Tk):
         )
         self.process_manager = ProcessManager(
             cwd=SCRIPT_DIR,
-            env_factory=lambda: build_default_env(self.data_dir, self._get_configured_images_dir(), self.profile_name),
+            env_factory=lambda: build_default_env(
+                self.data_dir,
+                self._get_configured_images_dir(),
+                self.profile_name,
+                thumbnail_blur_faces=self._get_thumbnail_blur_faces_enabled(),
+            ),
         )
         self.action_runner = ActionRunner(
             script_dir=SCRIPT_DIR,
@@ -1940,6 +1945,12 @@ class AutoShopLauncher(tk.Tk):
         configured = (cfg.get("thumbnail_footer_suffix") or "").strip()
         return configured or DEFAULT_THUMBNAIL_FOOTER_SUFFIX
 
+    def _get_thumbnail_blur_faces_enabled(self) -> bool:
+        options = ((self.profile_config.get("crawling") or {}).get("options") or {})
+        if "blur_faces" in options:
+            return bool(options.get("blur_faces"))
+        return True
+
     def configure_images_directory(self) -> bool:
         current_dir = self._get_configured_images_dir()
         selected_dir = filedialog.askdirectory(
@@ -2222,8 +2233,9 @@ class AutoShopLauncher(tk.Tk):
             brand,
             "--footer",
             footer,
-            "--blur-face",
         ]
+        if self._get_thumbnail_blur_faces_enabled():
+            command.append("--blur-face")
         self.action_runner.run_command(command, action="thumbnail-create", stage_key="design")
 
     def _drain_log_queue(self) -> None:

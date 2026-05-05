@@ -32,6 +32,7 @@ LOGO_BASENAMES = {"__brand_logo", "_brand_logo", "brand_logo", "logo"}
 YOLO_FACE_MODEL = os.environ.get("AUTO_SHOP_FACE_MODEL", "yolov8n-face.pt").strip() or "yolov8n-face.pt"
 _YOLO_FACE_MODEL_INSTANCE = None
 _YOLO_FACE_MODEL_FAILED = False
+_HAAR_FACE_CASCADE_FAILED = False
 
 
 def iter_images(input_path: Path):
@@ -277,26 +278,45 @@ def _detect_faces_yolo(pil_img: Image.Image) -> List[Tuple[int, int, int, int]]:
 
 
 def _detect_faces_haar(pil_img: Image.Image) -> List[Tuple[int, int, int, int]]:
+    global _HAAR_FACE_CASCADE_FAILED
     if cv2 is None or np is None:
+        return []
+    if _HAAR_FACE_CASCADE_FAILED:
         return []
 
     arr = np.array(pil_img)
     if arr.size == 0:
         return []
 
-    gray = cv2.cvtColor(arr, cv2.COLOR_RGB2GRAY)
-    cascade_path = cv2.data.haarcascades + "haarcascade_frontalface_default.xml"
-    face_cascade = cv2.CascadeClassifier(cascade_path)
+    cascade_dir = getattr(getattr(cv2, "data", None), "haarcascades", "")
+    cascade_path = os.path.join(cascade_dir, "haarcascade_frontalface_default.xml")
+    if not cascade_dir or not os.path.exists(cascade_path):
+        _HAAR_FACE_CASCADE_FAILED = True
+        return []
+
+    try:
+        gray = cv2.cvtColor(arr, cv2.COLOR_RGB2GRAY)
+        face_cascade = cv2.CascadeClassifier(cascade_path)
+        if face_cascade.empty():
+            _HAAR_FACE_CASCADE_FAILED = True
+            return []
+    except Exception:
+        _HAAR_FACE_CASCADE_FAILED = True
+        return []
 
     h_limit = int(gray.shape[0] * 0.55)
     gray_top = gray[:h_limit, :]
-    faces = face_cascade.detectMultiScale(
-        gray_top,
-        scaleFactor=1.05,
-        minNeighbors=7,
-        minSize=(60, 60),
-        maxSize=(int(gray.shape[1] * 0.5), int(gray.shape[0] * 0.5)),
-    )
+    try:
+        faces = face_cascade.detectMultiScale(
+            gray_top,
+            scaleFactor=1.05,
+            minNeighbors=7,
+            minSize=(60, 60),
+            maxSize=(int(gray.shape[1] * 0.5), int(gray.shape[0] * 0.5)),
+        )
+    except Exception:
+        _HAAR_FACE_CASCADE_FAILED = True
+        return []
     if faces is None or len(faces) == 0:
         return []
     return [(int(x), int(y), int(w), int(h)) for (x, y, w, h) in faces]

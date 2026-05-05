@@ -125,6 +125,7 @@ class SettingsPage(BasePage):
             "keyword_search": tk.BooleanVar(),
             "download_images": tk.BooleanVar(),
             "generate_thumbnails": tk.BooleanVar(),
+            "blur_faces": tk.BooleanVar(),
             "save_html": tk.BooleanVar(),
             "dedupe": tk.BooleanVar(),
         }
@@ -499,6 +500,7 @@ class SettingsPage(BasePage):
             [
                 ("이미지 다운로드", self.crawling_vars["download_images"]),
                 ("썸네일 생성", self.crawling_vars["generate_thumbnails"]),
+                ("얼굴 블러", self.crawling_vars["blur_faces"]),
                 ("HTML 저장", self.crawling_vars["save_html"]),
                 ("중복 상품 필터링", self.crawling_vars["dedupe"]),
             ],
@@ -936,6 +938,7 @@ class SettingsPage(BasePage):
         self._set_var(self.crawling_vars["min_sales"], crawl_filters.get("min_sales", 0))
         self._set_bool(self.crawling_vars["download_images"], crawl_options.get("download_images", True))
         self._set_bool(self.crawling_vars["generate_thumbnails"], crawl_options.get("generate_thumbnails", True))
+        self._set_bool(self.crawling_vars["blur_faces"], crawl_options.get("blur_faces", True))
         self._set_bool(self.crawling_vars["save_html"], crawl_options.get("save_html", False))
         self._set_bool(self.crawling_vars["dedupe"], crawl_options.get("dedupe", True))
 
@@ -1077,6 +1080,7 @@ class SettingsPage(BasePage):
             "options": {
                 "download_images": self.crawling_vars["download_images"].get(),
                 "generate_thumbnails": self.crawling_vars["generate_thumbnails"].get(),
+                "blur_faces": self.crawling_vars["blur_faces"].get(),
                 "save_html": self.crawling_vars["save_html"].get(),
                 "dedupe": self.crawling_vars["dedupe"].get(),
             },
