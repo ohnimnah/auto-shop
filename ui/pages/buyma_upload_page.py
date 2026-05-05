@@ -14,7 +14,37 @@ class BuymaUploadPage(BasePage):
     def build(self) -> None:
         self.build_header()
         overview = self.controller.dashboard_data.get_upload_overview()
-        _shell, left, right = self.build_dashboard_layout(overview["metrics"])
+        self.configure_standard_page_grid()
+        self.body.grid_rowconfigure(1, weight=0)
+        self.body.grid_rowconfigure(2, weight=1)
+        self.build_metric_row(self.body, row=0, metrics=overview["metrics"])
+
+        action_card, _action_body, _ = self.build_recommended_action_tiles(
+            self.body,
+            "권장 작업",
+            [
+                ("검토 후 업로드", "브라우저에서 확인 후 제출", self.controller.theme["orange"], self.controller.theme["orange"], lambda: self.controller.dispatch_ui_action("BUYMA 검토 후 업로드", lambda: self.controller.run_action("upload-review"), category="buyma")),
+                ("자동 업로드", "오류 없으면 자동 제출", "#334155", "#475569", lambda: self.controller.dispatch_ui_action("BUYMA 자동 업로드", lambda: self.controller.run_action("upload-auto"), category="buyma")),
+                ("로그 보기", "실시간 로그 패널 확인", self.controller.theme["blue"], self.controller.theme["blue_2"], lambda: self.controller.dispatch_ui_action("BUYMA 업로드 로그 보기", lambda: self.controller.on_menu_click("대시보드"), category="buyma")),
+                ("현재 작업 중지", "실행 중인 업로드 종료", self.controller.theme["red"], "#991b1b", lambda: self.controller.dispatch_ui_action("BUYMA 작업 중지", self.controller.stop_action, category="buyma")),
+            ],
+            columns=4,
+            min_height=132,
+        )
+        action_card.grid(row=1, column=0, sticky="ew", pady=(0, SECTION_GAP))
+
+        shell = tk.Frame(self.body, bg=self.controller.theme["bg"])
+        shell.grid(row=2, column=0, sticky="nsew")
+        shell.grid_columnconfigure(0, weight=3, uniform="page_columns")
+        shell.grid_columnconfigure(1, weight=2, uniform="page_columns")
+        shell.grid_rowconfigure(0, weight=1)
+
+        left = tk.Frame(shell, bg=self.controller.theme["bg"])
+        right = tk.Frame(shell, bg=self.controller.theme["bg"])
+        left.grid(row=0, column=0, sticky="nsew", padx=(0, SECTION_GAP))
+        right.grid(row=0, column=1, sticky="nsew")
+        left.grid_columnconfigure(0, weight=1)
+        right.grid_columnconfigure(0, weight=1)
         left.grid_rowconfigure(0, weight=0)
         left.grid_rowconfigure(1, weight=1)
         right.grid_rowconfigure(0, weight=0)
@@ -56,22 +86,17 @@ class BuymaUploadPage(BasePage):
         )
         recent_card.grid(row=1, column=0, sticky="nsew")
 
-        side_card, side_body = self.build_action_panel(
-            right,
-            "업로드 제어",
-            min_height=ACTION_PANEL_HEIGHT,
-            actions=[
-                ("업로드 실행", "BUYMA 자동 업로드", self.controller.theme["orange"], self.controller.theme["orange"], lambda: self.controller.dispatch_ui_action("BUYMA 업로드 실행", lambda: self.controller.run_action("upload-auto"), category="buyma")),
-                ("실패건 재실행", "오류 상품 재처리", "#334155", "#475569", lambda: self.controller.dispatch_ui_action("BUYMA 실패건 재실행", lambda: self.controller.run_action("upload-review"), category="buyma")),
-                ("로그 보기", "실시간 로그 패널 확인", self.controller.theme["blue"], self.controller.theme["blue_2"], lambda: self.controller.dispatch_ui_action("BUYMA 업로드 로그 보기", lambda: self.controller.on_menu_click("대시보드"), category="buyma")),
-            ],
-            details=[
+        side_card, side_body = self.build_panel_card(right, "업로드 상태", level="mid", min_height=ACTION_PANEL_HEIGHT)
+        side_card.grid(row=0, column=0, sticky="ew", pady=(0, SECTION_GAP))
+        side_body.grid_columnconfigure(0, weight=1)
+        self.build_dense_list(
+            side_body,
+            [
                 ("카테고리 실패", f"{overview['category_failures']}건"),
                 ("기타(その他)", f"{overview['other_ratio'] * 100:.1f}%"),
                 ("업로드 상태", self.controller.state.pipeline_status.get("sales", "대기")),
             ],
         )
-        side_card.grid(row=0, column=0, sticky="ew", pady=(0, SECTION_GAP))
 
         reasons_card, _ = self.build_simple_table(
             right,

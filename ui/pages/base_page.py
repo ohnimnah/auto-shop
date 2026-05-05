@@ -271,6 +271,66 @@ class BasePage(tk.Frame):
             self.build_dense_list(diagnostics, details)
         return card, body
 
+    def build_action_tile(
+        self,
+        parent: tk.Widget,
+        *,
+        title: str,
+        subtitle_var: tk.StringVar,
+        bg: str,
+        active: str,
+        command,
+    ) -> tk.Frame:
+        frame = tk.Frame(parent, bg=bg, cursor="hand2", padx=12, pady=10, highlightthickness=1, highlightbackground="#334155")
+        title_lbl = tk.Label(frame, text=title, bg=bg, fg="#ffffff", font=("Segoe UI", 12, "bold"), anchor="w")
+        sub_lbl = tk.Label(frame, textvariable=subtitle_var, bg=bg, fg="#dbeafe", font=("Segoe UI", 10), anchor="w")
+        title_lbl.pack(anchor="w")
+        sub_lbl.pack(anchor="w", pady=(6, 0))
+        for widget in (frame, title_lbl, sub_lbl):
+            widget.bind("<Enter>", lambda _e: (frame.configure(bg=active), title_lbl.configure(bg=active), sub_lbl.configure(bg=active)))
+            widget.bind("<Leave>", lambda _e: (frame.configure(bg=bg), title_lbl.configure(bg=bg), sub_lbl.configure(bg=bg)))
+            widget.bind("<Button-1>", lambda _e: command())
+        return frame
+
+    def build_recommended_action_tiles(
+        self,
+        parent: tk.Widget,
+        title: str,
+        actions: list[tuple[str, object, str, str, object]],
+        *,
+        columns: int = 4,
+        min_height: int = 132,
+        details: list[tuple[str, str]] | None = None,
+    ) -> tuple[tk.Frame, tk.Frame, list[tk.StringVar]]:
+        card, body = self.build_panel_card(parent, title, level="mid", min_height=min_height)
+        column_count = max(1, min(columns, max(1, len(actions))))
+        for col in range(column_count):
+            body.grid_columnconfigure(col, weight=1, uniform="rec_actions")
+
+        subtitle_vars: list[tk.StringVar] = []
+        for idx, (button_title, subtitle, bg, active, command) in enumerate(actions):
+            value = subtitle() if callable(subtitle) else subtitle
+            sub_var = subtitle if isinstance(subtitle, tk.StringVar) else tk.StringVar(value=str(value or ""))
+            subtitle_vars.append(sub_var)
+            row = idx // column_count
+            col = idx % column_count
+            tile = self.build_action_tile(body, title=button_title, subtitle_var=sub_var, bg=bg, active=active, command=command)
+            tile.grid(
+                row=row,
+                column=col,
+                sticky="nsew",
+                padx=(0 if col == 0 else 6, 0 if col == column_count - 1 else 6),
+                pady=(0 if row == 0 else 6, 0),
+            )
+
+        if details:
+            detail_row = (len(actions) + column_count - 1) // column_count
+            diagnostics = tk.Frame(body, bg=self.controller.theme["panel"])
+            diagnostics.grid(row=detail_row, column=0, columnspan=column_count, sticky="ew", pady=(10, 0))
+            diagnostics.grid_columnconfigure(0, weight=1)
+            self.build_dense_list(diagnostics, details)
+        return card, body, subtitle_vars
+
     def build_simple_table(
         self,
         parent: tk.Widget,

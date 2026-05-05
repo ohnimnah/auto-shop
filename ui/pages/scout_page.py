@@ -15,7 +15,37 @@ class ScoutPage(BasePage):
     def build(self) -> None:
         self.build_header()
         overview = self.controller.dashboard_data.get_scout_overview()
-        _shell, left, right = self.build_dashboard_layout(overview["metrics"])
+        self.configure_standard_page_grid()
+        self.body.grid_rowconfigure(1, weight=0)
+        self.body.grid_rowconfigure(2, weight=1)
+        self.build_metric_row(self.body, row=0, metrics=overview["metrics"])
+
+        action_card, _action_body, _ = self.build_recommended_action_tiles(
+            self.body,
+            "권장 작업",
+            [
+                ("목록 수집 실행", "목록 페이지 URL → 상품 큐", self.controller.theme["green"], self.controller.theme["green"], lambda: self.controller.dispatch_ui_action("목록 페이지 수집 실행", lambda: self.controller.run_action("collect-listings"), category="scout")),
+                ("정찰 1회 실행", "대기 상품 정보 수집", self.controller.theme["blue"], self.controller.theme["blue_2"], lambda: self.controller.dispatch_ui_action("정찰 1회 실행", lambda: self.controller.run_action("run"), category="scout")),
+                ("정찰 감시 시작", "대기 행 자동 감시", "#334155", "#475569", lambda: self.controller.dispatch_ui_action("정찰 감시 시작", self.controller._toggle_scout_watch, category="scout")),
+                ("현재 작업 중지", "실행 중인 작업 종료", self.controller.theme["red"], "#991b1b", lambda: self.controller.dispatch_ui_action("정찰 작업 중지", self.controller.stop_action, category="scout")),
+            ],
+            columns=4,
+            min_height=132,
+        )
+        action_card.grid(row=1, column=0, sticky="ew", pady=(0, SECTION_GAP))
+
+        shell = tk.Frame(self.body, bg=self.controller.theme["bg"])
+        shell.grid(row=2, column=0, sticky="nsew")
+        shell.grid_columnconfigure(0, weight=3, uniform="page_columns")
+        shell.grid_columnconfigure(1, weight=2, uniform="page_columns")
+        shell.grid_rowconfigure(0, weight=1)
+
+        left = tk.Frame(shell, bg=self.controller.theme["bg"])
+        right = tk.Frame(shell, bg=self.controller.theme["bg"])
+        left.grid(row=0, column=0, sticky="nsew", padx=(0, SECTION_GAP))
+        right.grid(row=0, column=1, sticky="nsew")
+        left.grid_columnconfigure(0, weight=1)
+        right.grid_columnconfigure(0, weight=1)
         left.grid_rowconfigure(0, weight=0)
         left.grid_rowconfigure(1, weight=1)
         right.grid_rowconfigure(0, weight=0)
@@ -103,14 +133,11 @@ class ScoutPage(BasePage):
         )
         recent_card.grid(row=1, column=0, sticky="nsew")
 
-        filter_card, filter_body = self.build_panel_card(right, "필터 / 실행", level="mid", min_height=ACTION_PANEL_HEIGHT)
+        filter_card, filter_body = self.build_panel_card(right, "정찰 상태", level="mid", min_height=ACTION_PANEL_HEIGHT)
         filter_card.grid(row=0, column=0, sticky="ew", pady=(0, SECTION_GAP))
         filter_body.grid_columnconfigure(0, weight=1)
-
-        diagnostics = tk.Frame(filter_body, bg=self.controller.theme["panel"])
-        diagnostics.grid(row=0, column=0, sticky="ew", pady=(8, 0))
         self.build_dense_list(
-            diagnostics,
+            filter_body,
             [
                 ("정찰 상태", self.controller.state.pipeline_status.get("scout", "대기")),
                 ("완료 건수", f"{overview['metrics'][1][1]}건"),

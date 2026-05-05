@@ -169,22 +169,19 @@ class ImageThumbnailPage(BasePage):
             tk.Label(card, text=desc, bg=self.controller.theme["panel"], fg=self.controller.theme["muted"], font=("Segoe UI", 8)).pack(anchor="w", pady=(4, 0))
 
     def _build_recommended_actions(self, *, row: int) -> None:
-        card, body = self.build_panel_card(self.body, "권장 작업", level="mid", min_height=132)
+        card, _body, self._recommended_sub_vars = self.build_recommended_action_tiles(
+            self.body,
+            "권장 작업",
+            [
+                ("이미지 다운로드 실행", lambda: f"대기 이미지 {self.pending_var.get():,}건 처리", self.controller.theme["blue"], self.controller.theme["blue_2"], self.start_image_download),
+                ("썸네일 생성 실행", lambda: f"생성 대기 이미지 {self.pending_var.get():,}건", self.controller.theme["purple"], self.controller.theme["purple"], self.start_thumbnail_generation),
+                ("실패 재시도 실행", lambda: f"실패 이미지 {self.failed_var.get():,}건 재시도", "#7f1d1d", "#991b1b", self.retry_failed_images),
+                ("자동 처리 시작  추천", lambda: "다운로드 → 썸네일 → 업로드", "#1f2937", "#374151", self.start_auto_pipeline),
+            ],
+            columns=4,
+            min_height=132,
+        )
         card.grid(row=row, column=0, sticky="ew", pady=(0, SECTION_GAP))
-        for i in range(4):
-            body.grid_columnconfigure(i, weight=1, uniform="rec_actions")
-        actions = [
-            ("이미지 다운로드 실행", lambda: f"대기 이미지 {self.pending_var.get():,}건 처리", self.controller.theme["blue"], self.controller.theme["blue_2"], self.start_image_download),
-            ("썸네일 생성 실행", lambda: f"생성 대기 이미지 {self.pending_var.get():,}건", self.controller.theme["purple"], self.controller.theme["purple"], self.start_thumbnail_generation),
-            ("실패 재시도 실행", lambda: f"실패 이미지 {self.failed_var.get():,}건 재시도", "#7f1d1d", "#991b1b", self.retry_failed_images),
-            ("자동 처리 시작  추천", lambda: "다운로드 → 썸네일 → 업로드", "#1f2937", "#374151", self.start_auto_pipeline),
-        ]
-        self._recommended_sub_vars: list[tk.StringVar] = []
-        for idx, (title, subtitle_fn, bg, active, handler) in enumerate(actions):
-            sub_var = tk.StringVar(value=subtitle_fn())
-            self._recommended_sub_vars.append(sub_var)
-            btn = self._build_action_tile(body, title=title, subtitle_var=sub_var, bg=bg, active=active, command=handler)
-            btn.grid(row=0, column=idx, sticky="nsew", padx=(0 if idx == 0 else 6, 0 if idx == 3 else 6))
 
     def _build_mid_panels(self, *, row: int) -> None:
         shell = tk.Frame(self.body, bg=self.controller.theme["bg"])
@@ -233,18 +230,6 @@ class ImageThumbnailPage(BasePage):
         action_row.grid(row=2, column=0, sticky="ew", pady=(8, 0))
         action_row.grid_columnconfigure(0, weight=1)
         self.controller._mini_button(action_row, "선택 항목 재시도", self.retry_selected_failed_rows, "#7f1d1d", "#991b1b").grid(row=0, column=1, sticky="e")
-
-    def _build_action_tile(self, parent: tk.Widget, *, title: str, subtitle_var: tk.StringVar, bg: str, active: str, command) -> tk.Frame:
-        frame = tk.Frame(parent, bg=bg, cursor="hand2", padx=12, pady=10, highlightthickness=1, highlightbackground="#334155")
-        title_lbl = tk.Label(frame, text=title, bg=bg, fg="#ffffff", font=("Segoe UI", 12, "bold"), anchor="w")
-        sub_lbl = tk.Label(frame, textvariable=subtitle_var, bg=bg, fg="#dbeafe", font=("Segoe UI", 10), anchor="w")
-        title_lbl.pack(anchor="w")
-        sub_lbl.pack(anchor="w", pady=(6, 0))
-        for w in (frame, title_lbl, sub_lbl):
-            w.bind("<Enter>", lambda _e: (frame.configure(bg=active), title_lbl.configure(bg=active), sub_lbl.configure(bg=active)))
-            w.bind("<Leave>", lambda _e: (frame.configure(bg=bg), title_lbl.configure(bg=bg), sub_lbl.configure(bg=bg)))
-            w.bind("<Button-1>", lambda _e: command())
-        return frame
 
     def _build_progress_panel(self, parent: tk.Widget) -> None:
         parent.grid_columnconfigure(0, weight=0)
