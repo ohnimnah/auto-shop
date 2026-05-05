@@ -51,11 +51,25 @@ function New-Venv {
     }
 }
 
+function Test-VenvPython {
+    if (-not (Test-Path $venvPython)) {
+        return $false
+    }
+
+    try {
+        & $venvPython -c "import sys" *> $null
+        return ($LASTEXITCODE -eq 0)
+    }
+    catch {
+        return $false
+    }
+}
+
 if (-not (Test-Path '.venv')) {
     New-Venv
 }
 
-if (-not (Test-Path $venvPython)) {
+if (-not (Test-VenvPython)) {
     Write-Host 'Broken virtual environment detected. Recreating .venv...' -ForegroundColor Yellow
     if (Test-Path '.venv') {
         Remove-Item -Recurse -Force '.venv'
@@ -63,8 +77,8 @@ if (-not (Test-Path $venvPython)) {
     New-Venv
 }
 
-if (-not (Test-Path $venvPython)) {
-    Write-Host 'Virtual environment python executable was not found after recreation.' -ForegroundColor Red
+if (-not (Test-VenvPython)) {
+    Write-Host 'Virtual environment python executable is still not usable after recreation.' -ForegroundColor Red
     exit 1
 }
 
