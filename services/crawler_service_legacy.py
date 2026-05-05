@@ -344,7 +344,7 @@ def clean_product_name(name: str) -> str:
         return "상품명 미확인"
 
     cleaned = re.sub(r"\s*/\s*[A-Z0-9-]+$", "", name).strip()
-    cleaned = remove_trailing_color_suffix(cleaned)
+    cleaned = remove_trailing_product_name_suffix(cleaned)
     cleaned = re.sub(r"\s+(?:M|W|K|FREE|O/S|OS)$", "", cleaned, flags=re.IGNORECASE).strip()
     return cleaned or "상품명 미확인"
 
@@ -391,11 +391,29 @@ def is_likely_color_suffix(text: str) -> bool:
 
 def is_removable_product_name_suffix(text: str) -> bool:
     """Return whether a trailing product-name marker should be removed."""
-    return is_color_count_placeholder(text) or is_likely_color_suffix(text)
+    return is_color_count_placeholder(text) or is_likely_color_suffix(text) or is_likely_sku_suffix(text)
 
 
-def remove_trailing_color_suffix(name: str) -> str:
-    """Remove only the trailing color part from a product name."""
+def is_likely_sku_suffix(text: str) -> bool:
+    """Return whether text looks like a trailing product code."""
+    candidate = (text or "").strip(" \t\r\n-_/[](){}")
+    if not candidate or has_hangul(candidate):
+        return False
+    if len(candidate) < 5 or len(candidate) > 32:
+        return False
+    if " " in candidate:
+        return False
+    if not re.search(r"[A-Za-z]", candidate) or not re.search(r"\d", candidate):
+        return False
+    if not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._-]*[A-Za-z0-9]", candidate):
+        return False
+    if re.fullmatch(r"\d+(?:COLOR|COLORS|COLOUR|COLOURS)", candidate, re.IGNORECASE):
+        return False
+    return True
+
+
+def remove_trailing_product_name_suffix(name: str) -> str:
+    """Remove trailing color/count/sku markers from a product name."""
     cleaned = (name or "").strip()
     if not cleaned:
         return ""

@@ -430,38 +430,8 @@ def is_relevant_buyma_listing_entry(
     return False
 
 
-def normalize_buyma_query(product_name: str, brand: str) -> List[str]:
-    """Build prioritized BUYMA query candidates."""
-    cleaned_name = re.sub(r"\s+", " ", (product_name or "").strip())
-    cleaned_name = re.sub(r"[\[\](){}]", " ", cleaned_name)
-    cleaned_name = re.sub(r"\s+", " ", cleaned_name).strip()
-    cleaned_brand = re.sub(r"\s+", " ", (brand or "").strip())
-
-    sku_match = re.search(r"\b([A-Z]{2,}[0-9]{2,}[A-Z0-9]*|[0-9]{4,})\b", cleaned_name)
-    sku_candidates = [sku_match.group(1)] if sku_match else []
-
-    english_parts = re.findall(r"[A-Za-z0-9\s\-/]+", cleaned_name)
-    english_name = " ".join(english_parts)
-    english_name = re.sub(r"\s+", " ", english_name).strip()
-
-    candidates = [*sku_candidates, f"{cleaned_brand} {english_name}".strip(), english_name, cleaned_brand]
-
-    normalized: List[str] = []
-    seen = set()
-    for query in candidates:
-        query = query[:80].strip()
-        if len(query) < 2 or query in seen:
-            continue
-        seen.add(query)
-        normalized.append(query)
-    return normalized
-
-
-def fetch_buyma_lowest_price(driver, product_name: str, brand: str, musinsa_sku: str = "") -> str:
-    """Search BUYMA and return lowest matched price."""
-    print("\n>>> BUYMA 최저가 검색 시작")
-    print(f"    상품명: {product_name}, 브랜드: {brand}, 품번: {musinsa_sku}")
-
+def build_buyma_price_search_queries(product_name: str, brand: str, musinsa_sku: str = "") -> List[str]:
+    """Build BUYMA price search queries in priority order."""
     sku_query = re.sub(r"\s+", " ", (musinsa_sku or "").strip())
     cleaned_name = re.sub(r"\s+", " ", (product_name or "").strip())
     cleaned_brand = re.sub(r"\s+", " ", (brand or "").strip())
@@ -472,8 +442,8 @@ def fetch_buyma_lowest_price(driver, product_name: str, brand: str, musinsa_sku:
 
     query_candidates = [
         sku_query,
-        f"{english_brand} {english_name}".strip() if english_brand and english_name else "",
         english_name,
+        f"{english_brand} {english_name}".strip() if english_brand and english_name else "",
     ]
     if not sku_query and not english_name and english_brand:
         query_candidates.append(english_brand)
@@ -488,6 +458,22 @@ def fetch_buyma_lowest_price(driver, product_name: str, brand: str, musinsa_sku:
             continue
         seen.add(query)
         queries.append(query)
+    return queries
+
+
+def fetch_buyma_lowest_price(driver, product_name: str, brand: str, musinsa_sku: str = "") -> str:
+    """Search BUYMA and return lowest matched price."""
+    print("\n>>> BUYMA 최저가 검색 시작")
+    print(f"    상품명: {product_name}, 브랜드: {brand}, 품번: {musinsa_sku}")
+
+    sku_query = re.sub(r"\s+", " ", (musinsa_sku or "").strip())
+    cleaned_name = re.sub(r"\s+", " ", (product_name or "").strip())
+    cleaned_brand = re.sub(r"\s+", " ", (brand or "").strip())
+    english_parts = re.findall(r"[A-Za-z0-9\s\-/]+", cleaned_name)
+    english_name = re.sub(r"\s+", " ", " ".join(english_parts)).strip()
+    english_brand_parts = re.findall(r"[A-Za-z0-9\s\-/]+", cleaned_brand)
+    english_brand = re.sub(r"\s+", " ", " ".join(english_brand_parts)).strip()
+    queries = build_buyma_price_search_queries(product_name, brand, musinsa_sku)
 
     if not queries:
         print("    [검색 질의 없음] 빈 값 반환")

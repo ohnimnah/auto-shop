@@ -38,6 +38,11 @@ class _DriverStub:
 
 
 class BuymaPriceSearchTests(unittest.TestCase):
+    def test_price_search_query_order_prefers_sku_then_name_then_brand_name(self):
+        queries = buyma_service.build_buyma_price_search_queries("G CLASSIC TANK", "GLOWNY", "GC25SPSL0010GR")
+
+        self.assertEqual(queries, ["GC25SPSL0010GR", "G CLASSIC TANK", "GLOWNY G CLASSIC TANK"])
+
     def test_listing_entry_does_not_reuse_price_from_multi_item_parent(self):
         soup = BeautifulSoup(
             """
