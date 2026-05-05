@@ -200,6 +200,16 @@ def extract_buyma_listing_entries(soup: BeautifulSoup) -> List[Dict[str, object]
     entries: List[Dict[str, object]] = []
     seen_urls = set()
 
+    def _item_urls_in(container) -> set:
+        urls = set()
+        if not container:
+            return urls
+        for item_link in container.select('a[href*="/item/"]'):
+            item_href = item_link.get("href", "").strip()
+            if re.search(r"/item/\d+/?", item_href):
+                urls.add(item_href.split("?")[0])
+        return urls
+
     result_count = None
     page_text = soup.get_text(" ", strip=True)
     count_match = re.search(r"該当件数\s*([0-9]+)件", page_text)
@@ -226,6 +236,9 @@ def extract_buyma_listing_entries(soup: BeautifulSoup) -> List[Dict[str, object]
 
         for _ in range(6):
             if not container:
+                break
+            container_item_urls = _item_urls_in(container)
+            if len(container_item_urls) > 1:
                 break
             if not title_text:
                 title_tag = container.select_one('a[href*="/item/"], h3, [class*="title"], [class*="name"]')
@@ -532,11 +545,7 @@ def fetch_buyma_lowest_price(driver, product_name: str, brand: str, musinsa_sku:
             if not combined_prices:
                 combined_prices.extend(listing_matched_prices)
             if not combined_prices:
-                # Last-resort fallback: use visible listing card prices to avoid empty sell-price cell.
-                card_prices = [int(entry["price"]) for entry in candidate_entries if int(entry.get("price", 0)) >= 3000]
-                if card_prices:
-                    combined_prices.extend(card_prices)
-                    print(f"    [fallback] 관련도 미매칭으로 카드 최저가 사용: {min(card_prices):,}엔")
+                print("    관련 상품 매칭 실패 - 다른 상품 가격은 사용하지 않음")
 
             if combined_prices:
                 unique_prices = sorted(set(combined_prices))
