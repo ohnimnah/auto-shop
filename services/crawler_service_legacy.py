@@ -21,6 +21,81 @@ from models.product_model import Product
 
 
 _COLOR_NAME_MAP: Dict[str, str] | None = None
+_EN_COLOR_WORDS = {
+    "black",
+    "blue",
+    "brown",
+    "beige",
+    "cream",
+    "charcoal",
+    "gray",
+    "grey",
+    "green",
+    "ivory",
+    "khaki",
+    "navy",
+    "orange",
+    "pink",
+    "purple",
+    "red",
+    "silver",
+    "white",
+    "yellow",
+    "melange",
+    "natural",
+    "oatmeal",
+}
+_EN_COLOR_MODIFIERS = {"light", "dark", "deep", "pale", "heather", "m", "l"}
+_KR_COLOR_WORDS = {
+    "검정",
+    "검정색",
+    "블랙",
+    "흑청",
+    "화이트",
+    "흰색",
+    "아이보리",
+    "크림",
+    "베이지",
+    "브라운",
+    "갈색",
+    "카멜",
+    "그레이",
+    "그레",
+    "회색",
+    "차콜",
+    "멜란지",
+    "네이비",
+    "남색",
+    "블루",
+    "파랑",
+    "파란색",
+    "청색",
+    "연청",
+    "중청",
+    "진청",
+    "인디고",
+    "스카이블루",
+    "라이트블루",
+    "그린",
+    "초록",
+    "초록색",
+    "카키",
+    "올리브",
+    "레드",
+    "빨강",
+    "빨간색",
+    "버건디",
+    "와인",
+    "핑크",
+    "분홍",
+    "퍼플",
+    "보라",
+    "옐로우",
+    "노랑",
+    "오렌지",
+    "실버",
+}
+_KR_COLOR_MODIFIERS = {"라이트", "다크", "딥", "연", "진", "멜란지"}
 
 
 def has_hangul(text: str) -> bool:
@@ -269,10 +344,76 @@ def clean_product_name(name: str) -> str:
         return "상품명 미확인"
 
     cleaned = re.sub(r"\s*/\s*[A-Z0-9-]+$", "", name).strip()
-    if " - " in cleaned:
-        cleaned = cleaned.split(" - ", 1)[0].strip()
+    cleaned = remove_trailing_color_suffix(cleaned)
     cleaned = re.sub(r"\s+(?:M|W|K|FREE|O/S|OS)$", "", cleaned, flags=re.IGNORECASE).strip()
     return cleaned or "상품명 미확인"
+
+
+def is_likely_color_suffix(text: str) -> bool:
+    """Return whether a product-name suffix looks like a color name."""
+    candidate = (text or "").strip(" \t\r\n-_/[](){}")
+    if not candidate or is_color_count_placeholder(candidate):
+        return False
+
+    normalized = re.sub(r"[/_,:+]", " ", candidate)
+    normalized = re.sub(r"\s*-\s*", " ", normalized)
+    normalized = re.sub(r"\s+", " ", normalized).strip()
+    if not normalized or len(normalized) > 40:
+        return False
+
+    if has_hangul(normalized):
+        tokens = [token.strip() for token in normalized.split() if token.strip()]
+        if not tokens:
+            return False
+        color_hits = 0
+        for token in tokens:
+            if token in _KR_COLOR_MODIFIERS:
+                continue
+            if token in _KR_COLOR_WORDS or (token.endswith("색") and len(token) > 1):
+                color_hits += 1
+                continue
+            return False
+        return color_hits > 0
+
+    tokens = re.findall(r"[a-z]+", normalized.lower())
+    if not tokens:
+        return False
+    color_hits = 0
+    for token in tokens:
+        if token in _EN_COLOR_MODIFIERS:
+            continue
+        if token in _EN_COLOR_WORDS:
+            color_hits += 1
+            continue
+        return False
+    return color_hits > 0
+
+
+def is_removable_product_name_suffix(text: str) -> bool:
+    """Return whether a trailing product-name marker should be removed."""
+    return is_color_count_placeholder(text) or is_likely_color_suffix(text)
+
+
+def remove_trailing_color_suffix(name: str) -> str:
+    """Remove only the trailing color part from a product name."""
+    cleaned = (name or "").strip()
+    if not cleaned:
+        return ""
+
+    separator_match = re.match(r"^(?P<base>.+?)\s+-\s+(?P<suffix>[^-]+)$", cleaned)
+    if separator_match and is_removable_product_name_suffix(separator_match.group("suffix")):
+        return separator_match.group("base").strip()
+
+    bracket_match = re.match(r"^(?P<base>.+?)\s*[\[\(](?P<suffix>[^\[\]\(\)]{1,50})[\]\)]\s*$", cleaned)
+    if bracket_match and is_removable_product_name_suffix(bracket_match.group("suffix")):
+        return bracket_match.group("base").strip()
+
+    words = cleaned.split()
+    for count in range(min(3, len(words) - 1), 0, -1):
+        suffix = " ".join(words[-count:])
+        if is_removable_product_name_suffix(suffix):
+            return " ".join(words[:-count]).strip()
+    return cleaned
 
 
 def split_name_and_color(raw_name: str) -> Tuple[str, str]:
