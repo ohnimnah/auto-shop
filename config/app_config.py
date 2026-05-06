@@ -44,6 +44,7 @@ SIZE_COLUMN = "K"
 ACTUAL_SIZE_COLUMN = "L"
 PRICE_COLUMN = "M"
 BAIMA_SELL_PRICE_COLUMN = "N"
+BUYMA_META_COLUMN = "O"
 IMAGE_PATHS_COLUMN = "P"
 SHIPPING_COST_COLUMN = "Q"
 CATEGORY_LARGE_COLUMN = "Y"
@@ -67,7 +68,7 @@ DEFAULT_SHEET_COLUMNS = {
     "actual_size": ACTUAL_SIZE_COLUMN,
     "price": PRICE_COLUMN,
     "buyma_price": BAIMA_SELL_PRICE_COLUMN,
-    "buyma_meta": "O",
+    "buyma_meta": BUYMA_META_COLUMN,
     "image_paths": IMAGE_PATHS_COLUMN,
     "shipping_cost": SHIPPING_COST_COLUMN,
     "category_large": CATEGORY_LARGE_COLUMN,

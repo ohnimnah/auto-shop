@@ -28,6 +28,7 @@ from config.app_config import (
     BAIMA_SELL_PRICE_COLUMN,
     BRAND_COLUMN,
     BRAND_EN_COLUMN,
+    BUYMA_META_COLUMN,
     CATEGORY_LARGE_COLUMN,
     CATEGORY_MIDDLE_COLUMN,
     CATEGORY_SMALL_COLUMN,
@@ -120,7 +121,7 @@ from services.pipeline_service import (
     is_thumbnail_ready_status as svc_is_thumbnail_ready_status,
 )
 from services.buyma_service import (
-    fetch_buyma_lowest_price as svc_fetch_buyma_lowest_price,
+    fetch_buyma_lowest_price_with_meta as svc_fetch_buyma_lowest_price,
 )
 from services.shipping_service import (
     estimate_weight as svc_estimate_weight,
@@ -165,13 +166,13 @@ def _load_sheet_runtime_config() -> None:
     global SPREADSHEET_ID, SHEET_GIDS, SHEET_NAME, ROW_START, LISTING_QUEUE_SHEET_NAME, LISTING_QUEUE_SHEET_URL, LISTING_SEED_SHEET_NAME
     global SEQUENCE_COLUMN, URL_COLUMN, BRAND_COLUMN, BRAND_EN_COLUMN, PRODUCT_NAME_KR_COLUMN, PRODUCT_NAME_JP_COLUMN, PRODUCT_NAME_EN_COLUMN
     global MUSINSA_SKU_COLUMN, COLOR_KR_COLUMN, COLOR_EN_COLUMN, SIZE_COLUMN, ACTUAL_SIZE_COLUMN, PRICE_COLUMN
-    global BAIMA_SELL_PRICE_COLUMN, IMAGE_PATHS_COLUMN, SHIPPING_COST_COLUMN, CATEGORY_LARGE_COLUMN, CATEGORY_MIDDLE_COLUMN, CATEGORY_SMALL_COLUMN
+    global BAIMA_SELL_PRICE_COLUMN, BUYMA_META_COLUMN, IMAGE_PATHS_COLUMN, SHIPPING_COST_COLUMN, CATEGORY_LARGE_COLUMN, CATEGORY_MIDDLE_COLUMN, CATEGORY_SMALL_COLUMN
     global SHIPPING_TABLE_RANGE
 
     def _apply_columns(raw_columns):
         global SEQUENCE_COLUMN, URL_COLUMN, BRAND_COLUMN, BRAND_EN_COLUMN, PRODUCT_NAME_KR_COLUMN, PRODUCT_NAME_JP_COLUMN, PRODUCT_NAME_EN_COLUMN
         global MUSINSA_SKU_COLUMN, COLOR_KR_COLUMN, COLOR_EN_COLUMN, SIZE_COLUMN, ACTUAL_SIZE_COLUMN, PRICE_COLUMN
-        global BAIMA_SELL_PRICE_COLUMN, IMAGE_PATHS_COLUMN, SHIPPING_COST_COLUMN, CATEGORY_LARGE_COLUMN, CATEGORY_MIDDLE_COLUMN, CATEGORY_SMALL_COLUMN
+        global BAIMA_SELL_PRICE_COLUMN, BUYMA_META_COLUMN, IMAGE_PATHS_COLUMN, SHIPPING_COST_COLUMN, CATEGORY_LARGE_COLUMN, CATEGORY_MIDDLE_COLUMN, CATEGORY_SMALL_COLUMN
         global SHIPPING_TABLE_RANGE
         if not isinstance(raw_columns, dict):
             return
@@ -196,6 +197,7 @@ def _load_sheet_runtime_config() -> None:
         ACTUAL_SIZE_COLUMN = normalized["actual_size"]
         PRICE_COLUMN = normalized["price"]
         BAIMA_SELL_PRICE_COLUMN = normalized["buyma_price"]
+        BUYMA_META_COLUMN = normalized["buyma_meta"]
         IMAGE_PATHS_COLUMN = normalized["image_paths"]
         SHIPPING_COST_COLUMN = normalized["shipping_cost"]
         CATEGORY_LARGE_COLUMN = normalized["category_large"]
@@ -535,6 +537,7 @@ def get_existing_row_values(service, sheet_name: str, row_num: int) -> Dict[str,
         actual_size_column=ACTUAL_SIZE_COLUMN,
         price_column=PRICE_COLUMN,
         buyma_sell_price_column=BAIMA_SELL_PRICE_COLUMN,
+        buyma_meta_column=BUYMA_META_COLUMN,
         image_paths_column=IMAGE_PATHS_COLUMN,
         shipping_cost_column=SHIPPING_COST_COLUMN,
         category_large_column=CATEGORY_LARGE_COLUMN,
@@ -568,6 +571,7 @@ def get_existing_rows_bulk(
         actual_size_column=ACTUAL_SIZE_COLUMN,
         price_column=PRICE_COLUMN,
         buyma_sell_price_column=BAIMA_SELL_PRICE_COLUMN,
+        buyma_meta_column=BUYMA_META_COLUMN,
         image_paths_column=IMAGE_PATHS_COLUMN,
         shipping_cost_column=SHIPPING_COST_COLUMN,
         category_large_column=CATEGORY_LARGE_COLUMN,
@@ -599,6 +603,7 @@ def build_incremental_payload(
         actual_size_column=ACTUAL_SIZE_COLUMN,
         price_column=PRICE_COLUMN,
         buyma_sell_price_column=BAIMA_SELL_PRICE_COLUMN,
+        buyma_meta_column=BUYMA_META_COLUMN,
         image_paths_column=IMAGE_PATHS_COLUMN,
         shipping_cost_column=SHIPPING_COST_COLUMN,
         category_large_column=CATEGORY_LARGE_COLUMN,
@@ -819,6 +824,7 @@ def process_sheet_once(
         "ACTUAL_SIZE_COLUMN": ACTUAL_SIZE_COLUMN,
         "PRICE_COLUMN": PRICE_COLUMN,
         "BUYMA_SELL_PRICE_COLUMN": BAIMA_SELL_PRICE_COLUMN,
+        "BUYMA_META_COLUMN": BUYMA_META_COLUMN,
         "CATEGORY_LARGE_COLUMN": CATEGORY_LARGE_COLUMN,
         "CATEGORY_MIDDLE_COLUMN": CATEGORY_MIDDLE_COLUMN,
         "CATEGORY_SMALL_COLUMN": CATEGORY_SMALL_COLUMN,
@@ -969,6 +975,8 @@ def scrape_musinsa_product(
     row_num: int,
     existing_sku: str = "",
     existing_product_name_jp: str = "",
+    existing_product_name_en: str = "",
+    existing_brand_en: str = "",
     download_images: bool = False,
     images_only: bool = False,
 ) -> Product:
@@ -979,6 +987,8 @@ def scrape_musinsa_product(
         row_num=row_num,
         existing_sku=existing_sku,
         existing_product_name_jp=existing_product_name_jp,
+        existing_product_name_en=existing_product_name_en,
+        existing_brand_en=existing_brand_en,
         download_images=download_images,
         images_only=images_only,
         crawl_page_settle_seconds=CRAWL_PAGE_SETTLE_SECONDS,

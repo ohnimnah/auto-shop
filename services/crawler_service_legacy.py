@@ -1499,6 +1499,8 @@ def scrape_musinsa_product(
     row_num: int,
     existing_sku: str = "",
     existing_product_name_jp: str = "",
+    existing_product_name_en: str = "",
+    existing_brand_en: str = "",
     download_images: bool = False,
     images_only: bool = False,
     crawl_page_settle_seconds: float = 2.0,
@@ -1674,14 +1676,23 @@ def scrape_musinsa_product(
             image_paths = download_images_fn(image_urls, image_folder_name)
 
         buyma_price_text = ""
+        buyma_meta_text = ""
         if fetch_buyma_lowest_price_fn:
-            buyma_price_text = fetch_buyma_lowest_price_fn(
+            buyma_search_brand = brand_en_from_state or existing_brand_en or brand
+            buyma_result = fetch_buyma_lowest_price_fn(
                 driver,
                 product_name,
-                brand,
+                buyma_search_brand,
                 musinsa_sku,
                 existing_product_name_jp,
+                price_text,
+                existing_product_name_en,
             )
+            if isinstance(buyma_result, dict):
+                buyma_price_text = str(buyma_result.get("buyma_price") or "")
+                buyma_meta_text = str(buyma_result.get("buyma_meta") or "")
+            else:
+                buyma_price_text = str(buyma_result or "")
 
         cat_large, cat_middle, cat_small = extract_musinsa_categories(soup, mss_state)
         gender_large = extract_musinsa_gender_large(mss_state, cat_large, cat_middle, cat_small)
@@ -1700,8 +1711,10 @@ def scrape_musinsa_product(
             actual_size=actual_size_text,
             price=price_text,
             buyma_price=buyma_price_text,
+            buyma_meta=buyma_meta_text,
             musinsa_sku=musinsa_sku,
             product_name_jp=existing_product_name_jp,
+            product_name_en=existing_product_name_en,
             image_paths=image_paths,
             brand_logo_url=brand_logo_url,
             opt_kind_cd=opt_kind_cd,

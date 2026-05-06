@@ -304,6 +304,7 @@ def build_incremental_payload(
     actual_size_column: str,
     price_column: str,
     buyma_sell_price_column: str,
+    buyma_meta_column: str,
     image_paths_column: str,
     shipping_cost_column: str,
     category_large_column: str,
@@ -324,6 +325,7 @@ def build_incremental_payload(
         (actual_size_column, product_map.get("actual_size", "")),
         (price_column, product_map.get("price", "")),
         (buyma_sell_price_column, product_map.get("buyma_price", "")),
+        (buyma_meta_column, product_map.get("buyma_meta", "")),
         (image_paths_column, product_map.get("image_paths", "")),
         (shipping_cost_column, product_map.get("shipping_cost", "")),
         (category_large_column, product_map.get("musinsa_category_large", "")),
@@ -440,6 +442,7 @@ def _sheet_product_column_map(cfg: Dict[str, Any]) -> Dict[str, str]:
         "actual_size": str(cfg.get("ACTUAL_SIZE_COLUMN", "") or ""),
         "price": str(cfg.get("PRICE_COLUMN", "") or ""),
         "buyma_price": str(cfg.get("BUYMA_SELL_PRICE_COLUMN", "") or ""),
+        "buyma_meta": str(cfg.get("BUYMA_META_COLUMN", "") or ""),
         "image_paths": str(cfg.get("IMAGE_PATHS_COLUMN", "") or ""),
         "shipping_cost": str(cfg.get("SHIPPING_COST_COLUMN", "") or ""),
         "musinsa_category_large": str(cfg.get("CATEGORY_LARGE_COLUMN", "") or ""),
@@ -567,6 +570,8 @@ def process_sheet_once(
             existing_product_for_row = product_from_sheet_row(existing_values_for_row, sheet_product_columns)
             sheet_sku = existing_product_for_row.musinsa_sku
             sheet_product_name_jp = existing_product_for_row.product_name_jp
+            sheet_product_name_en = existing_product_for_row.product_name_en
+            sheet_brand_en = existing_product_for_row.brand_en
             LOGGER.info("[START] SKU=%s ROW=%s", sheet_sku or "-", idx)
             LOGGER.info("[IMAGE START] SKU=%s ROW=%s", sheet_sku or "-", idx)
             if has_status_header:
@@ -581,6 +586,8 @@ def process_sheet_once(
                 idx,
                 existing_sku=sheet_sku,
                 existing_product_name_jp=sheet_product_name_jp,
+                existing_product_name_en=sheet_product_name_en,
+                existing_brand_en=sheet_brand_en,
                 download_images=True,
                 images_only=True,
             )
@@ -696,6 +703,8 @@ def process_sheet_once(
                     idx,
                     existing_sku=sheet_sku,
                     existing_product_name_jp=existing_product_for_row.product_name_jp,
+                    existing_product_name_en=existing_product_for_row.product_name_en,
+                    existing_brand_en=existing_product_for_row.brand_en,
                     download_images=download_images,
                 )
                 product_info = _product_to_dict(product)

@@ -9,12 +9,14 @@ PRODUCT_CORE_ID_FIELDS = (
     "musinsa_sku",
     "product_name_kr",
     "product_name_jp",
+    "product_name_en",
     "brand",
 )
 
 PRODUCT_SHEET_DERIVED_FIELDS = (
     "image_paths",
     "buyma_price",
+    "buyma_meta",
     "shipping_cost",
     "musinsa_category_large",
     "musinsa_category_middle",
@@ -50,6 +52,7 @@ class Product:
     musinsa_sku: str = ""
     product_name_kr: str = "상품명 미확인"
     product_name_jp: str = ""
+    product_name_en: str = ""
     brand: str = ""
 
     # Crawl result fields
@@ -66,6 +69,7 @@ class Product:
 
     # Post-process / upload derived fields
     buyma_price: str = ""
+    buyma_meta: str = ""
     image_paths: str = ""
     shipping_cost: str = ""
 
@@ -78,12 +82,14 @@ PRODUCT_SHEET_FIELDS = (
     "brand_en",
     "product_name_kr",
     "product_name_jp",
+    "product_name_en",
     "musinsa_sku",
     "color_kr",
     "size",
     "actual_size",
     "price",
     "buyma_price",
+    "buyma_meta",
     "image_paths",
     "shipping_cost",
     "musinsa_category_large",
@@ -138,11 +144,13 @@ def product_from_sheet_row(
         brand_en=_cell("brand_en"),
         product_name_kr=_cell("product_name_kr"),
         product_name_jp=_cell("product_name_jp"),
+        product_name_en=_cell("product_name_en"),
         color_kr=_cell("color_kr"),
         size=_cell("size"),
         actual_size=_cell("actual_size"),
         price=_cell("price"),
         buyma_price=_cell("buyma_price"),
+        buyma_meta=_cell("buyma_meta"),
         musinsa_sku=_cell("musinsa_sku"),
         image_paths=_cell("image_paths"),
         musinsa_category_large=_cell("musinsa_category_large"),

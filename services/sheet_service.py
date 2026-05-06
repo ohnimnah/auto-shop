@@ -275,6 +275,7 @@ def get_existing_row_values(
     actual_size_column: str,
     price_column: str,
     buyma_sell_price_column: str,
+    buyma_meta_column: str,
     image_paths_column: str,
     shipping_cost_column: str,
     category_large_column: str,
@@ -285,7 +286,7 @@ def get_existing_row_values(
     columns = [
         sequence_column, url_column, brand_column, brand_en_column, product_name_kr_column, product_name_jp_column, product_name_en_column,
         musinsa_sku_column, color_kr_column, color_en_column, size_column, actual_size_column, price_column,
-        buyma_sell_price_column, image_paths_column, shipping_cost_column, category_large_column,
+        buyma_sell_price_column, buyma_meta_column, image_paths_column, shipping_cost_column, category_large_column,
         category_middle_column, category_small_column,
     ]
     last_column = max_column_letter(*columns)
@@ -314,6 +315,7 @@ def get_existing_row_values(
             actual_size_column: cell(actual_size_column),
             price_column: cell(price_column),
             buyma_sell_price_column: cell(buyma_sell_price_column),
+            buyma_meta_column: cell(buyma_meta_column),
             image_paths_column: cell(image_paths_column),
             shipping_cost_column: cell(shipping_cost_column),
             category_large_column: cell(category_large_column),
@@ -344,6 +346,7 @@ def get_existing_rows_bulk(
     actual_size_column: str,
     price_column: str,
     buyma_sell_price_column: str,
+    buyma_meta_column: str,
     image_paths_column: str,
     shipping_cost_column: str,
     category_large_column: str,
@@ -356,7 +359,7 @@ def get_existing_rows_bulk(
     columns = [
         sequence_column, url_column, brand_column, brand_en_column, product_name_kr_column, product_name_jp_column, product_name_en_column,
         musinsa_sku_column, color_kr_column, color_en_column, size_column, actual_size_column, price_column,
-        buyma_sell_price_column, image_paths_column, shipping_cost_column, category_large_column,
+        buyma_sell_price_column, buyma_meta_column, image_paths_column, shipping_cost_column, category_large_column,
         category_middle_column, category_small_column,
     ]
     last_column = max_column_letter(*columns)
@@ -389,6 +392,7 @@ def get_existing_rows_bulk(
                 actual_size_column: cell(actual_size_column),
                 price_column: cell(price_column),
                 buyma_sell_price_column: cell(buyma_sell_price_column),
+                buyma_meta_column: cell(buyma_meta_column),
                 image_paths_column: cell(image_paths_column),
                 shipping_cost_column: cell(shipping_cost_column),
                 category_large_column: cell(category_large_column),
