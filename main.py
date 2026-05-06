@@ -1180,6 +1180,8 @@ def main():
                     sname,
                     HEADER_ROW,
                 ),
+                product_sheet_name=SHEET_NAME,
+                product_url_column=URL_COLUMN,
             )
         finally:
             driver.quit()

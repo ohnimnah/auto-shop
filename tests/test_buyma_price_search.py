@@ -139,6 +139,18 @@ class BuymaPriceSearchTests(unittest.TestCase):
 
         self.assertTrue(buyma_service.is_buyma_no_results_page(soup))
 
+    def test_buyma_search_ready_detects_no_results_without_fixed_sleep(self):
+        driver = _MultiDetailDriverStub(
+            "<p>お探しの条件にあてはまる商品は見つかりませんでした。</p>",
+            {},
+        )
+        driver.get("https://www.buyma.com/r/NORESULT/")
+
+        with patch.object(buyma_service.time, "sleep") as sleep_mock:
+            buyma_service._wait_for_buyma_search_ready(driver, timeout_seconds=1)
+
+        sleep_mock.assert_not_called()
+
     def test_sku_prefix6_alone_is_not_reliable(self):
         result = buyma_service._score_buyma_text(
             "GC25SP completely unrelated item ¥12,000",

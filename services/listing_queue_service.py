@@ -682,6 +682,61 @@ def _read_seed_urls_from_seed_sheet(
     return rows
 
 
+def _read_existing_product_ids_from_main_sheet(
+    service,
+    spreadsheet_id: str,
+    product_sheet_name: str,
+    url_column: str,
+    row_start: int = 2,
+    row_end: int = 5000,
+) -> set[str]:
+    """Read existing Musinsa product IDs from the main product sheet URL column."""
+    result = service.spreadsheets().values().get(
+        spreadsheetId=spreadsheet_id,
+        range=f"'{product_sheet_name}'!{url_column}{row_start}:{url_column}{row_end}",
+    ).execute()
+    values = result.get("values", [])
+    product_ids: set[str] = set()
+    for row in values:
+        url = (row[0] if row else "").strip()
+        product_id, _product_url = _extract_musinsa_product_id_and_url(url)
+        if product_id:
+            product_ids.add(product_id)
+    return product_ids
+
+
+def _append_product_urls_to_main_sheet(
+    service,
+    spreadsheet_id: str,
+    product_sheet_name: str,
+    url_column: str,
+    product_urls: List[str],
+) -> int:
+    """Append collected product URLs after the last non-empty URL cell."""
+    values = [[url] for url in product_urls if _is_http_url(url)]
+    if not values:
+        return 0
+    row_start = 2
+    result = service.spreadsheets().values().get(
+        spreadsheetId=spreadsheet_id,
+        range=f"'{product_sheet_name}'!{url_column}{row_start}:{url_column}",
+    ).execute()
+    existing_values = result.get("values", [])
+    last_offset = -1
+    for offset, row in enumerate(existing_values):
+        if row and str(row[0] or "").strip():
+            last_offset = offset
+    next_row = row_start + last_offset + 1
+
+    service.spreadsheets().values().update(
+        spreadsheetId=spreadsheet_id,
+        range=f"'{product_sheet_name}'!{url_column}{next_row}:{url_column}{next_row + len(values) - 1}",
+        valueInputOption="USER_ENTERED",
+        body={"values": values},
+    ).execute()
+    return len(values)
+
+
 def _update_seed_row_simple(
     service,
     spreadsheet_id: str,
@@ -747,6 +802,8 @@ def collect_listing_queue_once(
     queue_sheet_name: str,
     seed_sheet_name: str,
     get_sheet_header_map_fn,
+    product_sheet_name: str = "",
+    product_url_column: str = "B",
 ) -> Dict[str, int]:
     """Collect product URLs/IDs from listing page seed sheet into queue sheet."""
     header_map = get_sheet_header_map_fn(service, queue_sheet_name)
@@ -784,7 +841,22 @@ def collect_listing_queue_once(
             if page_url and not product_id and _is_http_url(page_url):
                 seed_rows.append((row_num, page_url))
 
-    summary = {'seed_rows': len(seed_rows), 'new_rows': 0, 'duplicate_rows': 0, 'error_rows': 0}
+    main_existing_ids: set[str] = set()
+    if product_sheet_name:
+        main_existing_ids = _read_existing_product_ids_from_main_sheet(
+            service=service,
+            spreadsheet_id=spreadsheet_id,
+            product_sheet_name=product_sheet_name,
+            url_column=product_url_column,
+        )
+
+    summary = {
+        'seed_rows': len(seed_rows),
+        'new_rows': 0,
+        'main_rows': 0,
+        'duplicate_rows': 0,
+        'error_rows': 0,
+    }
 
     if not seed_rows:
         print(f"[queue] '{queue_sheet_name}' 시트: 처리할 seed URL이 없습니다.")
@@ -796,6 +868,7 @@ def collect_listing_queue_once(
         try:
             collected, href_candidates, malformed_count, collect_meta = _collect_products_from_listing_page(driver, page_url)
             append_values: List[List[str]] = []
+            main_append_urls: List[str] = []
             duplicate_count = 0
 
             for product_id, product_url in collected:
@@ -812,6 +885,9 @@ def collect_listing_queue_once(
                     "대기",
                     '',
                 ])
+                if product_sheet_name and product_id not in main_existing_ids:
+                    main_existing_ids.add(product_id)
+                    main_append_urls.append(product_url)
 
             if append_values:
                 service.spreadsheets().values().append(
@@ -822,6 +898,17 @@ def collect_listing_queue_once(
                     body={'values': append_values},
                 ).execute()
                 summary['new_rows'] += len(append_values)
+
+            if main_append_urls:
+                inserted_count = _append_product_urls_to_main_sheet(
+                    service=service,
+                    spreadsheet_id=spreadsheet_id,
+                    product_sheet_name=product_sheet_name,
+                    url_column=product_url_column,
+                    product_urls=main_append_urls,
+                )
+                summary['main_rows'] += inserted_count
+                print(f"[queue] 메인탭 자동 입력: {inserted_count}개")
 
             summary['duplicate_rows'] += duplicate_count
 
@@ -865,7 +952,10 @@ def collect_listing_queue_once(
                         status="수집완료",
                         note=note,
                     )
-            print(f"[queue] {row_num}행 완료: 신규 {len(append_values)}개 / 중복 {duplicate_count}개 / 비고 {note or '-'}")
+            print(
+                f"[queue] {row_num}행 완료: 신규 {len(append_values)}개 / "
+                f"메인입력 {len(main_append_urls)}개 / 중복 {duplicate_count}개 / 비고 {note or '-'}"
+            )
         except Exception as exc:
             summary['error_rows'] += 1
             note = _classify_exception(exc)
@@ -895,6 +985,6 @@ def collect_listing_queue_once(
 
     print(
         f"[queue] 수집 요약: seed={summary['seed_rows']} 신규={summary['new_rows']} "
-        f"중복={summary['duplicate_rows']} 오류={summary['error_rows']}"
+        f"메인입력={summary['main_rows']} 중복={summary['duplicate_rows']} 오류={summary['error_rows']}"
     )
     return summary

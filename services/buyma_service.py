@@ -247,6 +247,26 @@ def is_buyma_no_results_page(soup: BeautifulSoup) -> bool:
     return BUYMA_NO_RESULTS_TEXT in page_text
 
 
+def _wait_for_buyma_search_ready(driver, timeout_seconds: float = 2.0) -> None:
+    """Wait briefly until BUYMA search content is parseable."""
+    deadline = time.time() + timeout_seconds
+    while time.time() < deadline:
+        soup = BeautifulSoup(driver.page_source, "html.parser")
+        if is_buyma_no_results_page(soup) or count_buyma_item_links(soup) > 0:
+            return
+        time.sleep(0.2)
+
+
+def _wait_for_buyma_detail_ready(driver, timeout_seconds: float = 0.8) -> None:
+    """Wait briefly until a BUYMA item detail page has title or price text."""
+    deadline = time.time() + timeout_seconds
+    while time.time() < deadline:
+        soup = BeautifulSoup(driver.page_source, "html.parser")
+        if soup.select_one("h1") or extract_buyma_item_page_price(soup) > 0:
+            return
+        time.sleep(0.2)
+
+
 def extract_buyma_item_page_price(soup: BeautifulSoup) -> int:
     """Extract item-page sell price from BUYMA item page."""
     page_text = soup.get_text(" ", strip=True)
@@ -539,7 +559,7 @@ def fetch_buyma_lowest_price_with_meta(
             print(f"    검색 URL: {search_url}")
             driver.get(search_url)
             WebDriverWait(driver, 10).until(EC.presence_of_element_located((By.TAG_NAME, "body")))
-            time.sleep(3)
+            _wait_for_buyma_search_ready(driver)
 
             soup = BeautifulSoup(driver.page_source, "html.parser")
             if is_buyma_no_results_page(soup):
@@ -600,7 +620,7 @@ def fetch_buyma_lowest_price_with_meta(
                     detail_checked += 1
                     driver.get(item_url)
                     WebDriverWait(driver, 10).until(EC.presence_of_element_located((By.TAG_NAME, "body")))
-                    time.sleep(1.2)
+                    _wait_for_buyma_detail_ready(driver)
 
                     item_soup = BeautifulSoup(driver.page_source, "html.parser")
                     title_tag = item_soup.select_one("h1")
