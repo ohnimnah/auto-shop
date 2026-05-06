@@ -53,6 +53,7 @@ from config.app_config import (
     OPT_KIND_WEIGHT_MAP,
     PRICE_COLUMN,
     PRODUCT_NAME_EN_COLUMN,
+    PRODUCT_NAME_JP_COLUMN,
     PRODUCT_NAME_KR_COLUMN,
     PROGRESS_STATUS_HEADER,
     SEQUENCE_COLUMN,
@@ -162,13 +163,13 @@ LISTING_SEED_SHEET_NAME = ""
 def _load_sheet_runtime_config() -> None:
     """런처에서 저장한 시트 설정을 읽어 런타임 기본값을 덮어쓴다."""
     global SPREADSHEET_ID, SHEET_GIDS, SHEET_NAME, ROW_START, LISTING_QUEUE_SHEET_NAME, LISTING_QUEUE_SHEET_URL, LISTING_SEED_SHEET_NAME
-    global SEQUENCE_COLUMN, URL_COLUMN, BRAND_COLUMN, BRAND_EN_COLUMN, PRODUCT_NAME_KR_COLUMN, PRODUCT_NAME_EN_COLUMN
+    global SEQUENCE_COLUMN, URL_COLUMN, BRAND_COLUMN, BRAND_EN_COLUMN, PRODUCT_NAME_KR_COLUMN, PRODUCT_NAME_JP_COLUMN, PRODUCT_NAME_EN_COLUMN
     global MUSINSA_SKU_COLUMN, COLOR_KR_COLUMN, COLOR_EN_COLUMN, SIZE_COLUMN, ACTUAL_SIZE_COLUMN, PRICE_COLUMN
     global BAIMA_SELL_PRICE_COLUMN, IMAGE_PATHS_COLUMN, SHIPPING_COST_COLUMN, CATEGORY_LARGE_COLUMN, CATEGORY_MIDDLE_COLUMN, CATEGORY_SMALL_COLUMN
     global SHIPPING_TABLE_RANGE
 
     def _apply_columns(raw_columns):
-        global SEQUENCE_COLUMN, URL_COLUMN, BRAND_COLUMN, BRAND_EN_COLUMN, PRODUCT_NAME_KR_COLUMN, PRODUCT_NAME_EN_COLUMN
+        global SEQUENCE_COLUMN, URL_COLUMN, BRAND_COLUMN, BRAND_EN_COLUMN, PRODUCT_NAME_KR_COLUMN, PRODUCT_NAME_JP_COLUMN, PRODUCT_NAME_EN_COLUMN
         global MUSINSA_SKU_COLUMN, COLOR_KR_COLUMN, COLOR_EN_COLUMN, SIZE_COLUMN, ACTUAL_SIZE_COLUMN, PRICE_COLUMN
         global BAIMA_SELL_PRICE_COLUMN, IMAGE_PATHS_COLUMN, SHIPPING_COST_COLUMN, CATEGORY_LARGE_COLUMN, CATEGORY_MIDDLE_COLUMN, CATEGORY_SMALL_COLUMN
         global SHIPPING_TABLE_RANGE
@@ -186,6 +187,7 @@ def _load_sheet_runtime_config() -> None:
         BRAND_COLUMN = normalized["brand"]
         BRAND_EN_COLUMN = normalized["brand_en"]
         PRODUCT_NAME_KR_COLUMN = normalized["product_name_kr"]
+        PRODUCT_NAME_JP_COLUMN = normalized["product_name_jp"]
         PRODUCT_NAME_EN_COLUMN = normalized["product_name_en"]
         MUSINSA_SKU_COLUMN = normalized["musinsa_sku"]
         COLOR_KR_COLUMN = normalized["color_kr"]
@@ -524,6 +526,7 @@ def get_existing_row_values(service, sheet_name: str, row_num: int) -> Dict[str,
         brand_column=BRAND_COLUMN,
         brand_en_column=BRAND_EN_COLUMN,
         product_name_kr_column=PRODUCT_NAME_KR_COLUMN,
+        product_name_jp_column=PRODUCT_NAME_JP_COLUMN,
         product_name_en_column=PRODUCT_NAME_EN_COLUMN,
         musinsa_sku_column=MUSINSA_SKU_COLUMN,
         color_kr_column=COLOR_KR_COLUMN,
@@ -556,6 +559,7 @@ def get_existing_rows_bulk(
         brand_column=BRAND_COLUMN,
         brand_en_column=BRAND_EN_COLUMN,
         product_name_kr_column=PRODUCT_NAME_KR_COLUMN,
+        product_name_jp_column=PRODUCT_NAME_JP_COLUMN,
         product_name_en_column=PRODUCT_NAME_EN_COLUMN,
         musinsa_sku_column=MUSINSA_SKU_COLUMN,
         color_kr_column=COLOR_KR_COLUMN,
@@ -808,6 +812,7 @@ def process_sheet_once(
         "BRAND_COLUMN": BRAND_COLUMN,
         "BRAND_EN_COLUMN": BRAND_EN_COLUMN,
         "PRODUCT_NAME_KR_COLUMN": PRODUCT_NAME_KR_COLUMN,
+        "PRODUCT_NAME_JP_COLUMN": PRODUCT_NAME_JP_COLUMN,
         "MUSINSA_SKU_COLUMN": MUSINSA_SKU_COLUMN,
         "COLOR_KR_COLUMN": COLOR_KR_COLUMN,
         "SIZE_COLUMN": SIZE_COLUMN,
@@ -963,6 +968,7 @@ def scrape_musinsa_product(
     url: str,
     row_num: int,
     existing_sku: str = "",
+    existing_product_name_jp: str = "",
     download_images: bool = False,
     images_only: bool = False,
 ) -> Product:
@@ -972,6 +978,7 @@ def scrape_musinsa_product(
         url=url,
         row_num=row_num,
         existing_sku=existing_sku,
+        existing_product_name_jp=existing_product_name_jp,
         download_images=download_images,
         images_only=images_only,
         crawl_page_settle_seconds=CRAWL_PAGE_SETTLE_SECONDS,

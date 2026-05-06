@@ -8,6 +8,7 @@ from typing import Any, Dict, Mapping
 PRODUCT_CORE_ID_FIELDS = (
     "musinsa_sku",
     "product_name_kr",
+    "product_name_jp",
     "brand",
 )
 
@@ -48,6 +49,7 @@ class Product:
     # Core identifiers
     musinsa_sku: str = ""
     product_name_kr: str = "상품명 미확인"
+    product_name_jp: str = ""
     brand: str = ""
 
     # Crawl result fields
@@ -75,6 +77,7 @@ PRODUCT_SHEET_FIELDS = (
     "brand",
     "brand_en",
     "product_name_kr",
+    "product_name_jp",
     "musinsa_sku",
     "color_kr",
     "size",
@@ -134,6 +137,7 @@ def product_from_sheet_row(
         brand=_cell("brand"),
         brand_en=_cell("brand_en"),
         product_name_kr=_cell("product_name_kr"),
+        product_name_jp=_cell("product_name_jp"),
         color_kr=_cell("color_kr"),
         size=_cell("size"),
         actual_size=_cell("actual_size"),

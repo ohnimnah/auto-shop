@@ -209,8 +209,44 @@ def _legacy_to_config(legacy: dict[str, Any]) -> dict[str, Any]:
             "images_dir": str(legacy.get("images_dir") or "").strip(),
             "log_dir": str(legacy.get("log_dir") or "").strip(),
         },
-        "columns": dict(legacy.get("columns") or legacy.get("upload_columns") or {}),
+        "columns": _migrate_japanese_name_column(dict(legacy.get("columns") or legacy.get("upload_columns") or {})),
     }
+
+
+def _migrate_japanese_name_column(columns: dict[str, Any]) -> dict[str, Any]:
+    """Shift old default column mapping when 일본어상품명 is newly inserted after 한국상품명."""
+    if not isinstance(columns, dict) or not columns:
+        return columns
+    if str(columns.get("product_name_jp") or "").strip():
+        return columns
+
+    migrated = dict(columns)
+    old_to_new = {
+        "product_name_en": ("F", "G"),
+        "musinsa_sku": ("G", "H"),
+        "color_kr": ("H", "I"),
+        "color_en": ("I", "J"),
+        "size": ("J", "K"),
+        "actual_size": ("K", "L"),
+        "price": ("L", "M"),
+        "buyma_price": ("M", "N"),
+        "buyma_meta": ("N", "O"),
+        "image_paths": ("O", "P"),
+        "shipping_cost": ("P", "Q"),
+        "category_large": ("X", "Y"),
+        "category_middle": ("Y", "Z"),
+        "category_small": ("Z", "AA"),
+        "shipping_table_range": ("AA1:AC60", "AB1:AD60"),
+    }
+    shifted_any = False
+    for key, (old_value, new_value) in old_to_new.items():
+        current = str(migrated.get(key) or "").strip().upper()
+        if current == old_value:
+            migrated[key] = new_value
+            shifted_any = True
+    if shifted_any:
+        migrated["product_name_jp"] = "F"
+    return migrated
 
 
 def load_config(profile_name: str = DEFAULT_PROFILE_NAME, *, create_if_missing: bool = False) -> dict[str, Any]:
@@ -224,6 +260,9 @@ def load_config(profile_name: str = DEFAULT_PROFILE_NAME, *, create_if_missing: 
             with open(config_path, "r", encoding="utf-8") as file:
                 loaded = json.load(file)
             if isinstance(loaded, dict):
+                if isinstance(loaded.get("columns"), dict):
+                    loaded = dict(loaded)
+                    loaded["columns"] = _migrate_japanese_name_column(loaded["columns"])
                 config = _deep_merge(config, loaded)
         except Exception:
             pass

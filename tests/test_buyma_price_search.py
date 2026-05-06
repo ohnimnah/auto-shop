@@ -39,9 +39,23 @@ class _DriverStub:
 
 class BuymaPriceSearchTests(unittest.TestCase):
     def test_price_search_query_order_prefers_sku_then_name_then_brand_name(self):
-        queries = buyma_service.build_buyma_price_search_queries("G CLASSIC TANK", "GLOWNY", "GC25SPSL0010GR")
+        queries = buyma_service.build_buyma_price_search_queries(
+            "G CLASSIC TANK",
+            "GLOWNY",
+            "GC25SPSL0010GR",
+            "クラシック タンク",
+        )
 
-        self.assertEqual(queries, ["GC25SPSL0010GR", "G CLASSIC TANK", "GLOWNY G CLASSIC TANK"])
+        self.assertEqual(
+            queries,
+            [
+                "GC25SPSL0010GR",
+                "G CLASSIC TANK",
+                "GLOWNY G CLASSIC TANK",
+                "クラシック タンク",
+                "GLOWNY クラシック タンク",
+            ],
+        )
 
     def test_listing_entry_does_not_reuse_price_from_multi_item_parent(self):
         soup = BeautifulSoup(
@@ -63,6 +77,17 @@ class BuymaPriceSearchTests(unittest.TestCase):
         self.assertEqual(entries[0]["url"], "https://www.buyma.com/item/222222/")
         self.assertEqual(entries[0]["price"], 8000)
 
+    def test_japanese_name_can_match_listing_without_english_tokens(self):
+        self.assertTrue(
+            buyma_service.is_relevant_buyma_listing_entry(
+                "GLOWNY クラシック タンクトップ ¥12,000",
+                "",
+                "",
+                "GLOWNY",
+                "クラシック タンクトップ",
+            )
+        )
+
     def test_fetch_buyma_lowest_price_returns_empty_when_only_unrelated_cards_match(self):
         search_html = """
         <div>
@@ -82,7 +107,9 @@ class BuymaPriceSearchTests(unittest.TestCase):
 
         with patch.object(buyma_service, "WebDriverWait", _WaitStub), patch.object(
             buyma_service, "EC", _ECStub
-        ), patch.object(buyma_service, "By", _ByStub), patch.object(buyma_service.time, "sleep", lambda *_: None):
+        ), patch.object(buyma_service, "By", _ByStub), patch.object(
+            buyma_service.time, "sleep", lambda *_: None
+        ), patch("builtins.print"):
             price = buyma_service.fetch_buyma_lowest_price(driver, "Target Product", "TARGETBRAND", "TARGETSKU")
 
         self.assertEqual(price, "")

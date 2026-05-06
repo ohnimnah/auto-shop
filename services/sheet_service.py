@@ -266,6 +266,7 @@ def get_existing_row_values(
     brand_column: str,
     brand_en_column: str,
     product_name_kr_column: str,
+    product_name_jp_column: str,
     product_name_en_column: str,
     musinsa_sku_column: str,
     color_kr_column: str,
@@ -280,9 +281,9 @@ def get_existing_row_values(
     category_middle_column: str,
     category_small_column: str,
 ) -> Dict[str, str]:
-    """Read one row (A~Y) and map selected columns."""
+    """Read one row and map selected columns."""
     columns = [
-        sequence_column, url_column, brand_column, brand_en_column, product_name_kr_column, product_name_en_column,
+        sequence_column, url_column, brand_column, brand_en_column, product_name_kr_column, product_name_jp_column, product_name_en_column,
         musinsa_sku_column, color_kr_column, color_en_column, size_column, actual_size_column, price_column,
         buyma_sell_price_column, image_paths_column, shipping_cost_column, category_large_column,
         category_middle_column, category_small_column,
@@ -304,6 +305,7 @@ def get_existing_row_values(
             brand_column: cell(brand_column),
             brand_en_column: cell(brand_en_column),
             product_name_kr_column: cell(product_name_kr_column),
+            product_name_jp_column: cell(product_name_jp_column),
             product_name_en_column: cell(product_name_en_column),
             musinsa_sku_column: cell(musinsa_sku_column),
             color_kr_column: cell(color_kr_column),
@@ -333,6 +335,7 @@ def get_existing_rows_bulk(
     brand_column: str,
     brand_en_column: str,
     product_name_kr_column: str,
+    product_name_jp_column: str,
     product_name_en_column: str,
     musinsa_sku_column: str,
     color_kr_column: str,
@@ -347,11 +350,11 @@ def get_existing_rows_bulk(
     category_middle_column: str,
     category_small_column: str,
 ) -> Dict[int, Dict[str, str]]:
-    """Read multiple rows (A~Y) in one request and map selected columns."""
+    """Read multiple rows in one request and map selected columns."""
     if not row_numbers:
         return {}
     columns = [
-        sequence_column, url_column, brand_column, brand_en_column, product_name_kr_column, product_name_en_column,
+        sequence_column, url_column, brand_column, brand_en_column, product_name_kr_column, product_name_jp_column, product_name_en_column,
         musinsa_sku_column, color_kr_column, color_en_column, size_column, actual_size_column, price_column,
         buyma_sell_price_column, image_paths_column, shipping_cost_column, category_large_column,
         category_middle_column, category_small_column,
@@ -377,6 +380,7 @@ def get_existing_rows_bulk(
                 brand_column: cell(brand_column),
                 brand_en_column: cell(brand_en_column),
                 product_name_kr_column: cell(product_name_kr_column),
+                product_name_jp_column: cell(product_name_jp_column),
                 product_name_en_column: cell(product_name_en_column),
                 musinsa_sku_column: cell(musinsa_sku_column),
                 color_kr_column: cell(color_kr_column),

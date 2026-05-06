@@ -104,25 +104,26 @@ DEFAULT_UPLOAD_COLUMNS = {
     "brand": "C",
     "brand_en": "D",
     "product_name_kr": "E",
-    "product_name_en": "F",
-    "musinsa_sku": "G",
-    "color_kr": "H",
-    "color_en": "I",
-    "size": "J",
-    "actual_size": "K",
-    "price_krw": "L",
-    "buyma_price": "M",
-    "image_paths": "O",
-    "shipping_cost": "P",
+    "product_name_jp": "F",
+    "product_name_en": "G",
+    "musinsa_sku": "H",
+    "color_kr": "I",
+    "color_en": "J",
+    "size": "K",
+    "actual_size": "L",
+    "price_krw": "M",
+    "buyma_price": "N",
+    "image_paths": "P",
+    "shipping_cost": "Q",
     "category_legacy_large": "V",
     "category_legacy_middle": "W",
     "category_legacy_small": "X",
-    "musinsa_category_large": "X",
-    "musinsa_category_middle": "Y",
-    "musinsa_category_small": "Z",
+    "musinsa_category_large": "Y",
+    "musinsa_category_middle": "Z",
+    "musinsa_category_small": "AA",
 }
 UPLOAD_COLUMNS = dict(DEFAULT_UPLOAD_COLUMNS)
-UPLOAD_MAX_DATA_COLUMN = "Z"
+UPLOAD_MAX_DATA_COLUMN = "AA"
 
 
 def _get_candidate_sheet_name() -> str:
@@ -222,6 +223,7 @@ def _load_sheet_runtime_config() -> None:
             "brand": (profile_config.get("columns") or {}).get("brand"),
             "brand_en": (profile_config.get("columns") or {}).get("brand_en"),
             "product_name_kr": (profile_config.get("columns") or {}).get("product_name_kr"),
+            "product_name_jp": (profile_config.get("columns") or {}).get("product_name_jp"),
             "product_name_en": (profile_config.get("columns") or {}).get("product_name_en"),
             "musinsa_sku": (profile_config.get("columns") or {}).get("musinsa_sku"),
             "color_kr": (profile_config.get("columns") or {}).get("color_kr"),

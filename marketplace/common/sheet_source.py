@@ -221,6 +221,7 @@ def read_upload_rows(
                 "brand": field_cell("brand"),
                 "brand_en": field_cell("brand_en"),
                 "product_name_kr": product_name,
+                "product_name_jp": field_cell("product_name_jp"),
                 "product_name_en": field_cell("product_name_en"),
                 "musinsa_sku": field_cell("musinsa_sku"),
                 "color_kr": field_cell("color_kr"),

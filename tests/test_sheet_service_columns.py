@@ -17,7 +17,7 @@ class _FakeValues:
 
     def get(self, *, spreadsheetId, range):
         self.requested_range = range
-        row = [""] * 30
+        row = [""] * 31
         row[0] = "1"
         row[1] = "https://example.com"
         row[25] = "Moved Brand"
@@ -25,6 +25,7 @@ class _FakeValues:
         row[27] = "Moved Price"
         row[28] = "Moved Images"
         row[29] = "Moved Shipping"
+        row[30] = "JP Name"
         return _FakeRequest({"values": [row]})
 
 
@@ -58,6 +59,7 @@ class SheetServiceColumnTests(unittest.TestCase):
             brand_column="Z",
             brand_en_column="D",
             product_name_kr_column="AA",
+            product_name_jp_column="AE",
             product_name_en_column="F",
             musinsa_sku_column="G",
             color_kr_column="H",
@@ -75,10 +77,11 @@ class SheetServiceColumnTests(unittest.TestCase):
 
         self.assertEqual(row["Z"], "Moved Brand")
         self.assertEqual(row["AA"], "Moved Product")
+        self.assertEqual(row["AE"], "JP Name")
         self.assertEqual(row["AB"], "Moved Price")
         self.assertEqual(row["AC"], "Moved Images")
         self.assertEqual(row["AD"], "Moved Shipping")
-        self.assertIn(":AD2", service.values.requested_range)
+        self.assertIn(":AE2", service.values.requested_range)
 
 
 if __name__ == "__main__":

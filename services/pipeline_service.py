@@ -433,6 +433,7 @@ def _sheet_product_column_map(cfg: Dict[str, Any]) -> Dict[str, str]:
         "brand": str(cfg.get("BRAND_COLUMN", "") or ""),
         "brand_en": str(cfg.get("BRAND_EN_COLUMN", "") or ""),
         "product_name_kr": str(cfg.get("PRODUCT_NAME_KR_COLUMN", "") or ""),
+        "product_name_jp": str(cfg.get("PRODUCT_NAME_JP_COLUMN", "") or ""),
         "musinsa_sku": str(cfg.get("MUSINSA_SKU_COLUMN", "") or ""),
         "color_kr": str(cfg.get("COLOR_KR_COLUMN", "") or ""),
         "size": str(cfg.get("SIZE_COLUMN", "") or ""),
@@ -500,6 +501,7 @@ def process_sheet_once(
             shipping_missing = api["is_empty_cell"](existing_values.get(cfg["SHIPPING_COST_COLUMN"], ""))
             status_normalized = (current_status or "").strip()
             should_backfill_shipping = shipping_missing and status_normalized not in {
+                cfg["STATUS_CRAWLED"],
                 cfg["STATUS_COMPLETED"],
                 cfg["STATUS_UPLOAD_READY"],
                 STATUS_UPLOADING,
@@ -564,6 +566,7 @@ def process_sheet_once(
             existing_values_for_row = existing_rows_map.get(idx, {})
             existing_product_for_row = product_from_sheet_row(existing_values_for_row, sheet_product_columns)
             sheet_sku = existing_product_for_row.musinsa_sku
+            sheet_product_name_jp = existing_product_for_row.product_name_jp
             LOGGER.info("[START] SKU=%s ROW=%s", sheet_sku or "-", idx)
             LOGGER.info("[IMAGE START] SKU=%s ROW=%s", sheet_sku or "-", idx)
             if has_status_header:
@@ -577,6 +580,7 @@ def process_sheet_once(
                 url,
                 idx,
                 existing_sku=sheet_sku,
+                existing_product_name_jp=sheet_product_name_jp,
                 download_images=True,
                 images_only=True,
             )
@@ -584,16 +588,16 @@ def process_sheet_once(
 
             image_paths = product_info.get("image_paths", "")
             if is_empty_cell(image_paths):
-                print(f" {sheet_name} row {idx}: skip N update (empty image paths)")
+                print(f" {sheet_name} row {idx}: skip {cfg['IMAGE_PATHS_COLUMN']} update (empty image paths)")
             elif not is_empty_cell(existing_values_for_row.get(cfg["IMAGE_PATHS_COLUMN"], "")):
-                print(f" {sheet_name} row {idx}: skip N update (already filled)")
+                print(f" {sheet_name} row {idx}: skip {cfg['IMAGE_PATHS_COLUMN']} update (already filled)")
             else:
                 _enqueue_update(
                     updates_buffer,
                     f"'{sheet_name}'!{cfg['IMAGE_PATHS_COLUMN']}{idx}",
                     image_paths,
                 )
-                print(f" {sheet_name} row {idx}: queue N(image_paths) update")
+                print(f" {sheet_name} row {idx}: queue {cfg['IMAGE_PATHS_COLUMN']}(image_paths) update")
 
             logo_url = (product_info.get("brand_logo_url") or "").strip()
             if logo_url and image_paths:
@@ -691,6 +695,7 @@ def process_sheet_once(
                     url,
                     idx,
                     existing_sku=sheet_sku,
+                    existing_product_name_jp=existing_product_for_row.product_name_jp,
                     download_images=download_images,
                 )
                 product_info = _product_to_dict(product)
@@ -754,4 +759,3 @@ def process_sheet_once(
     finally:
         _flush_normal_buffer("normal-finally", force=True)
         LOGGER.info("[DONE] sheet=%s mode=crawl total_rows=%s", sheet_name, len(target_rows))
-

@@ -360,6 +360,7 @@ def is_relevant_buyma_item(
     musinsa_sku: str,
     english_name: str,
     brand: str,
+    japanese_name: str = "",
 ) -> bool:
     """Judge whether BUYMA detail page is relevant to the target item."""
     title_tag = soup.select_one("h1")
@@ -387,6 +388,12 @@ def is_relevant_buyma_item(
         if hits >= 2:
             return True
 
+    japanese = re.sub(r"\s+", "", (japanese_name or "").strip()).lower()
+    if japanese and len(japanese) >= 3:
+        compact_haystack = re.sub(r"\s+", "", full_haystack)
+        if japanese in compact_haystack:
+            return True
+
     brand_text = (brand or "").strip().lower()
     if brand_text and brand_text in haystack and tokens:
         hits = sum(1 for token in tokens[:3] if token in haystack)
@@ -400,6 +407,7 @@ def is_relevant_buyma_listing_entry(
     musinsa_sku: str,
     english_name: str,
     brand: str,
+    japanese_name: str = "",
 ) -> bool:
     """Judge whether BUYMA search entry title is relevant."""
     title_lower = re.sub(r"\s+", " ", (title or "").strip()).lower()
@@ -420,17 +428,28 @@ def is_relevant_buyma_listing_entry(
         if t not in {"with", "from", "size", "color", "shoes", "black", "white"}
     ]
     brand_text = (brand or "").strip().lower()
-    if brand_text and brand_text not in title_lower:
-        return False
 
     if tokens:
+        if brand_text and brand_text not in title_lower:
+            return False
         hits = sum(1 for token in tokens if token in title_lower)
         if hits >= 2:
+            return True
+
+    japanese = re.sub(r"\s+", "", (japanese_name or "").strip()).lower()
+    if japanese and len(japanese) >= 3:
+        compact_title = re.sub(r"\s+", "", title_lower)
+        if japanese in compact_title:
             return True
     return False
 
 
-def build_buyma_price_search_queries(product_name: str, brand: str, musinsa_sku: str = "") -> List[str]:
+def build_buyma_price_search_queries(
+    product_name: str,
+    brand: str,
+    musinsa_sku: str = "",
+    product_name_jp: str = "",
+) -> List[str]:
     """Build BUYMA price search queries in priority order."""
     sku_query = re.sub(r"\s+", " ", (musinsa_sku or "").strip())
     cleaned_name = re.sub(r"\s+", " ", (product_name or "").strip())
@@ -439,11 +458,14 @@ def build_buyma_price_search_queries(product_name: str, brand: str, musinsa_sku:
     english_name = re.sub(r"\s+", " ", " ".join(english_parts)).strip()
     english_brand_parts = re.findall(r"[A-Za-z0-9\s\-/]+", cleaned_brand)
     english_brand = re.sub(r"\s+", " ", " ".join(english_brand_parts)).strip()
+    japanese_name = re.sub(r"\s+", " ", (product_name_jp or "").strip())
 
     query_candidates = [
         sku_query,
         english_name,
         f"{english_brand} {english_name}".strip() if english_brand and english_name else "",
+        japanese_name,
+        f"{english_brand} {japanese_name}".strip() if english_brand and japanese_name else "",
     ]
     if not sku_query and not english_name and english_brand:
         query_candidates.append(english_brand)
@@ -461,7 +483,13 @@ def build_buyma_price_search_queries(product_name: str, brand: str, musinsa_sku:
     return queries
 
 
-def fetch_buyma_lowest_price(driver, product_name: str, brand: str, musinsa_sku: str = "") -> str:
+def fetch_buyma_lowest_price(
+    driver,
+    product_name: str,
+    brand: str,
+    musinsa_sku: str = "",
+    product_name_jp: str = "",
+) -> str:
     """Search BUYMA and return lowest matched price."""
     print("\n>>> BUYMA 최저가 검색 시작")
     print(f"    상품명: {product_name}, 브랜드: {brand}, 품번: {musinsa_sku}")
@@ -473,7 +501,8 @@ def fetch_buyma_lowest_price(driver, product_name: str, brand: str, musinsa_sku:
     english_name = re.sub(r"\s+", " ", " ".join(english_parts)).strip()
     english_brand_parts = re.findall(r"[A-Za-z0-9\s\-/]+", cleaned_brand)
     english_brand = re.sub(r"\s+", " ", " ".join(english_brand_parts)).strip()
-    queries = build_buyma_price_search_queries(product_name, brand, musinsa_sku)
+    japanese_name = re.sub(r"\s+", " ", (product_name_jp or "").strip())
+    queries = build_buyma_price_search_queries(product_name, brand, musinsa_sku, japanese_name)
 
     if not queries:
         print("    [검색 질의 없음] 빈 값 반환")
@@ -505,6 +534,7 @@ def fetch_buyma_lowest_price(driver, product_name: str, brand: str, musinsa_sku:
                     sku_query,
                     english_name,
                     english_brand,
+                    japanese_name,
                 ):
                     listing_matched_prices.append(int(entry["price"]))
 
@@ -518,7 +548,7 @@ def fetch_buyma_lowest_price(driver, product_name: str, brand: str, musinsa_sku:
                     time.sleep(1.2)
 
                     item_soup = BeautifulSoup(driver.page_source, "html.parser")
-                    if not is_relevant_buyma_item(item_soup, sku_query, english_name, english_brand):
+                    if not is_relevant_buyma_item(item_soup, sku_query, english_name, english_brand, japanese_name):
                         continue
 
                     detail_price = extract_buyma_item_page_price(item_soup)
