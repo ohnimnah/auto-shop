@@ -133,11 +133,17 @@ def product_from_sheet_row(
     """Build Product from one sheet row dict using field->column mapping."""
     row = row_values or {}
 
+    def _clean_cell_value(value: Any) -> str:
+        text = str(value or "").strip()
+        if text.startswith("#"):
+            return ""
+        return text
+
     def _cell(field_name: str) -> str:
         column = str(column_map.get(field_name, "") or "").strip()
         if not column:
             return ""
-        return str(row.get(column, "") or "").strip()
+        return _clean_cell_value(row.get(column, ""))
 
     return Product(
         brand=_cell("brand"),

@@ -9,10 +9,12 @@ from typing import Dict, List, Tuple
 
 from bs4 import BeautifulSoup
 try:
+    from selenium.common.exceptions import TimeoutException
     from selenium.webdriver.common.by import By
     from selenium.webdriver.support import expected_conditions as EC
     from selenium.webdriver.support.ui import WebDriverWait
 except Exception:  # pragma: no cover
+    TimeoutException = Exception  # type: ignore[assignment]
     By = None  # type: ignore[assignment]
     EC = None  # type: ignore[assignment]
     WebDriverWait = None  # type: ignore[assignment]
@@ -1515,9 +1517,27 @@ def scrape_musinsa_product(
         text = (value or "").strip()
         return text in {"", "\uac00\uaca9 \ubbf8\ud655\uc778", "?? ???", "?????????"}
 
+    def _clean_existing_cell(value: str) -> str:
+        text = (value or "").strip()
+        if text.startswith("#"):
+            return ""
+        return text
+
+    existing_sku = _clean_existing_cell(existing_sku)
+    existing_product_name_jp = _clean_existing_cell(existing_product_name_jp)
+    existing_product_name_en = _clean_existing_cell(existing_product_name_en)
+    existing_brand_en = _clean_existing_cell(existing_brand_en)
+
     try:
         print(f"    페이지 로드 중... {url}")
-        driver.get(url)
+        try:
+            driver.get(url)
+        except TimeoutException as load_error:
+            print(f"    페이지 로드 지연: 현재 로드된 내용으로 진행 ({load_error})")
+            try:
+                driver.execute_script("window.stop();")
+            except Exception:
+                pass
         WebDriverWait(driver, 15).until(EC.presence_of_element_located((By.TAG_NAME, "body")))
         time.sleep(crawl_page_settle_seconds)
         soup = BeautifulSoup(driver.page_source, "html.parser")

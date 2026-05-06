@@ -38,6 +38,22 @@ class _DriverStub:
             self.page_source = self.search_html
 
 
+class _MultiDetailDriverStub:
+    def __init__(self, search_html: str, detail_html_by_url: dict[str, str]) -> None:
+        self.search_html = search_html
+        self.detail_html_by_url = detail_html_by_url
+        self.page_source = ""
+        self.visited = []
+
+    def get(self, url: str) -> None:
+        self.visited.append(url)
+        for item_url, html in self.detail_html_by_url.items():
+            if item_url in url:
+                self.page_source = html
+                return
+        self.page_source = self.search_html
+
+
 class BuymaPriceSearchTests(unittest.TestCase):
     def test_price_search_query_order_prefers_sku_brand_then_names(self):
         queries = buyma_service.build_buyma_price_search_queries(
@@ -83,6 +99,18 @@ class BuymaPriceSearchTests(unittest.TestCase):
         self.assertIn("Classic H-Line Skirt", queries)
         self.assertNotIn("H /", queries)
 
+    def test_formula_error_names_are_skipped(self):
+        queries = buyma_service.build_buyma_price_search_queries(
+            "데님 버튼 튜브탑",
+            "KINDAME",
+            "TS25S3105",
+            "#VALUE!",
+            "#VALUE!",
+        )
+
+        self.assertEqual(queries, ["TS25S3105", "KINDAME TS25S3105"])
+        self.assertNotIn("#VALUE!", queries)
+
     def test_listing_entry_does_not_reuse_price_from_multi_item_parent(self):
         soup = BeautifulSoup(
             """
@@ -103,21 +131,28 @@ class BuymaPriceSearchTests(unittest.TestCase):
         self.assertEqual(entries[0]["url"], "https://www.buyma.com/item/222222/")
         self.assertEqual(entries[0]["price"], 8000)
 
-    def test_sku_prefix6_alone_is_not_reliable(self):
-        self.assertFalse(
-            buyma_service.is_relevant_buyma_listing_entry(
-                "GC25SP completely unrelated item ¥12,000",
-                "GC25SPSL0010GR",
-                "",
-                "",
-                "",
-            )
+    def test_buyma_no_results_text_is_detected(self):
+        soup = BeautifulSoup(
+            "<p>お探しの条件にあてはまる商品は見つかりませんでした。</p>",
+            "html.parser",
         )
 
-    def test_fetch_buyma_price_with_meta_prefers_reliable_detail_price(self):
+        self.assertTrue(buyma_service.is_buyma_no_results_page(soup))
+
+    def test_sku_prefix6_alone_is_not_reliable(self):
+        result = buyma_service._score_buyma_text(
+            "GC25SP completely unrelated item ¥12,000",
+            musinsa_sku="GC25SPSL0010GR",
+            english_name="",
+            brand="",
+            japanese_name="",
+        )
+        self.assertLess(result["score"], 80)
+
+    def test_mid_confidence_candidate_prefers_reliable_detail_price(self):
         search_html = """
         <div>
-          <a href="/item/222222/">GLOWNY G CLASSIC TANK GC25SPSL0010GR</a>
+          <a href="/item/222222/">GLOWNY G CLASSIC TANK クラシック タンク</a>
           <span class="Price_Txt">¥9,000</span>
         </div>
         """
@@ -162,6 +197,96 @@ class BuymaPriceSearchTests(unittest.TestCase):
 
         self.assertEqual([item["price"] for item in filtered], [10000, 11000])
 
+    def test_unmatched_listing_cards_do_not_open_detail_pages(self):
+        search_html = """
+        <div>
+          <a href="/item/111111/">Completely Different One</a><span class="Price_Txt">¥9,000</span>
+          <a href="/item/222222/">Completely Different Two</a><span class="Price_Txt">¥9,500</span>
+        </div>
+        """
+        driver = _MultiDetailDriverStub(search_html, {})
+
+        with patch.object(buyma_service, "WebDriverWait", _WaitStub), patch.object(
+            buyma_service, "EC", _ECStub
+        ), patch.object(buyma_service, "By", _ByStub), patch.object(
+            buyma_service.time, "sleep", lambda *_: None
+        ), patch("builtins.print"):
+            buyma_service.fetch_buyma_lowest_price_with_meta(
+                driver,
+                "Target Product",
+                "TARGETBRAND",
+                "TARGETSKU",
+            )
+
+        detail_visits = [url for url in driver.visited if "/item/" in url]
+        self.assertEqual(detail_visits, [])
+
+    def test_high_confidence_listing_with_sku_skips_detail_page(self):
+        search_html = """
+        <div>
+          <a href="/item/222222/">GLOWNY G CLASSIC TANK GC25SPSL0010GR</a>
+          <span class="Price_Txt">¥9,000</span>
+        </div>
+        """
+        driver = _MultiDetailDriverStub(search_html, {})
+
+        with patch.object(buyma_service, "WebDriverWait", _WaitStub), patch.object(
+            buyma_service, "EC", _ECStub
+        ), patch.object(buyma_service, "By", _ByStub), patch.object(
+            buyma_service.time, "sleep", lambda *_: None
+        ), patch("builtins.print"):
+            result = buyma_service.fetch_buyma_lowest_price_with_meta(
+                driver,
+                "G CLASSIC TANK",
+                "GLOWNY",
+                "GC25SPSL0010GR",
+                "",
+                "5,000",
+            )
+
+        detail_visits = [url for url in driver.visited if "/item/" in url]
+        meta = json.loads(result["buyma_meta"])
+        self.assertEqual(detail_visits, [])
+        self.assertEqual(result["buyma_price"], "9,000")
+        self.assertEqual(meta["source"], "listing")
+
+    def test_sku_only_listing_opens_detail_for_verification(self):
+        search_html = """
+        <div>
+          <a href="/item/222222/">GC25SPSL0010GR</a>
+          <span class="Price_Txt">¥9,000</span>
+        </div>
+        """
+        detail_html = """
+        <html>
+          <body>
+            <h1>GLOWNY G CLASSIC TANK GC25SPSL0010GR</h1>
+            <span class="Price_Txt">¥8,800</span>
+          </body>
+        </html>
+        """
+        driver = _MultiDetailDriverStub(search_html, {"https://www.buyma.com/item/222222/": detail_html})
+
+        with patch.object(buyma_service, "WebDriverWait", _WaitStub), patch.object(
+            buyma_service, "EC", _ECStub
+        ), patch.object(buyma_service, "By", _ByStub), patch.object(
+            buyma_service.time, "sleep", lambda *_: None
+        ), patch("builtins.print"):
+            result = buyma_service.fetch_buyma_lowest_price_with_meta(
+                driver,
+                "G CLASSIC TANK",
+                "GLOWNY",
+                "GC25SPSL0010GR",
+                "",
+                "5,000",
+            )
+
+        detail_visits = [url for url in driver.visited if "/item/" in url]
+        meta = json.loads(result["buyma_meta"])
+        self.assertEqual(detail_visits, ["https://www.buyma.com/item/222222/"])
+        self.assertEqual(result["buyma_price"], "8,800")
+        self.assertEqual(meta["source"], "detail")
+
     def test_fetch_buyma_lowest_price_returns_empty_when_only_unrelated_cards_match(self):
         search_html = """
         <div>
@@ -187,6 +312,29 @@ class BuymaPriceSearchTests(unittest.TestCase):
             price = buyma_service.fetch_buyma_lowest_price(driver, "Target Product", "TARGETBRAND", "TARGETSKU")
 
         self.assertEqual(price, "")
+
+    def test_fetch_buyma_records_no_results_reason(self):
+        search_html = "<p>お探しの条件にあてはまる商品は見つかりませんでした。</p>"
+        driver = _MultiDetailDriverStub(search_html, {})
+
+        with patch.object(buyma_service, "WebDriverWait", _WaitStub), patch.object(
+            buyma_service, "EC", _ECStub
+        ), patch.object(buyma_service, "By", _ByStub), patch.object(
+            buyma_service.time, "sleep", lambda *_: None
+        ), patch("builtins.print"):
+            result = buyma_service.fetch_buyma_lowest_price_with_meta(
+                driver,
+                "Target Product",
+                "TARGETBRAND",
+                "TARGETSKU",
+            )
+
+        meta = json.loads(result["buyma_meta"])
+        detail_visits = [url for url in driver.visited if "/item/" in url]
+        self.assertEqual(result["buyma_price"], "")
+        self.assertEqual(detail_visits, [])
+        self.assertEqual(meta["selected_reason"], "buyma_no_results")
+        self.assertEqual(meta["checked_count"], 0)
 
 
 if __name__ == "__main__":

@@ -115,6 +115,7 @@ from services.pipeline_service import (
     is_empty_cell as svc_is_empty_cell,
     row_needs_image_download as svc_row_needs_image_download,
     row_needs_update as svc_row_needs_update,
+    row_crawl_outputs_complete as svc_row_crawl_outputs_complete,
     is_crawler_ready_status as svc_is_crawler_ready_status,
     is_image_ready_status as svc_is_image_ready_status,
     process_sheet_once as svc_process_sheet_once,
@@ -752,6 +753,7 @@ def process_sheet_once(
         "is_image_ready_status": is_image_ready_status,
         "row_needs_image_download": row_needs_image_download,
         "row_needs_update": row_needs_update,
+        "row_crawl_outputs_complete": svc_row_crawl_outputs_complete,
         "is_empty_cell": is_empty_cell,
         "is_crawler_ready_status": is_crawler_ready_status,
         "update_cell_by_header": update_cell_by_header,
@@ -759,6 +761,7 @@ def process_sheet_once(
         "build_thumbnail_brand": build_thumbnail_brand,
         "create_thumbnail_for_folder": create_thumbnail_for_folder,
         "scrape_musinsa_product": scrape_musinsa_product,
+        "fetch_buyma_lowest_price": svc_fetch_buyma_lowest_price,
         "write_image_paths_only": write_image_paths_only,
         "build_image_folder_name": build_image_folder_name,
         "download_brand_logo": download_brand_logo,
@@ -812,12 +815,11 @@ def process_sheet_once(
         "STATUS_CRAWLED": STATUS_CRAWLED,
         "CRAWLER_ROW_DELAY_SECONDS": CRAWLER_ROW_DELAY_SECONDS,
         "BATCH_FLUSH_SIZE": 60,
-        "BATCH_FLUSH_ROWS": 5,
-        "BATCH_FLUSH_CELLS": 140,
         "BRAND_COLUMN": BRAND_COLUMN,
         "BRAND_EN_COLUMN": BRAND_EN_COLUMN,
         "PRODUCT_NAME_KR_COLUMN": PRODUCT_NAME_KR_COLUMN,
         "PRODUCT_NAME_JP_COLUMN": PRODUCT_NAME_JP_COLUMN,
+        "PRODUCT_NAME_EN_COLUMN": PRODUCT_NAME_EN_COLUMN,
         "MUSINSA_SKU_COLUMN": MUSINSA_SKU_COLUMN,
         "COLOR_KR_COLUMN": COLOR_KR_COLUMN,
         "SIZE_COLUMN": SIZE_COLUMN,
@@ -979,6 +981,7 @@ def scrape_musinsa_product(
     existing_brand_en: str = "",
     download_images: bool = False,
     images_only: bool = False,
+    fetch_buyma: bool = True,
 ) -> Product:
     """Selenium을 사용하여 무신사 상품 페이지에서 정보를 추출한다."""
     return svc_scrape_musinsa_product(
@@ -994,7 +997,7 @@ def scrape_musinsa_product(
         crawl_page_settle_seconds=CRAWL_PAGE_SETTLE_SECONDS,
         max_thumbnail_images=MAX_THUMBNAIL_IMAGES,
         download_images_fn=download_thumbnail_images,
-        fetch_buyma_lowest_price_fn=svc_fetch_buyma_lowest_price,
+        fetch_buyma_lowest_price_fn=svc_fetch_buyma_lowest_price if fetch_buyma else None,
     )
 
 

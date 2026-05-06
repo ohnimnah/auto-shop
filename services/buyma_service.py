@@ -20,6 +20,9 @@ except Exception:  # pragma: no cover - allows tests without selenium runtime.
     WebDriverWait = None  # type: ignore[assignment]
 
 
+BUYMA_NO_RESULTS_TEXT = "お探しの条件にあてはまる商品は見つかりませんでした。"
+
+
 class BuymaCredentialService:
     """Persist BUYMA login credentials outside the UI layer."""
 
@@ -153,50 +156,6 @@ def extract_yen_values(text: str) -> List[int]:
     return values
 
 
-def extract_buyma_listing_prices(soup: BeautifulSoup) -> List[int]:
-    """Extract listing prices from BUYMA search page."""
-    prices: List[int] = []
-
-    action_blocks = soup.select('[item-url*="/item/"]')
-    for action in action_blocks:
-        container = action
-        price_tags = []
-        for _ in range(5):
-            if not container:
-                break
-            price_tags = container.select("span.Price_Txt")
-            if price_tags:
-                break
-            container = container.parent
-
-        for tag in price_tags:
-            prices.extend(extract_yen_values(tag.get_text(" ", strip=True)))
-
-    if prices:
-        return prices
-
-    item_links = soup.select('a[href*="/item/"]')
-    for link in item_links:
-        href = link.get("href", "")
-        if not re.search(r"/item/\d+/?", href):
-            continue
-
-        container = link
-        price_tags = []
-        for _ in range(6):
-            if not container:
-                break
-            price_tags = container.select("span.Price_Txt")
-            if price_tags:
-                break
-            container = container.parent
-
-        for tag in price_tags:
-            prices.extend(extract_yen_values(tag.get_text(" ", strip=True)))
-
-    return prices
-
-
 def extract_buyma_listing_entries(soup: BeautifulSoup) -> List[Dict[str, object]]:
     """Extract title/price/url entries from BUYMA search page."""
     entries: List[Dict[str, object]] = []
@@ -272,24 +231,20 @@ def extract_buyma_listing_entries(soup: BeautifulSoup) -> List[Dict[str, object]
     return entries
 
 
-def extract_buyma_shipping_included_prices(soup: BeautifulSoup) -> List[int]:
-    """Extract 'shipping included' prices from search text."""
-    text = soup.get_text(" ", strip=True)
-    patterns = [
-        r"[¥￥]\s*([0-9]{1,3}(?:,[0-9]{3})+|[0-9]{3,})\s*送料込",
-        r"([0-9]{1,3}(?:,[0-9]{3})+|[0-9]{3,})\s*円\s*送料込",
-    ]
+def count_buyma_item_links(soup: BeautifulSoup) -> int:
+    """Return the number of unique BUYMA item links found on a search page."""
+    urls = set()
+    for link in soup.select('a[href*="/item/"]'):
+        href = link.get("href", "").strip()
+        if re.search(r"/item/\d+/?", href):
+            urls.add(href.split("?")[0])
+    return len(urls)
 
-    prices: List[int] = []
-    for pattern in patterns:
-        for raw in re.findall(pattern, text):
-            try:
-                value = int(raw.replace(",", ""))
-            except ValueError:
-                continue
-            if 3000 <= value <= 10000000:
-                prices.append(value)
-    return prices
+
+def is_buyma_no_results_page(soup: BeautifulSoup) -> bool:
+    """Return True when BUYMA explicitly says the search has no matching items."""
+    page_text = soup.get_text(" ", strip=True)
+    return BUYMA_NO_RESULTS_TEXT in page_text
 
 
 def extract_buyma_item_page_price(soup: BeautifulSoup) -> int:
@@ -370,6 +325,13 @@ def _parse_price_number(value: object) -> int:
         return int(digits)
     except ValueError:
         return 0
+
+
+def _clean_sheet_text(value: str) -> str:
+    text = re.sub(r"\s+", " ", (value or "").strip())
+    if text.startswith("#"):
+        return ""
+    return text
 
 
 def _clean_english_query(value: str) -> str:
@@ -466,53 +428,6 @@ def _score_buyma_text(
     }
 
 
-def _is_reliable_score(score: int) -> bool:
-    return score >= 80
-
-
-def is_relevant_buyma_item(
-    soup: BeautifulSoup,
-    musinsa_sku: str,
-    english_name: str,
-    brand: str,
-    japanese_name: str = "",
-) -> bool:
-    """Judge whether BUYMA detail page is relevant to the target item."""
-    title_tag = soup.select_one("h1")
-    title_text = title_tag.get_text(" ", strip=True) if title_tag else ""
-    page_text = soup.get_text(" ", strip=True)
-    result = _score_buyma_text(
-        f"{title_text} {page_text}",
-        musinsa_sku=musinsa_sku,
-        english_name=english_name,
-        brand=brand,
-        japanese_name=japanese_name,
-    )
-    return _is_reliable_score(int(result["score"]))
-
-
-def is_relevant_buyma_listing_entry(
-    title: str,
-    musinsa_sku: str,
-    english_name: str,
-    brand: str,
-    japanese_name: str = "",
-) -> bool:
-    """Judge whether BUYMA search entry title is relevant."""
-    title_lower = re.sub(r"\s+", " ", (title or "").strip()).lower()
-    if not title_lower:
-        return False
-
-    result = _score_buyma_text(
-        title_lower,
-        musinsa_sku=musinsa_sku,
-        english_name=english_name,
-        brand=brand,
-        japanese_name=japanese_name,
-    )
-    return _is_reliable_score(int(result["score"]))
-
-
 def build_buyma_price_search_queries(
     product_name: str,
     brand: str,
@@ -521,12 +436,12 @@ def build_buyma_price_search_queries(
     product_name_en: str = "",
 ) -> List[str]:
     """Build BUYMA price search queries in priority order."""
-    sku_query = re.sub(r"\s+", " ", (musinsa_sku or "").strip())
-    cleaned_name = re.sub(r"\s+", " ", (product_name_en or product_name or "").strip())
-    cleaned_brand = re.sub(r"\s+", " ", (brand or "").strip())
+    sku_query = _clean_sheet_text(musinsa_sku)
+    cleaned_name = _clean_sheet_text(product_name_en) or _clean_sheet_text(product_name)
+    cleaned_brand = _clean_sheet_text(brand)
     english_name = _clean_english_query(cleaned_name)
     english_brand = _search_brand_text(cleaned_brand)
-    japanese_name = re.sub(r"\s+", " ", (product_name_jp or "").strip())
+    japanese_name = _clean_sheet_text(product_name_jp)
 
     query_candidates = [
         sku_query,
@@ -561,6 +476,31 @@ def _filter_valid_buyma_candidates(candidates: List[Dict[str, object]], musinsa_
     return reliable
 
 
+def _detail_check_limit_for_query(query: str, *, musinsa_sku: str, brand: str) -> int:
+    normalized_query = normalize_sku(query)
+    sku = normalize_sku(musinsa_sku)
+    if sku and normalized_query == sku:
+        return 3
+    if sku and sku in normalized_query and _search_brand_text(brand):
+        return 5
+    return 5
+
+
+def _can_use_listing_without_detail(candidate: Dict[str, object], *, musinsa_sku: str) -> bool:
+    if not normalize_sku(musinsa_sku):
+        return False
+    if int(candidate.get("score") or 0) < 90:
+        return False
+    matched_by = set(candidate.get("matched_by") or [])
+    return "sku_full" in matched_by and bool({"brand", "en_tokens", "jp_tokens", "jp_keyword"} & matched_by)
+
+
+def _should_check_detail_candidate(score_result: Dict[str, object]) -> bool:
+    score = int(score_result.get("score") or 0)
+    matched_by = set(score_result.get("matched_by") or [])
+    return score >= 60 or bool({"sku_full", "sku_partial_8_10"} & matched_by)
+
+
 def fetch_buyma_lowest_price_with_meta(
     driver,
     product_name: str,
@@ -574,12 +514,12 @@ def fetch_buyma_lowest_price_with_meta(
     print("\n>>> BUYMA 최저가 검색 시작")
     print(f"    상품명: {product_name}, 브랜드: {brand}, 품번: {musinsa_sku}")
 
-    sku_query = re.sub(r"\s+", " ", (musinsa_sku or "").strip())
-    cleaned_name = re.sub(r"\s+", " ", (product_name_en or product_name or "").strip())
-    cleaned_brand = re.sub(r"\s+", " ", (brand or "").strip())
+    sku_query = _clean_sheet_text(musinsa_sku)
+    cleaned_name = _clean_sheet_text(product_name_en) or _clean_sheet_text(product_name)
+    cleaned_brand = _clean_sheet_text(brand)
     english_name = _clean_english_query(cleaned_name)
     english_brand = _search_brand_text(cleaned_brand)
-    japanese_name = re.sub(r"\s+", " ", (product_name_jp or "").strip())
+    japanese_name = _clean_sheet_text(product_name_jp)
     queries = build_buyma_price_search_queries(product_name, brand, musinsa_sku, japanese_name, product_name_en)
     musinsa_price_value = _parse_price_number(musinsa_price)
 
@@ -590,6 +530,7 @@ def fetch_buyma_lowest_price_with_meta(
     print(f"    검색 시도 순서: {queries}")
     all_candidates: List[Dict[str, object]] = []
     checked_count = 0
+    no_result_queries: List[str] = []
     for idx, query in enumerate(queries, start=1):
         try:
             encoded = urllib.parse.quote(query, safe="")
@@ -601,12 +542,20 @@ def fetch_buyma_lowest_price_with_meta(
             time.sleep(3)
 
             soup = BeautifulSoup(driver.page_source, "html.parser")
+            if is_buyma_no_results_page(soup):
+                no_result_queries.append(query)
+                print("    BUYMA 검색 결과 없음 문구 확인 - 다음 검색어로 이동")
+                continue
+
             entries = extract_buyma_listing_entries(soup)
-            print(f"    발견된 상품카드(첫 페이지): {len(entries)}개")
+            unique_item_links = count_buyma_item_links(soup)
+            print(f"    BUYMA item 링크(첫 페이지): {unique_item_links}개, 가격 후보: {len(entries)}개")
 
             candidate_entries = entries[:10]
             checked_count += len(candidate_entries)
-            print(f"    상세페이지 확인 대상: {len(candidate_entries)}개")
+            detail_check_limit = _detail_check_limit_for_query(query, musinsa_sku=sku_query, brand=english_brand)
+            detail_checked = 0
+            print(f"    상세페이지 확인 대상: 최대 {detail_check_limit}개")
 
             for entry in candidate_entries:
                 title = str(entry.get("title", ""))
@@ -619,22 +568,36 @@ def fetch_buyma_lowest_price_with_meta(
                     japanese_name=japanese_name,
                 )
                 if int(listing_score["score"]) >= 60:
-                    all_candidates.append(
-                        {
-                            "url": item_url,
-                            "title": title,
-                            "price": int(entry["price"]),
-                            "score": int(listing_score["score"]),
-                            "matched_by": listing_score["matched_by"],
-                            "language_match": listing_score["language_match"],
-                            "source": "listing",
-                            "search_query": query,
-                        }
-                    )
+                    listing_candidate = {
+                        "url": item_url,
+                        "title": title,
+                        "price": int(entry["price"]),
+                        "score": int(listing_score["score"]),
+                        "matched_by": listing_score["matched_by"],
+                        "language_match": listing_score["language_match"],
+                        "source": "listing",
+                        "search_query": query,
+                    }
+                    all_candidates.append(listing_candidate)
+                    if _can_use_listing_without_detail(listing_candidate, musinsa_sku=sku_query):
+                        print("    고신뢰 카드 가격 후보 확인 - 상세페이지 생략 가능")
 
-                if not item_url:
+                listing_score_value = int(listing_score["score"])
+                if (
+                    not item_url
+                    or not _should_check_detail_candidate(listing_score)
+                    or detail_checked >= detail_check_limit
+                    or _can_use_listing_without_detail(
+                        {
+                            "score": listing_score_value,
+                            "matched_by": listing_score["matched_by"],
+                        },
+                        musinsa_sku=sku_query,
+                    )
+                ):
                     continue
                 try:
+                    detail_checked += 1
                     driver.get(item_url)
                     WebDriverWait(driver, 10).until(EC.presence_of_element_located((By.TAG_NAME, "body")))
                     time.sleep(1.2)
@@ -667,6 +630,14 @@ def fetch_buyma_lowest_price_with_meta(
                 except Exception as detail_error:
                     print(f"    상세페이지 스킵: {detail_error}")
 
+            valid_so_far = _filter_valid_buyma_candidates(all_candidates, musinsa_price_value)
+            if any(candidate.get("source") == "detail" for candidate in valid_so_far):
+                print("    신뢰 가능한 상세 가격 후보 확인 - 추가 검색 생략")
+                break
+            if any(_can_use_listing_without_detail(candidate, musinsa_sku=sku_query) for candidate in valid_so_far):
+                print("    신뢰 가능한 카드 가격 후보 확인 - 추가 검색 생략")
+                break
+
         except Exception as e:
             print(f"    검색 오류: {e}")
 
@@ -682,7 +653,8 @@ def fetch_buyma_lowest_price_with_meta(
             "language_match": [],
             "checked_count": checked_count,
             "candidate_count": len(all_candidates),
-            "selected_reason": "no_reliable_candidate",
+            "selected_reason": "buyma_no_results" if no_result_queries and not all_candidates else "no_reliable_candidate",
+            "no_result_queries": no_result_queries,
             "url": "",
         }
         print("  신뢰 가능한 BUYMA 가격 후보 없음 - 빈 값 반환")

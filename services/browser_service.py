@@ -60,6 +60,7 @@ def setup_chrome_driver(headless: bool = False):
 
     def _build_options(*, use_headless: bool) -> ChromeOptions:
         chrome_options = ChromeOptions()
+        chrome_options.page_load_strategy = "eager"
         if use_headless:
             chrome_options.add_argument("--headless=new")
         chrome_options.add_argument("--disable-blink-features=AutomationControlled")
@@ -88,11 +89,17 @@ def setup_chrome_driver(headless: bool = False):
         service = Service(installed)
 
     options = _build_options(use_headless=headless)
+    def _create_driver(chrome_options: ChromeOptions):
+        driver = webdriver.Chrome(service=service, options=chrome_options)
+        driver.set_page_load_timeout(45)
+        driver.set_script_timeout(30)
+        return driver
+
     try:
-        return webdriver.Chrome(service=service, options=options)
+        return _create_driver(options)
     except SessionNotCreatedException:
         # Retry once with classic headless flag when Chrome runtime rejects `--headless=new`.
         fallback_options = _build_options(use_headless=False)
         if headless:
             fallback_options.add_argument("--headless")
-        return webdriver.Chrome(service=service, options=fallback_options)
+        return _create_driver(fallback_options)

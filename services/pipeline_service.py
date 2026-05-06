@@ -1,9 +1,8 @@
 ﻿"""Pipeline/status decision helpers."""
 
 import time
-import re
 from dataclasses import dataclass
-from typing import Any, Dict, List, Tuple
+from typing import Any, Dict, List
 
 from constants.status import STATUS_UPLOADING
 from models.product_model import product_from_sheet_row, product_to_sheet_field_map
@@ -148,107 +147,6 @@ def _flush_updates_buffer(
     updates_buffer.clear()
 
 
-def _extract_row_from_a1(range_a1: str) -> int | None:
-    """Extract trailing row number from an A1 range."""
-    match = re.search(r"(\d+)$", str(range_a1 or ""))
-    if not match:
-        return None
-    try:
-        return int(match.group(1))
-    except Exception:
-        return None
-
-
-def _collect_row_spans(updates: List[Dict[str, object]]) -> Tuple[int, int, int]:
-    """Return (row_count, first_row, last_row) from update list."""
-    row_set = set()
-    for update in updates:
-        row_num = _extract_row_from_a1(str(update.get("range", "") or ""))
-        if row_num is not None:
-            row_set.add(row_num)
-    if not row_set:
-        return 0, -1, -1
-    return len(row_set), min(row_set), max(row_set)
-
-
-def _flush_multi_row_buffer(
-    service,
-    api: Dict[str, Any],
-    updates_buffer: List[Dict[str, object]],
-    reason: str,
-) -> List[int]:
-    """Flush multi-row buffer with row-batch and per-range fallbacks."""
-    if not updates_buffer:
-        return []
-
-    row_count, first_row, last_row = _collect_row_spans(updates_buffer)
-    cell_count = len(updates_buffer)
-    all_rows = sorted({
-        row_num
-        for row_num in (_extract_row_from_a1(str(update.get("range", "") or "")) for update in updates_buffer)
-        if row_num is not None
-    })
-    print(
-        f"[batch][multi] flush start: {reason} rows={row_count} cells={cell_count} "
-        f"first_row={first_row} last_row={last_row}"
-    )
-
-    success = False
-    try:
-        success = bool(api["batch_update_values"](service, updates_buffer))
-    except Exception as exc:
-        print(f"[batch][multi] flush failure: {reason} error={exc}")
-
-    if success:
-        print(f"[batch][multi] flush success: {reason} rows={row_count} cells={cell_count}")
-        updates_buffer.clear()
-        return all_rows
-
-    per_row_groups: Dict[int, List[Dict[str, object]]] = {}
-    for update in updates_buffer:
-        row_num = _extract_row_from_a1(str(update.get("range", "") or ""))
-        if row_num is None:
-            continue
-        per_row_groups.setdefault(row_num, []).append(update)
-
-    print(f"[batch][multi] fallback start: row-batch ({len(per_row_groups)} rows)")
-    row_batch_ok = 0
-    range_fallback_ok = 0
-    total_range_fallback = 0
-    for row_num in sorted(per_row_groups):
-        row_updates = per_row_groups[row_num]
-        try:
-            row_success = bool(api["batch_update_values"](service, row_updates))
-        except Exception as exc:
-            row_success = False
-            print(f"[batch][multi] row-batch failure row={row_num} error={exc}")
-
-        if row_success:
-            row_batch_ok += 1
-            continue
-
-        # Final fallback: per-range updates for this row.
-        total_range_fallback += len(row_updates)
-        for update in row_updates:
-            range_a1 = str(update.get("range", "") or "")
-            values = update.get("values") or []
-            value = ""
-            if values and isinstance(values, list) and values[0]:
-                value = str(values[0][0])
-            try:
-                if api["update_value_by_range"](service, range_a1, value):
-                    range_fallback_ok += 1
-            except Exception as exc:
-                print(f"[batch][multi] per-range failure range={range_a1} error={exc}")
-
-    print(
-        f"[batch][multi] fallback result: row_batch_ok={row_batch_ok}/{len(per_row_groups)} "
-        f"per_range_ok={range_fallback_ok}/{total_range_fallback}"
-    )
-    updates_buffer.clear()
-    return sorted(per_row_groups.keys())
-
-
 def determine_progress_status(
     margin_rate: float | None,
     margin_threshold_percent: float,
@@ -386,7 +284,7 @@ def row_needs_update(
     return False
 
 
-def row_has_existing_output(
+def row_crawl_outputs_complete(
     existing_values: Dict[str, str],
     brand_column: str,
     brand_en_column: str,
@@ -397,11 +295,11 @@ def row_has_existing_output(
     actual_size_column: str,
     price_column: str,
     buyma_sell_price_column: str,
-    image_paths_column: str,
+    buyma_meta_column: str,
     shipping_cost_column: str,
 ) -> bool:
-    """Return True if any output column already has a value."""
-    target_columns = [
+    """Return True when one crawl pass has finished, including a BUYMA attempt."""
+    required_columns = [
         brand_column,
         brand_en_column,
         product_name_kr_column,
@@ -410,14 +308,14 @@ def row_has_existing_output(
         size_column,
         actual_size_column,
         price_column,
-        buyma_sell_price_column,
-        image_paths_column,
         shipping_cost_column,
     ]
-    for column in target_columns:
-        if not is_empty_cell(existing_values.get(column, "")):
-            return True
-    return False
+    for column in required_columns:
+        if is_empty_cell(existing_values.get(column, "")):
+            return False
+    return not is_empty_cell(existing_values.get(buyma_sell_price_column, "")) or not is_empty_cell(
+        existing_values.get(buyma_meta_column, "")
+    )
 
 
 def row_needs_image_download(existing_values: Dict[str, str], image_paths_column: str) -> bool:
@@ -436,6 +334,7 @@ def _sheet_product_column_map(cfg: Dict[str, Any]) -> Dict[str, str]:
         "brand_en": str(cfg.get("BRAND_EN_COLUMN", "") or ""),
         "product_name_kr": str(cfg.get("PRODUCT_NAME_KR_COLUMN", "") or ""),
         "product_name_jp": str(cfg.get("PRODUCT_NAME_JP_COLUMN", "") or ""),
+        "product_name_en": str(cfg.get("PRODUCT_NAME_EN_COLUMN", "") or ""),
         "musinsa_sku": str(cfg.get("MUSINSA_SKU_COLUMN", "") or ""),
         "color_kr": str(cfg.get("COLOR_KR_COLUMN", "") or ""),
         "size": str(cfg.get("SIZE_COLUMN", "") or ""),
@@ -630,20 +529,6 @@ def process_sheet_once(
     if not shipping_table:
         print(f"'{sheet_name}' 배송표 없음: Z/AA/AB 기준 배송비 계산을 건너뜁니다.")
 
-    multi_row_buffer: List[Dict[str, object]] = []
-    pending_status_rows: set[int] = set()
-    flush_rows_threshold = int(cfg.get("BATCH_FLUSH_ROWS", 10))
-    flush_cells_threshold = int(cfg.get("BATCH_FLUSH_CELLS", 140))
-
-    def _flush_normal_buffer(reason: str, force: bool = False) -> List[int]:
-        if not multi_row_buffer:
-            return []
-        row_count, _, _ = _collect_row_spans(multi_row_buffer)
-        cell_count = len(multi_row_buffer)
-        if not force and row_count < flush_rows_threshold and cell_count < flush_cells_threshold:
-            return []
-        return _flush_multi_row_buffer(service, api, multi_row_buffer, reason)
-
     def _write_status_for_row(row_num: int) -> None:
         if not has_status_header:
             return
@@ -660,7 +545,22 @@ def process_sheet_once(
 
         if next_status != cfg["STATUS_HOLD"]:
             refreshed_values = api["get_existing_row_values"](service, sheet_name, row_num)
-            if not api["row_needs_update"](refreshed_values, require_image_paths=False):
+            if not api["row_needs_update"](refreshed_values, require_image_paths=False) or api[
+                "row_crawl_outputs_complete"
+            ](
+                refreshed_values,
+                cfg["BRAND_COLUMN"],
+                cfg["BRAND_EN_COLUMN"],
+                cfg["PRODUCT_NAME_KR_COLUMN"],
+                cfg["MUSINSA_SKU_COLUMN"],
+                cfg["COLOR_KR_COLUMN"],
+                cfg["SIZE_COLUMN"],
+                cfg["ACTUAL_SIZE_COLUMN"],
+                cfg["PRICE_COLUMN"],
+                cfg["BUYMA_SELL_PRICE_COLUMN"],
+                cfg["BUYMA_META_COLUMN"],
+                cfg["SHIPPING_COST_COLUMN"],
+            ):
                 next_status = cfg["STATUS_CRAWLED"]
 
         if current_status != next_status:
@@ -706,6 +606,7 @@ def process_sheet_once(
                     existing_product_name_en=existing_product_for_row.product_name_en,
                     existing_brand_en=existing_product_for_row.brand_en,
                     download_images=download_images,
+                    fetch_buyma=False,
                 )
                 product_info = _product_to_dict(product)
                 estimated_weight = api["estimate_weight"](
@@ -728,8 +629,53 @@ def process_sheet_once(
                     return_updates_only=True,
                 )
                 if row_updates:
-                    multi_row_buffer.extend(row_updates)
-                pending_status_rows.add(idx)
+                    print(f"[batch][row] base payload prepared row={idx} cells={len(row_updates)}")
+                    api["batch_update_values"](service, row_updates)
+                    time.sleep(1.0)
+
+                refreshed_values_for_buyma = api["get_existing_row_values"](service, sheet_name, idx)
+                refreshed_product_for_buyma = product_from_sheet_row(
+                    refreshed_values_for_buyma,
+                    sheet_product_columns,
+                )
+                buyma_price_existing = refreshed_values_for_buyma.get(cfg["BUYMA_SELL_PRICE_COLUMN"], "")
+                if api["is_empty_cell"](buyma_price_existing) and api.get("fetch_buyma_lowest_price"):
+                    buyma_search_brand = (
+                        refreshed_product_for_buyma.brand_en
+                        or product_info.get("brand_en", "")
+                        or refreshed_product_for_buyma.brand
+                        or product_info.get("brand", "")
+                    )
+                    buyma_result = api["fetch_buyma_lowest_price"](
+                        driver,
+                        product_info.get("product_name_kr", ""),
+                        buyma_search_brand,
+                        product_info.get("musinsa_sku", ""),
+                        refreshed_product_for_buyma.product_name_jp,
+                        product_info.get("price", ""),
+                        refreshed_product_for_buyma.product_name_en,
+                    )
+                    buyma_updates: List[Dict[str, object]] = []
+                    buyma_price = str(buyma_result.get("buyma_price") or "") if isinstance(buyma_result, dict) else str(buyma_result or "")
+                    buyma_meta = str(buyma_result.get("buyma_meta") or "") if isinstance(buyma_result, dict) else ""
+                    if buyma_price:
+                        buyma_updates.append(
+                            {
+                                "range": f"'{sheet_name}'!{cfg['BUYMA_SELL_PRICE_COLUMN']}{idx}",
+                                "values": [[buyma_price]],
+                            }
+                        )
+                    if buyma_meta and api["is_empty_cell"](refreshed_values_for_buyma.get(cfg["BUYMA_META_COLUMN"], "")):
+                        buyma_updates.append(
+                            {
+                                "range": f"'{sheet_name}'!{cfg['BUYMA_META_COLUMN']}{idx}",
+                                "values": [[buyma_meta]],
+                            }
+                        )
+                if buyma_updates:
+                    print(f"[batch][row] buyma payload prepared row={idx} cells={len(buyma_updates)}")
+                    api["batch_update_values"](service, buyma_updates)
+                _write_status_for_row(idx)
                 LOGGER.info("[CRAWL DONE] SKU=%s ROW=%s", sheet_sku or "-", idx)
             except Exception as row_exc:
                 print(f" {sheet_name} {idx}행 처리 오류: {row_exc}")
@@ -749,22 +695,6 @@ def process_sheet_once(
                         cfg["PROGRESS_STATUS_HEADER"],
                         cfg["STATUS_ERROR"],
                     )
-
-            flushed_rows = _flush_normal_buffer(f"normal-row-{idx}")
-            if flushed_rows:
-                for flushed_row in flushed_rows:
-                    if flushed_row in pending_status_rows:
-                        _write_status_for_row(flushed_row)
-                        pending_status_rows.discard(flushed_row)
-
             time.sleep(cfg["CRAWLER_ROW_DELAY_SECONDS"])
-
-        flushed_rows = _flush_normal_buffer("normal-loop-end-data", force=True)
-        for flushed_row in flushed_rows:
-            if flushed_row in pending_status_rows:
-                _write_status_for_row(flushed_row)
-                pending_status_rows.discard(flushed_row)
-                LOGGER.info("[DONE] ROW=%s", flushed_row)
     finally:
-        _flush_normal_buffer("normal-finally", force=True)
         LOGGER.info("[DONE] sheet=%s mode=crawl total_rows=%s", sheet_name, len(target_rows))
