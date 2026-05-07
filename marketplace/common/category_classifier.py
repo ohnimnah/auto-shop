@@ -89,6 +89,8 @@ MUSINSA_CATEGORY_OVERRIDES: List[Tuple[Tuple[str, ...], StandardCategory]] = [
     (("pants", "short"), StandardCategory.PANTS_SHORTS),
 ]
 
+SKIRT_TOKENS = ("미니스커트", "롱스커트", "스커트", "치마", "skirt")
+
 
 def _normalize_text(text: str) -> str:
     value = (text or "").lower().strip()
@@ -139,7 +141,7 @@ def fallback_category(name: str, brand: str) -> str:
     for category_label, keywords, _standard in CATEGORY_FALLBACK_RULES:
         if any(_normalize_text(keyword) in text for keyword in keywords):
             return category_label
-    return "湲고?"
+    return "unresolved"
 
 
 def classify_category_with_reason(
@@ -152,19 +154,23 @@ def classify_category_with_reason(
     result: StandardCategory | None = None
     reason = "unresolved"
 
-    # If the caller already resolved a concrete category from sheet/mapping,
-    # keep it as highest priority to avoid accidental force-map overrides
-    # (e.g. shorts being flipped to homewear by noisy keywords).
-    if existing_category is not None and existing_category != StandardCategory.ETC:
-        return existing_category, "existing_category"
+    # Guardrail: skirt signals should win over broad/ambiguous top keywords.
+    if any(_contains_keyword(force_text, token) for token in SKIRT_TOKENS):
+        if _contains_keyword(force_text, "미니"):
+            return StandardCategory.SKIRT_MINI, "skirt_keyword_override_mini"
+        return StandardCategory.SKIRT_LONG, "skirt_keyword_override"
 
     # Guardrail: explicit dress/one-piece signals should win over noisy top keywords.
     dress_tokens = ("원피스", "드레스", "onepiece", "one-piece", "shirt dress", "dress")
-    skirt_tokens = ("스커트", "치마", "skirt")
     has_dress = any(_contains_keyword(force_text, token) for token in dress_tokens)
-    has_skirt = any(_contains_keyword(force_text, token) for token in skirt_tokens)
+    has_skirt = any(_contains_keyword(force_text, token) for token in SKIRT_TOKENS)
     if has_dress and not has_skirt:
         return StandardCategory.DRESS, "dress_keyword_override"
+
+    # If caller already resolved a concrete category from sheet/mapping,
+    # keep it unless stronger domain-specific guardrails above overrode it.
+    if existing_category is not None and existing_category != StandardCategory.ETC:
+        return existing_category, "existing_category"
 
     # Guardrail: denim/jeans product names should not be flipped to innerwear
     # by broad body-shape keywords such as "골반뽕", "볼륨업".
