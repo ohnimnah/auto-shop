@@ -158,6 +158,14 @@ def classify_category_with_reason(
     if existing_category is not None and existing_category != StandardCategory.ETC:
         return existing_category, "existing_category"
 
+    # Guardrail: explicit dress/one-piece signals should win over noisy top keywords.
+    dress_tokens = ("원피스", "드레스", "onepiece", "one-piece", "shirt dress", "dress")
+    skirt_tokens = ("스커트", "치마", "skirt")
+    has_dress = any(_contains_keyword(force_text, token) for token in dress_tokens)
+    has_skirt = any(_contains_keyword(force_text, token) for token in skirt_tokens)
+    if has_dress and not has_skirt:
+        return StandardCategory.DRESS, "dress_keyword_override"
+
     # Guardrail: denim/jeans product names should not be flipped to innerwear
     # by broad body-shape keywords such as "골반뽕", "볼륨업".
     denim_tokens = ("청바지", "데님", "jeans", "denim", "부츠컷", "bootcut")

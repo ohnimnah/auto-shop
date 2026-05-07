@@ -609,7 +609,84 @@ def apply_buyma_post_option_fields(
     except Exception as exc:
         print(f"  ⚠ 관세 관련 체크 실패: {exc}")
 
+    # 参考価格(이중가격 표기) 자동 설정: 시트 BUYMA 가격의 +10%
     buyma_price = payload["buyma_price_digits"]
+    if buyma_price:
+        try:
+            base_price = int(str(buyma_price).replace(",", "").strip())
+            reference_price = (base_price * 110 + 99) // 100  # ceil(base * 1.10)
+            # 1) 라디오 먼저 체크해서 입력칸 생성 트리거
+            ref_clicked = driver.execute_script(
+                """
+                var ref = document.querySelector('input[type="radio"][name="reference-radio"][value="ref"]');
+                if (!ref) return false;
+                if (!ref.checked) {
+                    ref.click();
+                    ref.dispatchEvent(new Event('change', { bubbles: true }));
+                }
+                return true;
+                """
+            )
+            if ref_clicked:
+                sleep_fn(0.7)
+
+            # 2) 렌더 후 입력칸 탐색/입력 (판매가와 동일한 clear/send_keys 방식)
+            reference_result = {"clicked": bool(ref_clicked), "wrote": False}
+            for _ in range(3):
+                reference_input = driver.execute_script(
+                    """
+                    function visible(el) {
+                        if (!el) return false;
+                        var s = window.getComputedStyle(el);
+                        return s && s.display !== 'none' && s.visibility !== 'hidden';
+                    }
+                    var ref = document.querySelector('input[type="radio"][name="reference-radio"][value="ref"]');
+                    if (ref && ref.checked) {
+                        var root = ref.closest('.bmm-c-field, .bmm-c-panel__item, .bmm-l-grid') || ref.parentElement;
+                        if (root) {
+                            var localInputs = root.querySelectorAll('input.bmm-c-text-field, input[type="text"], input[type="number"]');
+                            for (var a = 0; a < localInputs.length; a++) {
+                                var el = localInputs[a];
+                                if (!visible(el) || el.disabled || el.readOnly) continue;
+                                return el;
+                            }
+                        }
+                    }
+                    var fields = document.querySelectorAll('.bmm-c-field, .bmm-c-panel__item, .bmm-l-grid');
+                    for (var f = 0; f < fields.length; f++) {
+                        var txt = (fields[f].textContent || '');
+                        if (txt.indexOf('参考価格') < 0 && txt.indexOf('通常出品価格') < 0) continue;
+                        var local = fields[f].querySelectorAll('input.bmm-c-text-field, input[type="text"], input[type="number"]');
+                        for (var b = 0; b < local.length; b++) {
+                            var el2 = local[b];
+                            if (!visible(el2) || el2.disabled || el2.readOnly) continue;
+                            return el2;
+                        }
+                    }
+                    return null;
+                    """
+                )
+                if reference_input is None:
+                    sleep_fn(0.35)
+                    continue
+                try:
+                    scroll_and_click(driver, reference_input)
+                    reference_input.clear()
+                    reference_input.send_keys(str(reference_price))
+                    reference_result["wrote"] = True
+                    break
+                except Exception:
+                    sleep_fn(0.35)
+
+            if reference_result.get("clicked") and reference_result.get("wrote"):
+                print(f"  ✓ 참고가격 입력: ¥{reference_price} (BUYMA가 +10%)")
+            elif reference_result.get("clicked"):
+                print("  △ 참고가격 라디오 선택 완료, 가격 입력필드는 찾지 못했습니다.")
+            else:
+                print("  △ 참고가격(参考価格) 라디오를 찾지 못했습니다.")
+        except Exception as exc:
+            print(f"  ⚠ 참고가격 자동 입력 실패: {exc}")
+
     if buyma_price:
         try:
             adjusted_price = payload["adjusted_price"]
