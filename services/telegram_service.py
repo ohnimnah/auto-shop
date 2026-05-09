@@ -271,24 +271,24 @@ def get_notification_status() -> dict[str, bool | str]:
 def notify_job_started(job_name: str) -> bool:
     now = datetime.now().strftime("%Y-%m-%d %H:%M")
     return send_message(
-        "?? ?묒뾽 ?쒖옉\n"
+        "🚀 작업 시작\n"
         f"{MESSAGE_DIVIDER}\n"
-        f"?묒뾽: {_truncate(job_name)}\n"
-        f"?쒓컙: {now}"
+        f"작업: {_truncate(job_name)}\n"
+        f"시간: {now}"
     )
 
 
 def notify_job_finished(job_name: str, success_count: int, fail_count: int, duration: str | float | int) -> bool:
     success = int(success_count or 0)
     fail = int(fail_count or 0)
-    title = "???묒뾽 ?꾨즺" if fail == 0 else "?좑툘 ?묒뾽 ?꾨즺(?ㅽ뙣 ?ы븿)"
+    title = "✅ 작업 완료" if fail == 0 else "⚠️ 작업 완료(실패 포함)"
     return send_message(
         f"{title}\n"
         f"{MESSAGE_DIVIDER}\n"
-        f"?묒뾽: {_truncate(job_name)}\n\n"
-        f"?깃났: {success}\n"
-        f"?ㅽ뙣: {fail}\n"
-        f"?뚯슂?쒓컙: {_format_duration(duration)}"
+        f"작업: {_truncate(job_name)}\n\n"
+        f"성공: {success}\n"
+        f"실패: {fail}\n"
+        f"소요시간: {_format_duration(duration)}"
     )
 
 
@@ -300,38 +300,38 @@ def notify_upload_success(product: dict[str, Any]) -> bool:
     if category_kr:
         category_text = f"{category} ({category_kr})" if category else category_kr
     return send_message(
-        "??BUYMA ?낅줈???깃났\n"
+        "✅ BUYMA 업로드 성공\n"
         f"{MESSAGE_DIVIDER}\n"
-        f"?곹뭹紐? {_truncate(product.get('product_name') or product.get('product_name_kr'))}\n\n"
-        f"釉뚮옖?? {_truncate(product.get('brand'))}\n"
-        f"媛寃? {_truncate(product.get('price') or product.get('buyma_price'))}\n"
-        f"移댄뀒怨좊━: {category_text}"
+        f"상품명: {_truncate(product.get('product_name') or product.get('product_name_kr'))}\n\n"
+        f"브랜드: {_truncate(product.get('brand'))}\n"
+        f"가격: {_truncate(product.get('price') or product.get('buyma_price'))}\n"
+        f"카테고리: {category_text}"
     )
 
 
 def notify_upload_failed(product: dict[str, Any], error: Any) -> bool:
     return send_message(
-        "??BUYMA ?낅줈???ㅽ뙣\n"
+        "❌ BUYMA 업로드 실패\n"
         f"{MESSAGE_DIVIDER}\n"
-        f"?곹뭹紐? {_truncate(product.get('product_name') or product.get('product_name_kr'))}\n\n"
-        f"?ъ쑀: {_truncate(error, 220)}"
+        f"상품명: {_truncate(product.get('product_name') or product.get('product_name_kr'))}\n\n"
+        f"사유: {_truncate(error, 220)}"
     )
 
 
 def notify_critical_error(module_name: str, error: Any) -> bool:
     return send_message(
-        "?뵦 移섎챸???ㅻ쪟\n"
+        "🔥 치명적 오류\n"
         f"{MESSAGE_DIVIDER}\n"
-        f"?꾩튂: {_truncate(module_name)}\n\n"
-        f"?댁슜: {_truncate(error, 240)}"
+        f"위치: {_truncate(module_name)}\n\n"
+        f"내용: {_truncate(error, 240)}"
     )
 
 
 def notify_emergency_stop(reason: str) -> bool:
     return send_message(
-        "?썞 湲닿툒 以묒?\n"
+        "🛑 긴급 중지\n"
         f"{MESSAGE_DIVIDER}\n"
-        f"?ъ쑀: {_truncate(reason, 240)}"
+        f"사유: {_truncate(reason, 240)}"
     )
 
 
