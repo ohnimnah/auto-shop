@@ -1180,6 +1180,7 @@ def main():
                     sname,
                     HEADER_ROW,
                 ),
+                product_spreadsheet_id=SPREADSHEET_ID,
                 product_sheet_name=SHEET_NAME,
                 product_url_column=URL_COLUMN,
             )

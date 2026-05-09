@@ -1,4 +1,5 @@
 import unittest
+from unittest.mock import patch
 
 from services import listing_queue_service
 
@@ -118,6 +119,30 @@ class ListingQueueServiceTests(unittest.TestCase):
         update_call = service.values_api.update_calls[0]
         self.assertEqual(update_call["range"], "'업로드정리'!B3:B3")
         self.assertEqual(update_call["body"]["values"], [["https://www.musinsa.com/products/2222222"]])
+
+    def test_collect_uses_separate_main_spreadsheet_id_for_main_backfill(self):
+        service = _FakeSheetsService()
+        header_map = {header: idx for idx, header in enumerate(listing_queue_service.QUEUE_HEADERS)}
+
+        with patch("services.listing_queue_service._read_all_queue_rows", return_value=[]), patch(
+            "services.listing_queue_service._read_existing_product_ids_from_main_sheet", return_value=set()
+        ) as read_existing, patch(
+            "services.listing_queue_service._backfill_main_sheet_from_queue_rows", return_value=0
+        ) as backfill:
+            listing_queue_service.collect_listing_queue_once(
+                service=service,
+                driver=object(),
+                spreadsheet_id="queue-spreadsheet-id",
+                queue_sheet_name="목록 페이지 url",
+                seed_sheet_name="목록 페이지 url",
+                get_sheet_header_map_fn=lambda _svc, _sheet: header_map,
+                product_spreadsheet_id="main-spreadsheet-id",
+                product_sheet_name="업로드정리",
+                product_url_column="B",
+            )
+
+        self.assertEqual(read_existing.call_args.kwargs["spreadsheet_id"], "main-spreadsheet-id")
+        self.assertEqual(backfill.call_args.kwargs["spreadsheet_id"], "main-spreadsheet-id")
 
 
 if __name__ == "__main__":

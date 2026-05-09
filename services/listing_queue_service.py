@@ -837,10 +837,12 @@ def collect_listing_queue_once(
     queue_sheet_name: str,
     seed_sheet_name: str,
     get_sheet_header_map_fn,
+    product_spreadsheet_id: str = "",
     product_sheet_name: str = "",
     product_url_column: str = "B",
 ) -> Dict[str, int]:
     """Collect product URLs/IDs from listing page seed sheet into queue sheet."""
+    main_spreadsheet_id = (product_spreadsheet_id or spreadsheet_id).strip()
     header_map = get_sheet_header_map_fn(service, queue_sheet_name)
     missing_headers = [h for h in QUEUE_HEADERS if h not in header_map]
     if missing_headers:
@@ -880,10 +882,11 @@ def collect_listing_queue_once(
     if product_sheet_name:
         main_existing_ids = _read_existing_product_ids_from_main_sheet(
             service=service,
-            spreadsheet_id=spreadsheet_id,
+            spreadsheet_id=main_spreadsheet_id,
             product_sheet_name=product_sheet_name,
             url_column=product_url_column,
         )
+        print(f"[queue] 메인탭 자동 입력 대상: '{product_sheet_name}'!{product_url_column}열")
 
     summary = {
         'seed_rows': len(seed_rows),
@@ -896,7 +899,7 @@ def collect_listing_queue_once(
     if not seed_rows:
         backfill_count = _backfill_main_sheet_from_queue_rows(
             service=service,
-            spreadsheet_id=spreadsheet_id,
+            spreadsheet_id=main_spreadsheet_id,
             product_sheet_name=product_sheet_name,
             product_url_column=product_url_column,
             queue_rows=rows,
@@ -949,7 +952,7 @@ def collect_listing_queue_once(
             if main_append_urls:
                 inserted_count = _append_product_urls_to_main_sheet(
                     service=service,
-                    spreadsheet_id=spreadsheet_id,
+                    spreadsheet_id=main_spreadsheet_id,
                     product_sheet_name=product_sheet_name,
                     url_column=product_url_column,
                     product_urls=main_append_urls,
