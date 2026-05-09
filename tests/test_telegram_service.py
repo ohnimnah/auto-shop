@@ -54,6 +54,19 @@ class TelegramServiceTests(unittest.TestCase):
 
         self.assertEqual(len(fake_requests.calls), 1)
 
+    def test_send_message_preserves_notification_line_breaks(self):
+        fake_requests = _FakeRequests()
+        env = {
+            "TELEGRAM_ENABLED": "true",
+            "TELEGRAM_BOT_TOKEN": "123:abc",
+            "TELEGRAM_CHAT_ID": "456",
+        }
+        text = "✅ 작업 완료\n────────────\n작업: 정찰\n\n성공: 1\n실패: 0"
+        with patch.dict(os.environ, env, clear=False), patch("services.telegram_service.requests", fake_requests):
+            self.assertTrue(telegram_service.send_message(text))
+
+        self.assertEqual(fake_requests.calls[0]["data"]["text"], text)
+
     def test_missing_credentials_disables_notification(self):
         fake_requests = _FakeRequests()
         with patch.dict(os.environ, {"TELEGRAM_ENABLED": "true"}, clear=True), patch(

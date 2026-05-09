@@ -7,9 +7,7 @@ from typing import Optional
 
 try:
     import keyring  # type: ignore
-    _KEYRING_IMPORT_ERROR: Exception | None = None
-except Exception as exc:  # pragma: no cover
-    _KEYRING_IMPORT_ERROR = exc
+except Exception:  # pragma: no cover
 
     class _UnavailableKeyring:
         _message = "keyring 패키지를 사용할 수 없어 OS 키링에 저장할 수 없습니다."

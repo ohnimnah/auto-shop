@@ -119,6 +119,15 @@ def _truncate(value: Any, limit: int = MAX_FIELD_CHARS) -> str:
     return text[: max(0, limit - 3)].rstrip() + "..."
 
 
+def _truncate_message(value: Any, limit: int = MAX_MESSAGE_CHARS) -> str:
+    text = _sanitize_text(str(value or "").replace("\r\n", "\n").replace("\r", "\n"))
+    lines = [" ".join(line.split()) for line in text.split("\n")]
+    text = "\n".join(lines).strip()
+    if len(text) <= limit:
+        return text
+    return text[: max(0, limit - 3)].rstrip() + "..."
+
+
 def _sanitize_text(text: str) -> str:
     value = str(text or "")
     value = re.sub(r"[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}", "[masked-email]", value)
@@ -163,7 +172,7 @@ def send_message(text: str) -> bool:
         if not _is_enabled(config) or not token or not chat_id or requests is None:
             return False
 
-        message = _truncate(text, MAX_MESSAGE_CHARS)
+        message = _truncate_message(text, MAX_MESSAGE_CHARS)
         if _deduped(message):
             return False
 
