@@ -2,15 +2,20 @@
 
 Important:
 - This module does NOT replace existing 1:1 mapping logic.
-- It only applies additive keyword corrections on top of base_category.
+- It only applies additive keyword corrections on top of ``base_category``.
+- If ``base_category`` is already a precise category (e.g. sunglasses), keep it.
 """
 
 from __future__ import annotations
 
 
-HOODIE_KEYWORDS = ["후드", "후디", "후드티", "hoodie", "hooded", "zip hoodie"]
-PAJAMA_KEYWORDS = ["파자마", "잠옷", "룸웨어", "홈웨어", "라운지웨어", "pajama", "sleepwear", "loungewear"]
-SWEAT_KEYWORDS = ["맨투맨", "스웨트", "스웻", "sweatshirt"]
+EYEWEAR_KEYWORDS = ["선글라스", "썬글라스", "안경", "sunglasses", "eyewear", "glasses"]
+BEANIE_KEYWORDS = ["비니", "beanie", "니트 모자", "watch cap"]
+CAP_KEYWORDS = ["캡", "볼캡", "baseball cap", "ball cap", "cap"]
+
+HOODIE_KEYWORDS = ["후드", "hoodie", "hooded", "zip hoodie"]
+PAJAMA_KEYWORDS = ["파자마", "잠옷", "pajama", "sleepwear", "loungewear"]
+SWEAT_KEYWORDS = ["맨투맨", "스웻", "스웨트", "sweatshirt"]
 TSHIRT_KEYWORDS = ["티셔츠", "반팔", "긴팔", "t-shirt", "tee"]
 SHIRT_KEYWORDS = ["셔츠", "남방", "button-down"]
 KNIT_KEYWORDS = ["니트", "스웨터", "knit", "sweater"]
@@ -20,7 +25,7 @@ SLACKS_KEYWORDS = ["슬랙스", "정장바지", "trousers"]
 SHORTS_KEYWORDS = ["반바지", "쇼츠", "shorts"]
 SKIRT_KEYWORDS = ["스커트", "치마", "skirt"]
 DRESS_KEYWORDS = ["원피스", "드레스", "dress"]
-JACKET_KEYWORDS = ["자켓", "재킷", "jacket"]
+JACKET_KEYWORDS = ["재킷", "자켓", "jacket"]
 COAT_KEYWORDS = ["코트", "coat"]
 DOWN_KEYWORDS = ["패딩", "다운", "down jacket", "puffer"]
 SNEAKER_KEYWORDS = ["스니커즈", "운동화", "sneakers"]
@@ -43,90 +48,66 @@ def _contains_any(text: str, keywords: list[str]) -> bool:
 
 
 def correct_buyma_category(base_category, product_name, musinsa_category) -> str:
-    """Return final corrected BUYMA category string.
-
-    Flow:
-    1) Start from existing base_category
-    2) Apply rule-based keyword corrections by priority
-    3) If no rule matched, return base_category unchanged
-    """
+    """Return final corrected BUYMA category string."""
     base = _to_text(base_category).strip()
     product = _to_text(product_name).strip().lower()
     musinsa = _to_text(musinsa_category).strip().lower()
     text = f"{product} {musinsa}"
 
-    # Priority order (also resolves conflicts):
-    # PAJAMA > HOODIE > SWEAT > TSHIRT > SHIRT > KNIT > CARDIGAN >
-    # DENIM > SLACKS > SHORTS > SKIRT > DRESS > JACKET > COAT > DOWN >
-    # SNEAKER > SANDAL > BOOT > BACKPACK > BAG
-    # Explicit conflict notes:
-    # - PAJAMA overrides everything
-    # - HOODIE overrides SWEAT
-    # - DOWN overrides JACKET
-    # - SHIRT overrides TSHIRT
-    #
-    # To satisfy DOWN > JACKET and SHIRT > TSHIRT, we evaluate DOWN and SHIRT
-    # before their lower-priority counterparts.
+    # Keep already-correct eyewear categories as-is.
+    if "サングラス" in base:
+        return base
 
+    # Hard guardrail for eyewear tokens.
+    if _contains_any(text, EYEWEAR_KEYWORDS):
+        return "メンズファッション > ファッション雑貨・小物 > サングラス"
+
+    # Hat guardrails for known troublesome cases.
+    if _contains_any(text, BEANIE_KEYWORDS):
+        return "メンズファッション > 帽子 > ニットキャップ・ビーニー"
+    if _contains_any(text, CAP_KEYWORDS):
+        return "メンズファッション > 帽子 > キャップ"
+
+    # Generic clothing/accessory fallback rules.
     if _contains_any(text, PAJAMA_KEYWORDS):
-        return "ルームウェア・パジャマ"
-
+        return "インナー・ルームウェア > ルームウェア・パジャマ"
     if _contains_any(text, HOODIE_KEYWORDS):
-        return "パーカー・フーディ"
-
+        return "トップス > パーカー・フーディ"
     if _contains_any(text, DOWN_KEYWORDS):
-        return "ダウンジャケット"
-
+        return "アウター・ジャケット > ダウンジャケット"
     if _contains_any(text, SHIRT_KEYWORDS):
-        return "シャツ"
-
+        return "トップス > シャツ"
     if _contains_any(text, SWEAT_KEYWORDS):
-        return "スウェット・トレーナー"
-
+        return "トップス > スウェット・トレーナー"
     if _contains_any(text, TSHIRT_KEYWORDS):
-        return "Tシャツ・カットソー"
-
+        return "トップス > Tシャツ・カットソー"
     if _contains_any(text, KNIT_KEYWORDS):
-        return "ニット・セーター"
-
+        return "トップス > ニット・セーター"
     if _contains_any(text, CARDIGAN_KEYWORDS):
-        return "カーディガン"
-
+        return "トップス > カーディガン"
     if _contains_any(text, DENIM_KEYWORDS):
-        return "デニム・ジーパン"
-
+        return "パンツ > デニム・ジーンズ"
     if _contains_any(text, SLACKS_KEYWORDS):
-        return "スラックス"
-
+        return "パンツ > スラックス"
     if _contains_any(text, SHORTS_KEYWORDS):
-        return "ハーフ・ショートパンツ"
-
+        return "パンツ > ハーフ・ショートパンツ"
     if _contains_any(text, SKIRT_KEYWORDS):
         return "スカート"
-
     if _contains_any(text, DRESS_KEYWORDS):
-        return "ワンピース"
-
+        return "ワンピース・オールインワン"
     if _contains_any(text, JACKET_KEYWORDS):
-        return "ジャケット"
-
+        return "アウター・ジャケット > ジャケット"
     if _contains_any(text, COAT_KEYWORDS):
-        return "コート"
-
+        return "アウター・ジャケット > コート"
     if _contains_any(text, SNEAKER_KEYWORDS):
-        return "スニーカー"
-
+        return "靴・ブーツ・サンダル > スニーカー"
     if _contains_any(text, SANDAL_KEYWORDS):
-        return "サンダル"
-
+        return "靴・ブーツ・サンダル > サンダル"
     if _contains_any(text, BOOT_KEYWORDS):
-        return "ブーツ"
-
+        return "靴・ブーツ・サンダル > ブーツ"
     if _contains_any(text, BACKPACK_KEYWORDS):
-        return "バックパック"
-
+        return "バッグ・カバン > バックパック・リュック"
     if _contains_any(text, BAG_KEYWORDS):
-        return "ショルダーバッグ"
+        return "バッグ・カバン > バッグ"
 
     return base
-

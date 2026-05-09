@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import hashlib
-import json
 import os
 import re
 import time
@@ -13,7 +12,7 @@ from typing import Any
 
 try:
     import requests
-except Exception:  # pragma: no cover - notification must never block app startup.
+except Exception:  # pragma: no cover
     requests = None  # type: ignore[assignment]
 
 from app.security import KeyringTokenStore
@@ -23,9 +22,10 @@ from config.config_service import DEFAULT_PROFILE_NAME, load_config
 DEDUP_SECONDS = 300
 MAX_FIELD_CHARS = 120
 MAX_MESSAGE_CHARS = 1200
-MESSAGE_DIVIDER = "────────────"
+MESSAGE_DIVIDER = "------------"
 
 _DEDUP_CACHE: dict[str, float] = {}
+_TELEGRAM_TOKEN_RE = re.compile(r"^\d{6,}:[A-Za-z0-9_-]{20,}$")
 
 
 def _read_env_file() -> dict[str, str]:
@@ -85,10 +85,7 @@ def _load_token(config: dict[str, Any], env_file: dict[str, str]) -> str:
         account_keys.append(fallback_key)
     account_keys.append("bot_token")
     for account_key in account_keys:
-        token = KeyringTokenStore(
-            service_name="auto_shop.telegram",
-            account_key=account_key,
-        ).load()
+        token = KeyringTokenStore(service_name="auto_shop.telegram", account_key=account_key).load()
         if token:
             return token
     return ""
@@ -105,27 +102,30 @@ def _load_chat_id(config: dict[str, Any], env_file: dict[str, str]) -> str:
     ).strip()
 
 
+def _is_valid_telegram_token(token: str) -> bool:
+    value = (token or "").strip()
+    if not value:
+        return False
+    lowered = value.lower()
+    if "setx " in lowered or "http_proxy" in lowered or "https_proxy" in lowered:
+        return False
+    return bool(_TELEGRAM_TOKEN_RE.fullmatch(value))
+
+
+def _is_valid_chat_id(chat_id: str) -> bool:
+    value = (chat_id or "").strip()
+    if not value:
+        return False
+    if value.startswith("@"):
+        return len(value) > 1 and " " not in value
+    return bool(re.fullmatch(r"-?\d{3,}", value))
+
+
 def _is_enabled(config: dict[str, Any]) -> bool:
     env_enabled = os.environ.get("TELEGRAM_ENABLED") or os.environ.get("AUTO_SHOP_TELEGRAM_ENABLED")
     if env_enabled is not None:
         return env_enabled.strip().lower() in {"1", "true", "yes", "y", "on"}
     return bool(config.get("enabled", False))
-
-
-def _truncate(value: Any, limit: int = MAX_FIELD_CHARS) -> str:
-    text = _sanitize_text(" ".join(str(value or "").split()))
-    if len(text) <= limit:
-        return text
-    return text[: max(0, limit - 3)].rstrip() + "..."
-
-
-def _truncate_message(value: Any, limit: int = MAX_MESSAGE_CHARS) -> str:
-    text = _sanitize_text(str(value or "").replace("\r\n", "\n").replace("\r", "\n"))
-    lines = [" ".join(line.split()) for line in text.split("\n")]
-    text = "\n".join(lines).strip()
-    if len(text) <= limit:
-        return text
-    return text[: max(0, limit - 3)].rstrip() + "..."
 
 
 def _sanitize_text(text: str) -> str:
@@ -143,6 +143,22 @@ def _sanitize_text(text: str) -> str:
     )
     value = re.sub(r"\b\d{6,}:[A-Za-z0-9_-]{20,}\b", "[masked-telegram-token]", value)
     return value
+
+
+def _truncate(value: Any, limit: int = MAX_FIELD_CHARS) -> str:
+    text = _sanitize_text(" ".join(str(value or "").split()))
+    if len(text) <= limit:
+        return text
+    return text[: max(0, limit - 3)].rstrip() + "..."
+
+
+def _truncate_message(value: Any, limit: int = MAX_MESSAGE_CHARS) -> str:
+    text = _sanitize_text(str(value or "").replace("\r\n", "\n").replace("\r", "\n"))
+    lines = [" ".join(line.split()) for line in text.split("\n")]
+    text = "\n".join(lines).strip()
+    if len(text) <= limit:
+        return text
+    return text[: max(0, limit - 3)].rstrip() + "..."
 
 
 def _message_key(text: str) -> str:
@@ -163,7 +179,7 @@ def _deduped(text: str) -> bool:
 
 
 def send_message(text: str) -> bool:
-    """Send a Telegram message if configured; never raise into main work."""
+    """Send a Telegram message if configured; never raise into main flow."""
     try:
         config = _load_telegram_config()
         env_file = _read_env_file()
@@ -171,16 +187,21 @@ def send_message(text: str) -> bool:
         chat_id = _load_chat_id(config, env_file)
         if not _is_enabled(config) or not token or not chat_id or requests is None:
             return False
+        if not _is_valid_telegram_token(token) or not _is_valid_chat_id(chat_id):
+            return False
 
         message = _truncate_message(text, MAX_MESSAGE_CHARS)
         if _deduped(message):
             return False
 
-        response = requests.post(
-            f"https://api.telegram.org/bot{token}/sendMessage",
-            data={"chat_id": chat_id, "text": message},
-            timeout=10,
-        )
+        with requests.Session() as session:
+            # Ignore broken OS proxy env values.
+            session.trust_env = False
+            response = session.post(
+                f"https://api.telegram.org/bot{token}/sendMessage",
+                data={"chat_id": chat_id, "text": message},
+                timeout=10,
+            )
         response.raise_for_status()
         return True
     except Exception:
@@ -188,7 +209,7 @@ def send_message(text: str) -> bool:
 
 
 def get_notification_status() -> dict[str, bool | str]:
-    """Return non-sensitive Telegram notification configuration status."""
+    """Return non-sensitive Telegram configuration status."""
     config = _load_telegram_config()
     env_file = _read_env_file()
     token = _load_token(config, env_file)
@@ -215,7 +236,7 @@ def notify_job_started(job_name: str) -> bool:
 def notify_job_finished(job_name: str, success_count: int, fail_count: int, duration: str | float | int) -> bool:
     success = int(success_count or 0)
     fail = int(fail_count or 0)
-    title = "✅ 작업 완료" if fail == 0 else "⚠️ 작업 완료"
+    title = "✅ 작업 완료" if fail == 0 else "⚠️ 작업 완료(실패 포함)"
     return send_message(
         f"{title}\n"
         f"{MESSAGE_DIVIDER}\n"
@@ -227,13 +248,18 @@ def notify_job_finished(job_name: str, success_count: int, fail_count: int, dura
 
 
 def notify_upload_success(product: dict[str, Any]) -> bool:
+    category = _truncate(product.get("category"))
+    category_kr = _truncate(product.get("category_kr"))
+    category_text = category
+    if category_kr:
+        category_text = f"{category} ({category_kr})" if category else category_kr
     return send_message(
         "✅ BUYMA 업로드 성공\n"
         f"{MESSAGE_DIVIDER}\n"
         f"상품명: {_truncate(product.get('product_name') or product.get('product_name_kr'))}\n\n"
         f"브랜드: {_truncate(product.get('brand'))}\n"
         f"가격: {_truncate(product.get('price') or product.get('buyma_price'))}\n"
-        f"카테고리: {_truncate(product.get('category'))}"
+        f"카테고리: {category_text}"
     )
 
 
@@ -248,7 +274,7 @@ def notify_upload_failed(product: dict[str, Any], error: Any) -> bool:
 
 def notify_critical_error(module_name: str, error: Any) -> bool:
     return send_message(
-        "🚨 치명적 에러\n"
+        "🔥 치명적 오류\n"
         f"{MESSAGE_DIVIDER}\n"
         f"위치: {_truncate(module_name)}\n\n"
         f"내용: {_truncate(error, 240)}"
@@ -271,15 +297,3 @@ def _format_duration(duration: str | float | int) -> str:
     if minutes:
         return f"{minutes}분 {rem}초" if rem else f"{minutes}분"
     return f"{rem}초"
-
-
-"""
-사용 예시:
-
-notify_job_started("BUYMA 업로드")
-notify_job_finished("이미지/썸네일 처리", success_count=38, fail_count=2, duration="12분")
-notify_upload_success({"product_name": "상품명", "brand": "BRAND", "buyma_price": "12000", "category": "トップス"})
-notify_upload_failed({"product_name": "상품명"}, "가격 입력 필드를 찾을 수 없습니다")
-notify_critical_error("buyma_upload", "ChromeDriver start failed")
-notify_emergency_stop("사용자가 전체 중지를 눌렀습니다")
-"""

@@ -83,6 +83,13 @@ def _notification_product(row_data: MarketplaceRow, category_diag: Dict[str, Any
         "price": row_data.get("buyma_price") or "",
         "buyma_price": row_data.get("buyma_price") or "",
         "category": category,
+        "category_kr": " / ".join(
+            [
+                str(row_data.get("musinsa_category_large") or "").strip(),
+                str(row_data.get("musinsa_category_middle") or "").strip(),
+                str(row_data.get("musinsa_category_small") or "").strip(),
+            ]
+        ).strip(" /"),
     }
 
 
@@ -278,7 +285,9 @@ def upload_products(
             if append_category_candidate:
                 final_result = str(category_diag.get("final_result", "") or "").lower()
                 failure_stage = str(category_diag.get("failure_stage", "") or "")
-                if final_result in {"other", "failed", "error", "manual_review"} or failure_stage:
+                recovery_used = bool(category_diag.get("recovery_used", False))
+                should_record_recovery_success = recovery_used and final_result == "success"
+                if final_result in {"other", "failed", "error", "manual_review"} or failure_stage or should_record_recovery_success:
                     try:
                         append_category_candidate(service, row_data, category_diag)
                     except Exception as exc:
