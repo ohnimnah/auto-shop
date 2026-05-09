@@ -10,6 +10,7 @@ import tkinter as tk
 import urllib.error
 import urllib.parse
 import urllib.request
+import webbrowser
 from copy import deepcopy
 from datetime import datetime
 from tkinter import filedialog, messagebox, ttk
@@ -33,6 +34,7 @@ class SettingsPage(BasePage):
         ("crawling", "크롤링 설정"),
         ("upload", "업로드 설정"),
         ("notification", "알림 설정"),
+        ("setup", "설치/점검"),
         ("advanced", "고급 설정"),
     )
     GENERAL_TAB_FIELDS = (
@@ -93,6 +95,7 @@ class SettingsPage(BasePage):
         self.config_path_var = tk.StringVar(value=self._config_path())
         self.telegram_status_var = tk.StringVar(value="테스트 전")
         self.buyma_status_var = tk.StringVar(value="계정 확인 전")
+        self.install_summary_var = tk.StringVar(value="상태 확인 전")
         self.connection_color_var = tk.StringVar(value=self.controller.theme["muted"])
         self.permission_color_var = tk.StringVar(value=self.controller.theme["muted"])
         self.tabs_color_var = tk.StringVar(value=self.controller.theme["muted"])
@@ -291,6 +294,7 @@ class SettingsPage(BasePage):
             "crawling": self._build_crawling_tab,
             "upload": self._build_upload_tab,
             "notification": self._build_notification_tab,
+            "setup": self._build_setup_tab,
             "advanced": self._build_advanced_tab,
         }[self.active_tab.get()]
         builder(left, right)
@@ -605,6 +609,32 @@ class SettingsPage(BasePage):
             row=1,
         )
 
+    def _build_setup_tab(self, left: tk.Widget, right: tk.Widget) -> None:
+        rows = self._collect_setup_check_rows()
+        missing_count = sum(1 for row in rows if row["state"] == "missing")
+        warn_count = sum(1 for row in rows if row["state"] == "warn")
+        if missing_count:
+            self.install_summary_var.set(f"설치/연결 필요 {missing_count}개 · 확인 필요 {warn_count}개")
+        elif warn_count:
+            self.install_summary_var.set(f"실행 가능 · 확인 필요 {warn_count}개")
+        else:
+            self.install_summary_var.set("준비 완료 · 주요 실행 환경이 정상입니다")
+
+        self._build_setup_overview_card(left, 0)
+        self._build_setup_checks_card(left, 1, rows)
+        self._build_setup_help_card(right, 0)
+        self._build_action_only_card(
+            right,
+            1,
+            "빠른 작업",
+            [
+                ("필수 설치 한번에 실행", self._run_required_install, self.controller.theme["blue"], self.controller.theme["blue_2"]),
+                ("Google 키 파일 선택", self._choose_service_account_file, "#111f34", "#1e3350"),
+                ("이미지 폴더 선택", lambda: self._choose_directory(self.images_dir_var), "#111f34", "#1e3350"),
+                ("로그 폴더 열기", lambda: self._open_directory(self.log_dir_var.get().strip() or self.controller._get_configured_log_dir()), "#111f34", "#1e3350"),
+            ],
+        )
+
     def _build_advanced_tab(self, left: tk.Widget, right: tk.Widget) -> None:
         self._build_form_card(
             left,
@@ -782,6 +812,86 @@ class SettingsPage(BasePage):
         card.grid(row=row, column=0, sticky="ew", pady=(0, SECTION_GAP))
         for idx, (label, callback, bg, active) in enumerate(buttons):
             self.controller._mini_button(body, label, lambda cb=callback: self.controller.dispatch_ui_action(f"설정: {label}", cb, category="settings"), bg, active).grid(row=idx, column=0, sticky="ew", pady=(0, 6 if idx < len(buttons) - 1 else 0))
+
+    def _build_setup_overview_card(self, parent: tk.Widget, row: int) -> None:
+        card, body = self._build_auto_card(parent, "설치/환경 상태")
+        card.grid(row=row, column=0, sticky="ew", pady=(0, SECTION_GAP))
+        tk.Label(
+            body,
+            textvariable=self.install_summary_var,
+            bg=self.controller.theme["panel"],
+            fg="#5ef2c2",
+            font=("Segoe UI", 12, "bold"),
+            wraplength=640,
+            justify=tk.LEFT,
+        ).grid(row=0, column=0, sticky="w")
+        button_row = tk.Frame(body, bg=self.controller.theme["panel"])
+        button_row.grid(row=1, column=0, sticky="ew", pady=(10, 0))
+        self.controller._mini_button(
+            button_row,
+            "상태 다시 확인",
+            lambda: self.controller.dispatch_ui_action("설정: 설치/점검 새로고침", self._refresh_setup_tab, category="settings"),
+            "#1e3350",
+            "#294565",
+        ).pack(side=tk.LEFT, padx=(0, 8))
+        self.controller._mini_button(
+            button_row,
+            "필수 설치 실행",
+            lambda: self.controller.dispatch_ui_action("설정: 필수 설치 실행", self._run_required_install, category="settings"),
+            self.controller.theme["blue"],
+            self.controller.theme["blue_2"],
+        ).pack(side=tk.LEFT)
+
+    def _build_setup_checks_card(self, parent: tk.Widget, row: int, rows: list[dict[str, object]]) -> None:
+        card, body = self._build_auto_card(parent, "점검 항목")
+        card.grid(row=row, column=0, sticky="ew", pady=(0, SECTION_GAP))
+        body.grid_columnconfigure(1, weight=1)
+        for idx, item in enumerate(rows):
+            self._build_setup_check_row(body, idx, item)
+
+    def _build_setup_check_row(self, parent: tk.Widget, row: int, item: dict[str, object]) -> None:
+        state = str(item.get("state") or "warn")
+        icon = {"ok": "✅", "warn": "⚠", "missing": "❌"}.get(state, "⚠")
+        color = {"ok": "#4ade80", "warn": "#fbbf24", "missing": "#f87171"}.get(state, self.controller.theme["muted"])
+        label = str(item.get("label") or "")
+        status = str(item.get("status") or "")
+        detail = str(item.get("detail") or "")
+        action_label = str(item.get("action_label") or "")
+        action = item.get("action")
+
+        wrap = tk.Frame(parent, bg=self.controller.theme["panel"])
+        wrap.grid(row=row, column=0, sticky="ew", pady=(0, 8))
+        wrap.grid_columnconfigure(1, weight=1)
+        tk.Label(wrap, text=icon, bg=self.controller.theme["panel"], fg=color, font=("Segoe UI", 13, "bold")).grid(row=0, column=0, rowspan=2, sticky="n", padx=(0, 10))
+        tk.Label(wrap, text=label, bg=self.controller.theme["panel"], fg=self.controller.theme["text"], font=("Segoe UI", 9, "bold")).grid(row=0, column=1, sticky="w")
+        tk.Label(wrap, text=status, bg=self.controller.theme["panel"], fg=color, font=("Segoe UI", 9, "bold")).grid(row=0, column=2, sticky="e", padx=(8, 0))
+        tk.Label(wrap, text=detail, bg=self.controller.theme["panel"], fg=self.controller.theme["muted"], font=("Segoe UI", 8), wraplength=520, justify=tk.LEFT).grid(row=1, column=1, columnspan=2, sticky="w", pady=(2, 0))
+        if action_label and callable(action):
+            self.controller._mini_button(
+                wrap,
+                action_label,
+                lambda cb=action, name=label: self.controller.dispatch_ui_action(f"설정: {name}", cb, category="settings"),
+                "#111f34",
+                "#1e3350",
+            ).grid(row=0, column=3, rowspan=2, sticky="e", padx=(10, 0))
+
+    def _build_setup_help_card(self, parent: tk.Widget, row: int) -> None:
+        card, body = self._build_auto_card(parent, "설치/점검 안내")
+        card.grid(row=row, column=0, sticky="ew", pady=(0, SECTION_GAP))
+        guide = (
+            "필수 패키지와 키링은 자동 설치로 준비할 수 있습니다.\n"
+            "Chrome은 브라우저 설치가 필요하고, Google 키는 직접 받은 credentials.json 파일을 선택해야 합니다.\n"
+            "ChromeDriver는 실행 중 자동 준비될 수 있지만, 문제가 있으면 필수 설치를 다시 실행하세요."
+        )
+        tk.Label(
+            body,
+            text=guide,
+            bg=self.controller.theme["panel"],
+            fg=self.controller.theme["muted"],
+            justify=tk.LEFT,
+            wraplength=320,
+            font=("Segoe UI", 9),
+        ).grid(row=0, column=0, sticky="w")
 
     def _build_entry_row(self, parent: tk.Widget, row: int, label: str, variable: tk.StringVar, *, button_text: str | None = None, button_command=None, show: str | None = None) -> None:
         parent.grid_columnconfigure(0, weight=1)
@@ -1558,6 +1668,128 @@ class SettingsPage(BasePage):
             return True
         except Exception as exc:
             messagebox.showerror("초기화 실패", f"기본 설정으로 되돌리지 못했습니다.\n\n{exc}")
+            return False
+
+    def _collect_setup_check_rows(self) -> list[dict[str, object]]:
+        runtime = self.controller.system_checker.check_runtime_environment()
+        runtime_ready = self.controller.system_checker.has_ready_runtime()
+        mosaic_state = self.controller.system_checker.get_mosaic_runtime_state()
+        images_dir = os.path.abspath(os.path.expanduser(self.images_dir_var.get().strip() or self.controller._get_configured_images_dir()))
+        log_dir = os.path.abspath(os.path.expanduser(self.log_dir_var.get().strip() or self.controller._get_configured_log_dir()))
+        credentials_path = self.controller._get_available_credentials_path() or self.service_account_path_var.get().strip()
+
+        rows: list[dict[str, object]] = [
+            {
+                "label": "필수 Python 패키지",
+                "state": "ok" if runtime_ready else "missing",
+                "status": "정상" if runtime_ready else "설치 필요",
+                "detail": "selenium, Pillow, Google API, webdriver-manager, numpy, OpenCV 등 실행 패키지",
+                "action_label": "설치/업데이트",
+                "action": self._run_required_install,
+            },
+            {
+                "label": "OS 키링",
+                "state": "ok" if runtime.keyring_available else "missing",
+                "status": "정상" if runtime.keyring_available else "설치 필요",
+                "detail": "텔레그램 토큰과 BUYMA 비밀번호를 OS 보안 저장소에 보관합니다.",
+                "action_label": "설치/업데이트",
+                "action": self._run_required_install,
+            },
+            {
+                "label": "Chrome",
+                "state": "ok" if runtime.chrome_accessible else "missing",
+                "status": "정상" if runtime.chrome_accessible else "설치 필요",
+                "detail": "무신사 정찰과 BUYMA 업로드 자동화에 필요합니다.",
+                "action_label": "다운로드 페이지",
+                "action": self._open_chrome_download_page,
+            },
+            {
+                "label": "ChromeDriver",
+                "state": "ok" if runtime.chromedriver_accessible else "warn",
+                "status": "정상" if runtime.chromedriver_accessible else "자동 준비 가능",
+                "detail": "webdriver-manager가 실행 중 자동 준비할 수 있습니다. 실패하면 필수 설치를 다시 실행하세요.",
+                "action_label": "자동 준비",
+                "action": self._run_required_install,
+            },
+            {
+                "label": "Google credentials.json",
+                "state": "ok" if bool(credentials_path and os.path.isfile(os.path.abspath(os.path.expanduser(credentials_path)))) else "missing",
+                "status": "연결됨" if bool(credentials_path and os.path.isfile(os.path.abspath(os.path.expanduser(credentials_path)))) else "파일 필요",
+                "detail": os.path.basename(credentials_path) if credentials_path else "Google 서비스 계정 JSON 파일을 선택해야 합니다.",
+                "action_label": "파일 선택",
+                "action": self._choose_service_account_file,
+            },
+            {
+                "label": "이미지 저장 폴더",
+                "state": "ok" if os.path.isdir(images_dir) else "missing",
+                "status": "정상" if os.path.isdir(images_dir) else "폴더 필요",
+                "detail": images_dir,
+                "action_label": "폴더 열기" if os.path.isdir(images_dir) else "폴더 선택",
+                "action": (lambda path=images_dir: self._open_directory(path)) if os.path.isdir(images_dir) else (lambda: self._choose_directory(self.images_dir_var)),
+            },
+            {
+                "label": "로그 폴더",
+                "state": "ok" if self._is_directory_writable(log_dir) else "missing",
+                "status": "정상" if self._is_directory_writable(log_dir) else "쓰기 불가",
+                "detail": log_dir,
+                "action_label": "폴더 열기" if os.path.isdir(log_dir) else "폴더 선택",
+                "action": (lambda path=log_dir: self._open_directory(path)) if os.path.isdir(log_dir) else (lambda: self._choose_directory(self.log_dir_var)),
+            },
+            {
+                "label": "OpenCV 얼굴 블러",
+                "state": "ok" if mosaic_state in {"ready", "installed"} else "missing",
+                "status": "사용 가능" if mosaic_state == "ready" else "제한 가능" if mosaic_state == "installed" else "복구 필요",
+                "detail": "썸네일 얼굴 블러/모자이크에 필요한 OpenCV cascade 파일 상태입니다.",
+                "action_label": "복구/재설치",
+                "action": self._run_required_install,
+            },
+            {
+                "label": "BUYMA 계정",
+                "state": "ok" if self.controller._has_buyma_credentials() else "warn",
+                "status": "저장됨" if self.controller._has_buyma_credentials() else "업로드 전 필요",
+                "detail": self.controller._load_buyma_email() or "BUYMA 업로드를 쓰려면 계정을 저장하세요.",
+                "action_label": "계정 입력",
+                "action": self.controller.configure_buyma_credentials,
+            },
+        ]
+        return rows
+
+    def _refresh_setup_tab(self) -> bool:
+        self._render_active_tab()
+        return True
+
+    def _run_required_install(self) -> bool:
+        self.controller.run_install_from_wizard()
+        return True
+
+    def _open_chrome_download_page(self) -> bool:
+        webbrowser.open("https://www.google.com/chrome/")
+        return True
+
+    def _open_directory(self, path: str) -> bool:
+        target = os.path.abspath(os.path.expanduser(path or ""))
+        if not target or not os.path.isdir(target):
+            messagebox.showwarning("폴더 열기", "폴더를 찾을 수 없습니다.")
+            return False
+        try:
+            if hasattr(os, "startfile"):
+                os.startfile(target)
+            else:
+                webbrowser.open(f"file://{target}")
+            return True
+        except Exception as exc:
+            messagebox.showerror("폴더 열기 실패", f"폴더를 열지 못했습니다.\n\n{exc}")
+            return False
+
+    def _is_directory_writable(self, path: str) -> bool:
+        try:
+            os.makedirs(path, exist_ok=True)
+            probe = os.path.join(path, ".write_test")
+            with open(probe, "w", encoding="utf-8") as file:
+                file.write("ok")
+            os.remove(probe)
+            return True
+        except Exception:
             return False
 
     def _choose_service_account_file(self) -> None:

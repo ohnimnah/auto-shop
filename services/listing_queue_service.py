@@ -738,6 +738,40 @@ def _append_product_urls_to_main_sheet(
     return len(values)
 
 
+def _backfill_main_sheet_from_queue_rows(
+    service,
+    spreadsheet_id: str,
+    product_sheet_name: str,
+    product_url_column: str,
+    queue_rows: List[Tuple[int, Dict[str, str]]],
+    main_existing_ids: set[str],
+) -> int:
+    """Append queue product URLs to the main sheet when they are missing there."""
+    if not product_sheet_name:
+        return 0
+
+    product_urls: List[str] = []
+    seen_ids: set[str] = set()
+    for _row_num, row in queue_rows:
+        product_id = (row.get(QUEUE_HEADERS[1]) or "").strip()
+        product_url = (row.get(QUEUE_HEADERS[2]) or "").strip()
+        if not product_id or not _is_http_url(product_url):
+            continue
+        if product_id in main_existing_ids or product_id in seen_ids:
+            continue
+        seen_ids.add(product_id)
+        main_existing_ids.add(product_id)
+        product_urls.append(product_url)
+
+    return _append_product_urls_to_main_sheet(
+        service=service,
+        spreadsheet_id=spreadsheet_id,
+        product_sheet_name=product_sheet_name,
+        url_column=product_url_column,
+        product_urls=product_urls,
+    )
+
+
 def _update_seed_row_simple(
     service,
     spreadsheet_id: str,
@@ -860,6 +894,17 @@ def collect_listing_queue_once(
     }
 
     if not seed_rows:
+        backfill_count = _backfill_main_sheet_from_queue_rows(
+            service=service,
+            spreadsheet_id=spreadsheet_id,
+            product_sheet_name=product_sheet_name,
+            product_url_column=product_url_column,
+            queue_rows=rows,
+            main_existing_ids=main_existing_ids,
+        )
+        if backfill_count:
+            summary["main_rows"] += backfill_count
+            print(f"[queue] 메인탭 누락분 자동 입력: {backfill_count}개")
         print(f"[queue] '{queue_sheet_name}' 시트: 처리할 seed URL이 없습니다.")
         return summary
 
@@ -873,6 +918,11 @@ def collect_listing_queue_once(
             duplicate_count = 0
 
             for product_id, product_url in collected:
+                should_append_main = bool(product_sheet_name and product_id not in main_existing_ids)
+                if should_append_main:
+                    main_existing_ids.add(product_id)
+                    main_append_urls.append(product_url)
+
                 if product_id in existing_ids:
                     duplicate_count += 1
                     continue
@@ -886,10 +936,6 @@ def collect_listing_queue_once(
                     "대기",
                     '',
                 ])
-                if product_sheet_name and product_id not in main_existing_ids:
-                    main_existing_ids.add(product_id)
-                    main_append_urls.append(product_url)
-
             if append_values:
                 service.spreadsheets().values().append(
                     spreadsheetId=spreadsheet_id,

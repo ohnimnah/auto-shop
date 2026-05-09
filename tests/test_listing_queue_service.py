@@ -96,6 +96,29 @@ class ListingQueueServiceTests(unittest.TestCase):
         self.assertEqual(update_call["range"], "'업로드정리'!B5:B5")
         self.assertEqual(update_call["body"]["values"], [["https://www.musinsa.com/products/1111111"]])
 
+    def test_backfill_main_sheet_from_queue_rows_appends_queue_urls_missing_from_main(self):
+        service = _FakeSheetsService()
+        service.values_api.next_get_payload = {"values": [["https://www.musinsa.com/products/1111111"]]}
+        queue_rows = [
+            (2, {"상품ID": "1111111", "상품URL": "https://www.musinsa.com/products/1111111"}),
+            (3, {"상품ID": "2222222", "상품URL": "https://www.musinsa.com/products/2222222"}),
+            (4, {"상품ID": "3333333", "상품URL": ""}),
+        ]
+
+        inserted = listing_queue_service._backfill_main_sheet_from_queue_rows(
+            service=service,
+            spreadsheet_id="spreadsheet-id",
+            product_sheet_name="업로드정리",
+            product_url_column="B",
+            queue_rows=queue_rows,
+            main_existing_ids={"1111111"},
+        )
+
+        self.assertEqual(inserted, 1)
+        update_call = service.values_api.update_calls[0]
+        self.assertEqual(update_call["range"], "'업로드정리'!B3:B3")
+        self.assertEqual(update_call["body"]["values"], [["https://www.musinsa.com/products/2222222"]])
+
 
 if __name__ == "__main__":
     unittest.main()
