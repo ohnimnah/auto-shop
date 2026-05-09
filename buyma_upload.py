@@ -98,6 +98,19 @@ CATEGORY_MAPPING_CANDIDATES_COLUMNS = [
     "review_status",
     "reviewer_note",
 ]
+CATEGORY_MAPPING_HEADERS = [
+    "standard_category",
+    "gender",
+    "buyma_parent_category",
+    "buyma_middle_category",
+    "buyma_child_category",
+    "category_url",
+    "category_id",
+    "source",
+    "note",
+    "updated_at",
+]
+CATEGORY_MAPPING_SHEET = "category_mapping"
 
 DEFAULT_UPLOAD_COLUMNS = {
     "url": "B",
@@ -134,6 +147,20 @@ def _get_candidate_sheet_name() -> str:
         return str(tabs_cfg.get("category_mapping_candidates") or CATEGORY_MAPPING_CANDIDATES_SHEET).strip() or CATEGORY_MAPPING_CANDIDATES_SHEET
     except Exception:
         return CATEGORY_MAPPING_CANDIDATES_SHEET
+
+
+def _get_category_mapping_sheet_name() -> str:
+    profile_name = (os.environ.get("AUTO_SHOP_PROFILE") or "default").strip() or "default"
+    try:
+        config = load_profile_config(profile_name)
+        # backward-compatible key from sheets_config + explicit config field
+        configured = str((config.get("spreadsheet") or {}).get("category_mapping_sheet_name") or "").strip()
+        if configured:
+            return configured
+        tabs_cfg = ((config.get("spreadsheet") or {}).get("tabs") or {})
+        return str(tabs_cfg.get("category_mapping") or CATEGORY_MAPPING_SHEET).strip() or CATEGORY_MAPPING_SHEET
+    except Exception:
+        return CATEGORY_MAPPING_SHEET
 
 
 def _normalize_upload_columns(raw_columns: Any) -> Dict[str, str]:
@@ -663,6 +690,87 @@ def _ensure_category_mapping_candidates_sheet(service) -> None:
     ).execute()
 
 
+def _ensure_category_mapping_sheet(service) -> None:
+    mapping_sheet_name = _get_category_mapping_sheet_name()
+    metadata = service.spreadsheets().get(
+        spreadsheetId=SPREADSHEET_ID,
+        fields="sheets(properties(sheetId,title))",
+    ).execute()
+    sheets = metadata.get("sheets", [])
+    title_to_id = {
+        (s.get("properties", {}) or {}).get("title", ""): (s.get("properties", {}) or {}).get("sheetId")
+        for s in sheets
+    }
+    if mapping_sheet_name not in title_to_id:
+        service.spreadsheets().batchUpdate(
+            spreadsheetId=SPREADSHEET_ID,
+            body={"requests": [{"addSheet": {"properties": {"title": mapping_sheet_name}}}]},
+        ).execute()
+
+    last_col = column_index_to_letter(len(CATEGORY_MAPPING_HEADERS) - 1)
+    service.spreadsheets().values().update(
+        spreadsheetId=SPREADSHEET_ID,
+        range=f"'{_quote_sheet_name(mapping_sheet_name)}'!A1:{last_col}1",
+        valueInputOption="RAW",
+        body={"values": [CATEGORY_MAPPING_HEADERS]},
+    ).execute()
+
+
+def _append_auto_seed_mapping_row(service, row_data: Dict[str, str], category_diag: Dict[str, Any]) -> None:
+    final_result = str(category_diag.get("final_result", "") or "").lower()
+    recovery_used = bool(category_diag.get("recovery_used", False))
+    if not (recovery_used and final_result == "success"):
+        return
+
+    standard_category = str(category_diag.get("standard_category", "") or "").strip()
+    parent = str(category_diag.get("actual_selected_parent_category") or category_diag.get("target_buyma_parent_category") or "").strip()
+    middle = str(category_diag.get("actual_selected_middle_category") or category_diag.get("target_buyma_middle_category") or "").strip()
+    child = str(category_diag.get("actual_selected_child_category") or category_diag.get("target_buyma_child_category") or "").strip()
+    if not (standard_category and parent and middle):
+        return
+
+    _ensure_category_mapping_sheet(service)
+    mapping_sheet_name = _get_category_mapping_sheet_name()
+    gender = _normalize_candidate_gender(row_data, str(row_data.get("product_name_kr", "") or ""))
+    normalized_gender = "men" if gender == "남성" else "women"
+
+    # Dedup: skip when same (std, gender, middle, child) already exists.
+    values = service.spreadsheets().values().get(
+        spreadsheetId=SPREADSHEET_ID,
+        range=f"'{_quote_sheet_name(mapping_sheet_name)}'!A2:J5000",
+    ).execute().get("values", [])
+    for row in values:
+        row_std = (row[0] if len(row) > 0 else "").strip()
+        row_gender = (row[1] if len(row) > 1 else "").strip().lower()
+        row_middle = (row[3] if len(row) > 3 else "").strip()
+        row_child = (row[4] if len(row) > 4 else "").strip()
+        if row_std == standard_category and row_gender == normalized_gender and row_middle == middle and row_child == child:
+            return
+
+    now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    note = f"auto_recovery row={row_data.get('row_num','')} method={category_diag.get('recovery_method','')}"
+    row_values = [
+        standard_category,
+        normalized_gender,
+        parent,
+        middle,
+        child,
+        "",
+        "",
+        "auto_seed",
+        note,
+        now,
+    ]
+    service.spreadsheets().values().append(
+        spreadsheetId=SPREADSHEET_ID,
+        range=f"'{_quote_sheet_name(mapping_sheet_name)}'!A:A",
+        valueInputOption="USER_ENTERED",
+        insertDataOption="INSERT_ROWS",
+        body={"values": [row_values]},
+    ).execute()
+    print("  ✓ category_mapping auto_seed 학습 기록 완료")
+
+
 def _normalize_candidate_gender(row_data: Dict[str, str], product_name: str) -> str:
     raw = (row_data.get("musinsa_category_large") or "").strip()
     raw_lower = raw.lower()
@@ -795,6 +903,10 @@ def _append_category_candidate_row(service, row_data: Dict[str, str], category_d
         body={"values": [row_values]},
     ).execute()
     print("  ✓ category_mapping_candidates 후보 기록 완료")
+    try:
+        _append_auto_seed_mapping_row(service, row_data, category_diag)
+    except Exception as exc:
+        print(f"  △ category_mapping auto_seed 기록 실패: {exc}")
 
 
 def get_sheet_header_map(service, sheet_name: str) -> Dict[str, int]:

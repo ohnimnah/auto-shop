@@ -11,6 +11,11 @@ import urllib.error
 import urllib.parse
 import urllib.request
 import webbrowser
+import string
+try:
+    import certifi
+except Exception:  # pragma: no cover
+    certifi = None
 from copy import deepcopy
 from datetime import datetime
 from tkinter import filedialog, messagebox, ttk
@@ -26,6 +31,31 @@ def _same_file(source_path: str, target_path: str) -> bool:
         return os.path.samefile(source_path, target_path)
     except OSError:
         return os.path.abspath(source_path) == os.path.abspath(target_path)
+
+
+def _is_valid_telegram_token(token: str) -> bool:
+    value = (token or "").strip()
+    if not value:
+        return False
+    lowered = value.lower()
+    if "setx " in lowered or "http_proxy" in lowered or "https_proxy" in lowered:
+        return False
+    if ":" not in value:
+        return False
+    left, right = value.split(":", 1)
+    if not left.isdigit() or len(left) < 6:
+        return False
+    allowed = set(string.ascii_letters + string.digits + "_-")
+    return len(right) >= 20 and all(ch in allowed for ch in right)
+
+
+def _is_valid_telegram_chat_id(chat_id: str) -> bool:
+    value = (chat_id or "").strip()
+    if not value:
+        return False
+    if value.startswith("@"):
+        return len(value) > 1 and (" " not in value)
+    return bool(re.fullmatch(r"-?\d{3,}", value))
 
 
 class SettingsPage(BasePage):
@@ -1453,6 +1483,17 @@ class SettingsPage(BasePage):
             self.telegram_status_var.set("토큰/채팅 ID 필요")
             messagebox.showwarning("Telegram 테스트", "Bot Token과 Chat ID를 입력해 주세요.")
             return False
+        if not _is_valid_telegram_token(token):
+            self.telegram_status_var.set("Bot Token 형식 오류")
+            messagebox.showwarning(
+                "Telegram 테스트",
+                "Bot Token 값이 올바르지 않습니다.\n\n명령문(setx ...), 프록시 문자열, 공백 포함 값은 사용할 수 없습니다.",
+            )
+            return False
+        if not _is_valid_telegram_chat_id(chat_id):
+            self.telegram_status_var.set("Chat ID 형식 오류")
+            messagebox.showwarning("Telegram 테스트", "Chat ID 형식이 올바르지 않습니다.")
+            return False
         try:
             url = (
                 "https://api.telegram.org/bot"
@@ -1466,7 +1507,12 @@ class SettingsPage(BasePage):
                 )
             )
             request = urllib.request.Request(url, method="POST")
-            with urllib.request.urlopen(request, timeout=10, context=ssl.create_default_context()) as response:
+            context = ssl.create_default_context(cafile=certifi.where()) if certifi else ssl.create_default_context()
+            opener = urllib.request.build_opener(
+                urllib.request.ProxyHandler({}),
+                urllib.request.HTTPSHandler(context=context),
+            )
+            with opener.open(request, timeout=10) as response:
                 payload = json.loads(response.read().decode("utf-8", "replace"))
             if not payload.get("ok"):
                 raise RuntimeError(str(payload))
