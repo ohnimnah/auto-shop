@@ -23,6 +23,7 @@ from config.config_service import DEFAULT_PROFILE_NAME, load_config
 DEDUP_SECONDS = 300
 MAX_FIELD_CHARS = 120
 MAX_MESSAGE_CHARS = 1200
+MESSAGE_DIVIDER = "────────────"
 
 _DEDUP_CACHE: dict[str, float] = {}
 
@@ -194,15 +195,24 @@ def get_notification_status() -> dict[str, bool | str]:
 
 def notify_job_started(job_name: str) -> bool:
     now = datetime.now().strftime("%Y-%m-%d %H:%M")
-    return send_message(f"🚀 Auto Shop 작업 시작\n작업: {_truncate(job_name)}\n시간: {now}")
+    return send_message(
+        "🚀 작업 시작\n"
+        f"{MESSAGE_DIVIDER}\n"
+        f"작업: {_truncate(job_name)}\n"
+        f"시간: {now}"
+    )
 
 
 def notify_job_finished(job_name: str, success_count: int, fail_count: int, duration: str | float | int) -> bool:
+    success = int(success_count or 0)
+    fail = int(fail_count or 0)
+    title = "✅ 작업 완료" if fail == 0 else "⚠️ 작업 완료"
     return send_message(
-        "✅ 작업 완료\n"
-        f"작업: {_truncate(job_name)}\n"
-        f"성공: {int(success_count or 0)}\n"
-        f"실패: {int(fail_count or 0)}\n"
+        f"{title}\n"
+        f"{MESSAGE_DIVIDER}\n"
+        f"작업: {_truncate(job_name)}\n\n"
+        f"성공: {success}\n"
+        f"실패: {fail}\n"
         f"소요시간: {_format_duration(duration)}"
     )
 
@@ -210,7 +220,8 @@ def notify_job_finished(job_name: str, success_count: int, fail_count: int, dura
 def notify_upload_success(product: dict[str, Any]) -> bool:
     return send_message(
         "✅ BUYMA 업로드 성공\n"
-        f"상품명: {_truncate(product.get('product_name') or product.get('product_name_kr'))}\n"
+        f"{MESSAGE_DIVIDER}\n"
+        f"상품명: {_truncate(product.get('product_name') or product.get('product_name_kr'))}\n\n"
         f"브랜드: {_truncate(product.get('brand'))}\n"
         f"가격: {_truncate(product.get('price') or product.get('buyma_price'))}\n"
         f"카테고리: {_truncate(product.get('category'))}"
@@ -220,21 +231,27 @@ def notify_upload_success(product: dict[str, Any]) -> bool:
 def notify_upload_failed(product: dict[str, Any], error: Any) -> bool:
     return send_message(
         "❌ BUYMA 업로드 실패\n"
-        f"상품명: {_truncate(product.get('product_name') or product.get('product_name_kr'))}\n"
+        f"{MESSAGE_DIVIDER}\n"
+        f"상품명: {_truncate(product.get('product_name') or product.get('product_name_kr'))}\n\n"
         f"사유: {_truncate(error, 220)}"
     )
 
 
 def notify_critical_error(module_name: str, error: Any) -> bool:
     return send_message(
-        "🚨 치명적 에러 발생\n"
-        f"위치: {_truncate(module_name)}\n"
+        "🚨 치명적 에러\n"
+        f"{MESSAGE_DIVIDER}\n"
+        f"위치: {_truncate(module_name)}\n\n"
         f"내용: {_truncate(error, 240)}"
     )
 
 
 def notify_emergency_stop(reason: str) -> bool:
-    return send_message(f"🛑 긴급 중지\n사유: {_truncate(reason, 240)}")
+    return send_message(
+        "🛑 긴급 중지\n"
+        f"{MESSAGE_DIVIDER}\n"
+        f"사유: {_truncate(reason, 240)}"
+    )
 
 
 def _format_duration(duration: str | float | int) -> str:

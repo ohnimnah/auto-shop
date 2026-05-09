@@ -1348,7 +1348,12 @@ class SettingsPage(BasePage):
                 "https://api.telegram.org/bot"
                 + token
                 + "/sendMessage?"
-                + urllib.parse.urlencode({"chat_id": chat_id, "text": "[Auto Shop] 설정 테스트 메시지입니다."})
+                + urllib.parse.urlencode(
+                    {
+                        "chat_id": chat_id,
+                        "text": "🔔 알림 테스트\n────────────\n상태: 연결 성공\n용도: 설정 확인",
+                    }
+                )
             )
             request = urllib.request.Request(url, method="POST")
             with urllib.request.urlopen(request, timeout=10, context=ssl.create_default_context()) as response:

@@ -97,6 +97,24 @@ class TelegramServiceTests(unittest.TestCase):
 
         self.assertEqual(len(fake_requests.calls), 1)
 
+    def test_job_finished_message_is_readable_multiline_summary(self):
+        with patch("services.telegram_service.send_message") as send_message:
+            telegram_service.notify_job_finished("정찰", success_count=1, fail_count=0, duration=6)
+
+        text = send_message.call_args.args[0]
+        self.assertIn("✅ 작업 완료", text)
+        self.assertIn("────────────", text)
+        self.assertIn("작업: 정찰\n\n성공: 1", text)
+        self.assertIn("실패: 0\n소요시간: 6초", text)
+
+    def test_job_finished_warns_when_failures_exist(self):
+        with patch("services.telegram_service.send_message") as send_message:
+            telegram_service.notify_job_finished("정찰 감시", success_count=0, fail_count=1, duration=10)
+
+        text = send_message.call_args.args[0]
+        self.assertIn("⚠️ 작업 완료", text)
+        self.assertIn("실패: 1", text)
+
     def test_sensitive_values_are_masked(self):
         fake_requests = _FakeRequests()
         env = {
