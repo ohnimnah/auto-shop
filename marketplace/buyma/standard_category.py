@@ -1,4 +1,4 @@
-"""Semantic StandardCategory resolver for BUYMA category correction layer."""
+﻿"""Semantic StandardCategory resolver for BUYMA category correction layer."""
 
 from __future__ import annotations
 
