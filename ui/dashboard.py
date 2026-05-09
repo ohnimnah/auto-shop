@@ -2180,7 +2180,7 @@ class AutoShopLauncher(tk.Tk):
             sheet_name = bu.get_sheet_name(service)
             result = service.spreadsheets().values().get(
                 spreadsheetId=bu.SPREADSHEET_ID,
-                range=f"'{sheet_name}'!A{bu.ROW_START}:D1000",
+                range=f"'{sheet_name}'!A{bu.ROW_START}:D",
             ).execute()
             rows = result.get("values", [])
             # idx=1 maps to rows[0], the first data row.

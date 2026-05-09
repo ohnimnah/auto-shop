@@ -241,7 +241,7 @@ def read_urls_from_sheet(
     try:
         result = service.spreadsheets().values().get(
             spreadsheetId=spreadsheet_id,
-            range=f"'{sheet_name}'!{url_column}{row_start}:{url_column}1000",
+            range=f"'{sheet_name}'!{url_column}{row_start}:{url_column}",
         ).execute()
         values = result.get("values", [])
         rows: List[Tuple[int, str]] = []

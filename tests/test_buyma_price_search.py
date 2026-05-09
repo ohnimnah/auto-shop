@@ -1,5 +1,6 @@
 import unittest
 import json
+import urllib.parse
 from unittest.mock import patch
 
 from bs4 import BeautifulSoup
@@ -54,6 +55,26 @@ class _MultiDetailDriverStub:
         self.page_source = self.search_html
 
 
+class _QueryPageDriverStub:
+    def __init__(self, html_by_query: dict[str, str], detail_html_by_url: dict[str, str]) -> None:
+        self.html_by_query = html_by_query
+        self.detail_html_by_url = detail_html_by_url
+        self.page_source = ""
+        self.visited = []
+
+    def get(self, url: str) -> None:
+        self.visited.append(url)
+        for item_url, html in self.detail_html_by_url.items():
+            if item_url in url:
+                self.page_source = html
+                return
+        query = urllib.parse.unquote(url.rstrip("/").split("/r/")[-1]) if "/r/" in url else ""
+        self.page_source = self.html_by_query.get(
+            query,
+            "<p>お探しの条件にあてはまる商品は見つかりませんでした。</p>",
+        )
+
+
 class BuymaPriceSearchTests(unittest.TestCase):
     def test_price_search_query_order_prefers_sku_brand_then_names(self):
         queries = buyma_service.build_buyma_price_search_queries(
@@ -72,8 +93,28 @@ class BuymaPriceSearchTests(unittest.TestCase):
                 "GLOWNY クラシック タンク",
                 "G CLASSIC TANK",
                 "クラシック タンク",
+                "GLOWNY classic tank",
+                "classic tank",
             ],
         )
+
+    def test_extract_keywords_removes_colors_size_and_parentheses(self):
+        keywords = buyma_service.extract_keywords("Classic Tank Black (2color) Size M")
+
+        self.assertEqual(keywords, ["classic", "tank"])
+
+    def test_build_search_queries_marks_keyword_queries(self):
+        queries = buyma_service.build_search_queries(
+            "G CLASSIC TANK",
+            "GLOWNY",
+            "GC25SPSL0010GR",
+            "クラシック タンク",
+        )
+
+        keyword_queries = [query for query in queries if query["query_type"] == "keyword"]
+        self.assertEqual(keyword_queries[-1]["query"], "classic tank")
+        self.assertEqual(keyword_queries[-1]["keywords"], ["classic", "tank"])
+        self.assertLessEqual(len(queries), 8)
 
     def test_weak_english_fragment_query_is_skipped(self):
         queries = buyma_service.build_buyma_price_search_queries(
@@ -209,6 +250,49 @@ class BuymaPriceSearchTests(unittest.TestCase):
 
         self.assertEqual([item["price"] for item in filtered], [10000, 11000])
 
+    def test_full_sku_and_brand_match_is_reliable_with_krw_price_floor(self):
+        candidates = [
+            {"price": 6847, "score": 70, "matched_by": ["sku_full", "brand"]},
+            {"price": 7246, "score": 20, "matched_by": ["brand"]},
+        ]
+
+        filtered = buyma_service._filter_valid_buyma_candidates(candidates, 51300)
+
+        self.assertEqual([item["price"] for item in filtered], [6847])
+
+    def test_keyword_context_requires_brand_anchor_for_reliable_candidate(self):
+        score = buyma_service._score_buyma_text(
+            "GLOWNY classic tank top",
+            musinsa_sku="",
+            english_name="classic tank",
+            brand="GLOWNY",
+            japanese_name="",
+        )
+        score = buyma_service._apply_keyword_context_score(
+            score,
+            "GLOWNY classic tank top",
+            query_type="keyword",
+            keywords=["classic", "tank"],
+        )
+
+        filtered = buyma_service._filter_valid_buyma_candidates(
+            [{"price": 9000, "score": score["score"], "matched_by": score["matched_by"], "query_type": "keyword"}]
+        )
+
+        self.assertEqual(score["score"], 70)
+        self.assertEqual([item["price"] for item in filtered], [9000])
+
+    def test_candidate_stop_state_counts_mid_score_candidates(self):
+        state = buyma_service._candidate_stop_state(
+            [
+                {"score": 70},
+                {"score": 79},
+                {"score": 40},
+            ]
+        )
+
+        self.assertEqual(state, {"max_score": 79, "mid_count": 2})
+
     def test_unmatched_listing_cards_do_not_open_detail_pages(self):
         search_html = """
         <div>
@@ -299,6 +383,43 @@ class BuymaPriceSearchTests(unittest.TestCase):
         self.assertEqual(result["buyma_price"], "8,800")
         self.assertEqual(meta["source"], "detail")
 
+    def test_sku_query_with_blank_listing_title_opens_detail_for_verification(self):
+        search_html = """
+        <div>
+          <a href="/item/222222/"></a>
+          <span class="Price_Txt">¥6,847</span>
+        </div>
+        """
+        detail_html = """
+        <html>
+          <body>
+            <h1>ETRE AU SOMMET | Cutting Rib Button Long Sleeve ET24FWTLS03CH</h1>
+            <span class="Price_Txt">¥6,847</span>
+          </body>
+        </html>
+        """
+        driver = _MultiDetailDriverStub(search_html, {"https://www.buyma.com/item/222222/": detail_html})
+
+        with patch.object(buyma_service, "WebDriverWait", _WaitStub), patch.object(
+            buyma_service, "EC", _ECStub
+        ), patch.object(buyma_service, "By", _ByStub), patch.object(
+            buyma_service.time, "sleep", lambda *_: None
+        ), patch("builtins.print"):
+            result = buyma_service.fetch_buyma_lowest_price_with_meta(
+                driver,
+                "커팅 립 버튼 롱 슬리브",
+                "ETRE AU SOMMET",
+                "ET24FWTLS03CH",
+                "",
+                "51,300",
+            )
+
+        detail_visits = [url for url in driver.visited if "/item/" in url]
+        meta = json.loads(result["buyma_meta"])
+        self.assertEqual(detail_visits, ["https://www.buyma.com/item/222222/"])
+        self.assertEqual(result["buyma_price"], "6,847")
+        self.assertEqual(meta["source"], "detail")
+
     def test_fetch_buyma_lowest_price_returns_empty_when_only_unrelated_cards_match(self):
         search_html = """
         <div>
@@ -347,6 +468,74 @@ class BuymaPriceSearchTests(unittest.TestCase):
         self.assertEqual(detail_visits, [])
         self.assertEqual(meta["selected_reason"], "buyma_no_results")
         self.assertEqual(meta["checked_count"], 0)
+
+    def test_keyword_query_result_records_keyword_meta(self):
+        search_html = """
+        <div>
+          <a href="/item/333333/">GLOWNY classic tank</a>
+          <span class="Price_Txt">¥9,000</span>
+        </div>
+        """
+        driver = _QueryPageDriverStub(
+            {"GLOWNY classic tank": search_html},
+            {},
+        )
+
+        with patch.object(buyma_service, "WebDriverWait", _WaitStub), patch.object(
+            buyma_service, "EC", _ECStub
+        ), patch.object(buyma_service, "By", _ByStub), patch.object(
+            buyma_service.time, "sleep", lambda *_: None
+        ), patch("builtins.print"):
+            result = buyma_service.fetch_buyma_lowest_price_with_meta(
+                driver,
+                "G CLASSIC TANK BLACK",
+                "GLOWNY",
+                "",
+                "",
+                "5,000",
+                "",
+            )
+
+        meta = json.loads(result["buyma_meta"])
+        self.assertEqual(result["buyma_price"], "9,000")
+        self.assertEqual(meta["query_type"], "keyword")
+        self.assertEqual(meta["keywords"], ["classic", "tank"])
+
+    def test_score_70_candidate_limits_additional_queries(self):
+        keyword_html = """
+        <div>
+          <a href="/item/333333/">GLOWNY classic tank</a>
+          <span class="Price_Txt">¥9,000</span>
+        </div>
+        """
+        driver = _QueryPageDriverStub(
+            {
+                "GLOWNY classic tank": keyword_html,
+                "classic tank": keyword_html,
+            },
+            {},
+        )
+
+        with patch.object(buyma_service, "WebDriverWait", _WaitStub), patch.object(
+            buyma_service, "EC", _ECStub
+        ), patch.object(buyma_service, "By", _ByStub), patch.object(
+            buyma_service.time, "sleep", lambda *_: None
+        ), patch("builtins.print"):
+            result = buyma_service.fetch_buyma_lowest_price_with_meta(
+                driver,
+                "G CLASSIC TANK BLACK",
+                "GLOWNY",
+                "",
+                "",
+                "5,000",
+                "",
+            )
+
+        search_visits = [urllib.parse.unquote(url.rstrip("/").split("/r/")[-1]) for url in driver.visited if "/r/" in url]
+        meta = json.loads(result["buyma_meta"])
+        self.assertEqual(result["buyma_price"], "9,000")
+        self.assertEqual(search_visits, ["GLOWNY G CLASSIC TANK BLACK", "G CLASSIC TANK BLACK", "GLOWNY classic tank"])
+        self.assertEqual(meta["score"], 70)
 
 
 if __name__ == "__main__":

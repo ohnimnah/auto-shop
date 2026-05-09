@@ -332,7 +332,7 @@ class DashboardDataService:
             service = build("sheets", "v4", credentials=creds)
             result = service.spreadsheets().values().get(
                 spreadsheetId=spreadsheet_id,
-                range=f"'{sheet_name}'!A1:Z5000",
+                range=f"'{sheet_name}'!A1:Z",
             ).execute()
             values = result.get("values", [])
             return self._rows_from_sheet_values(values, sheet_name)

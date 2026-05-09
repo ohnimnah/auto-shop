@@ -1,6 +1,6 @@
 import unittest
 
-from services.sheet_service import get_existing_row_values
+from services.sheet_service import get_existing_row_values, read_urls_from_sheet
 
 
 class _FakeRequest:
@@ -14,9 +14,12 @@ class _FakeRequest:
 class _FakeValues:
     def __init__(self):
         self.requested_range = ""
+        self.payload = None
 
     def get(self, *, spreadsheetId, range):
         self.requested_range = range
+        if self.payload is not None:
+            return _FakeRequest(self.payload)
         row = [""] * 32
         row[0] = "1"
         row[1] = "https://example.com"
@@ -47,6 +50,27 @@ class _FakeService:
 
 
 class SheetServiceColumnTests(unittest.TestCase):
+    def test_read_urls_from_sheet_reads_past_row_1000(self):
+        service = _FakeService()
+        service.values.payload = {
+            "values": [
+                ["https://example.com/2"],
+                [""],
+                ["https://example.com/1001"],
+            ]
+        }
+
+        rows = read_urls_from_sheet(
+            service=service,
+            spreadsheet_id="spreadsheet",
+            sheet_name="시트1",
+            url_column="B",
+            row_start=999,
+        )
+
+        self.assertEqual(rows, [(999, "https://example.com/2"), (1001, "https://example.com/1001")])
+        self.assertEqual(service.values.requested_range, "'시트1'!B999:B")
+
     def test_existing_row_values_use_configured_column_letters(self):
         service = _FakeService()
 

@@ -688,12 +688,13 @@ def _read_existing_product_ids_from_main_sheet(
     product_sheet_name: str,
     url_column: str,
     row_start: int = 2,
-    row_end: int = 5000,
+    row_end: int | None = None,
 ) -> set[str]:
     """Read existing Musinsa product IDs from the main product sheet URL column."""
+    end_part = str(row_end) if row_end else ""
     result = service.spreadsheets().values().get(
         spreadsheetId=spreadsheet_id,
-        range=f"'{product_sheet_name}'!{url_column}{row_start}:{url_column}{row_end}",
+        range=f"'{product_sheet_name}'!{url_column}{row_start}:{url_column}{end_part}",
     ).execute()
     values = result.get("values", [])
     product_ids: set[str] = set()

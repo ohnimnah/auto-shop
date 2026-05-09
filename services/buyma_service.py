@@ -21,6 +21,41 @@ except Exception:  # pragma: no cover - allows tests without selenium runtime.
 
 
 BUYMA_NO_RESULTS_TEXT = "お探しの条件にあてはまる商品は見つかりませんでした。"
+BUYMA_KRW_PER_JPY_FLOOR = 10.0
+KEYWORD_STOPWORDS = {
+    "gray",
+    "grey",
+    "black",
+    "white",
+    "red",
+    "blue",
+    "green",
+    "navy",
+    "beige",
+    "brown",
+    "charcoal",
+    "cream",
+    "ivory",
+    "khaki",
+    "pink",
+    "purple",
+    "yellow",
+    "orange",
+    "silver",
+    "gold",
+    "size",
+    "color",
+    "colour",
+    "free",
+    "one",
+    "none",
+    "xs",
+    "s",
+    "m",
+    "l",
+    "xl",
+    "xxl",
+}
 
 
 class BuymaCredentialService:
@@ -374,6 +409,26 @@ def _english_tokens(value: str) -> List[str]:
     return [token for token in re.findall(r"[a-z0-9]{4,}", (value or "").lower()) if token not in stop_words]
 
 
+def extract_keywords(product_name: str) -> List[str]:
+    """Extract compact English search keywords from product name."""
+    name = (product_name or "").lower()
+    name = re.sub(r"\(.*?\)|\[.*?\]|\{.*?\}", " ", name)
+    words = re.findall(r"[a-z0-9]+", name)
+    keywords: List[str] = []
+    for word in words:
+        if len(word) < 2:
+            continue
+        if word in KEYWORD_STOPWORDS:
+            continue
+        if word.isdigit():
+            continue
+        if word not in keywords:
+            keywords.append(word)
+        if len(keywords) >= 3:
+            break
+    return keywords
+
+
 def _japanese_tokens(value: str) -> List[str]:
     tokens = re.findall(r"[\u3040-\u30ff\u3400-\u9fff]{2,}", value or "")
     if tokens:
@@ -448,6 +503,40 @@ def _score_buyma_text(
     }
 
 
+def _apply_keyword_context_score(
+    score_result: Dict[str, object],
+    text: str,
+    *,
+    query_type: str,
+    keywords: List[str],
+) -> Dict[str, object]:
+    """Boost keyword-search candidates only when contextual matches are present."""
+    if query_type != "keyword" or len(keywords) < 2:
+        return score_result
+
+    haystack = re.sub(r"\s+", " ", (text or "").lower())
+    keyword_hits = sum(1 for keyword in keywords if keyword and keyword.lower() in haystack)
+    if keyword_hits < 2:
+        return score_result
+
+    matched_by = list(score_result.get("matched_by") or [])
+    has_anchor = bool({"brand", "sku_full", "sku_partial_8_10", "en_tokens"} & set(matched_by))
+    if not has_anchor:
+        return score_result
+
+    score = int(score_result.get("score") or 0) + 30
+    if "keyword_context" not in matched_by:
+        matched_by.append("keyword_context")
+    language_match = list(score_result.get("language_match") or [])
+    if "en" not in language_match:
+        language_match.append("en")
+    return {
+        "score": max(0, score),
+        "matched_by": matched_by,
+        "language_match": language_match,
+    }
+
+
 def build_buyma_price_search_queries(
     product_name: str,
     brand: str,
@@ -456,39 +545,93 @@ def build_buyma_price_search_queries(
     product_name_en: str = "",
 ) -> List[str]:
     """Build BUYMA price search queries in priority order."""
+    return [query["query"] for query in build_search_queries(product_name, brand, musinsa_sku, product_name_jp, product_name_en)]
+
+
+def build_search_queries(
+    product_name: str,
+    brand: str,
+    musinsa_sku: str = "",
+    product_name_jp: str = "",
+    product_name_en: str = "",
+) -> List[Dict[str, object]]:
+    """Build BUYMA search query metadata in priority order."""
     sku_query = _clean_sheet_text(musinsa_sku)
     cleaned_name = _clean_sheet_text(product_name_en) or _clean_sheet_text(product_name)
     cleaned_brand = _clean_sheet_text(brand)
     english_name = _clean_english_query(cleaned_name)
     english_brand = _search_brand_text(cleaned_brand)
     japanese_name = _clean_sheet_text(product_name_jp)
+    keywords = extract_keywords(english_name or cleaned_name)
+    keyword_pair = " ".join(keywords[-2:]) if len(keywords) >= 2 else " ".join(keywords)
+    keyword_full = " ".join(keywords[:3])
 
     query_candidates = [
-        sku_query,
-        f"{english_brand} {sku_query}".strip() if english_brand and sku_query else "",
-        f"{english_brand} {english_name}".strip() if english_brand and english_name else "",
-        f"{english_brand} {japanese_name}".strip() if english_brand and japanese_name else "",
-        english_name,
-        japanese_name,
+        {"query": sku_query, "query_type": "sku", "keywords": []},
+        {
+            "query": f"{english_brand} {sku_query}".strip() if english_brand and sku_query else "",
+            "query_type": "brand_sku",
+            "keywords": [],
+        },
+        {
+            "query": f"{english_brand} {english_name}".strip() if english_brand and english_name else "",
+            "query_type": "brand_name",
+            "keywords": [],
+        },
+        {
+            "query": f"{english_brand} {japanese_name}".strip() if english_brand and japanese_name else "",
+            "query_type": "brand_jp",
+            "keywords": [],
+        },
+        {"query": english_name, "query_type": "name", "keywords": []},
+        {"query": japanese_name, "query_type": "jp", "keywords": []},
+        {
+            "query": f"{english_brand} {keyword_full}".strip() if english_brand and keyword_full else "",
+            "query_type": "keyword",
+            "keywords": keywords,
+        },
+        {
+            "query": f"{english_brand} {keyword_pair}".strip() if english_brand and keyword_pair else "",
+            "query_type": "keyword",
+            "keywords": keywords[-2:] if len(keywords) >= 2 else keywords,
+        },
+        {"query": keyword_pair, "query_type": "keyword", "keywords": keywords[-2:] if len(keywords) >= 2 else keywords},
     ]
 
-    queries: List[str] = []
+    queries: List[Dict[str, object]] = []
     seen = set()
     for candidate in query_candidates:
-        query = re.sub(r"\s+", " ", (candidate or "").strip())
+        query = re.sub(r"\s+", " ", str(candidate.get("query") or "").strip())
         if re.search(r"[\uac00-\ud7a3]", query):
             continue
         if len(query) < 2 or query in seen:
             continue
         seen.add(query)
-        queries.append(query)
+        queries.append(
+            {
+                "query": query,
+                "query_type": str(candidate.get("query_type") or "standard"),
+                "keywords": list(candidate.get("keywords") or []),
+            }
+        )
+        if len(queries) >= 8:
+            break
     return queries
 
 
 def _filter_valid_buyma_candidates(candidates: List[Dict[str, object]], musinsa_price: int = 0) -> List[Dict[str, object]]:
-    reliable = [candidate for candidate in candidates if int(candidate.get("score") or 0) >= 80 and int(candidate.get("price") or 0) > 0]
+    def _is_reliable_candidate(candidate: Dict[str, object]) -> bool:
+        score = int(candidate.get("score") or 0)
+        matched_by = set(candidate.get("matched_by") or [])
+        query_type = str(candidate.get("query_type") or "")
+        if query_type == "keyword":
+            return score >= 70 and "keyword_context" in matched_by and bool({"brand", "sku_full"} & matched_by)
+        return score >= 80 or (score >= 70 and {"sku_full", "brand"} <= matched_by)
+
+    reliable = [candidate for candidate in candidates if _is_reliable_candidate(candidate) and int(candidate.get("price") or 0) > 0]
     if musinsa_price > 0:
-        reliable = [candidate for candidate in reliable if int(candidate.get("price") or 0) >= int(musinsa_price * 1.1)]
+        min_buyma_jpy = int((musinsa_price / BUYMA_KRW_PER_JPY_FLOOR) * 1.1)
+        reliable = [candidate for candidate in reliable if int(candidate.get("price") or 0) >= min_buyma_jpy]
     prices = [int(candidate["price"]) for candidate in reliable]
     if len(prices) >= 3:
         median_price = statistics.median(prices)
@@ -521,6 +664,18 @@ def _should_check_detail_candidate(score_result: Dict[str, object]) -> bool:
     return score >= 60 or bool({"sku_full", "sku_partial_8_10"} & matched_by)
 
 
+def _candidate_stop_state(candidates: List[Dict[str, object]]) -> Dict[str, int]:
+    """Summarize candidate score state for early query stopping."""
+    max_score = 0
+    mid_count = 0
+    for candidate in candidates:
+        score = int(candidate.get("score") or 0)
+        max_score = max(max_score, score)
+        if 70 <= score < 80:
+            mid_count += 1
+    return {"max_score": max_score, "mid_count": mid_count}
+
+
 def fetch_buyma_lowest_price_with_meta(
     driver,
     product_name: str,
@@ -540,7 +695,8 @@ def fetch_buyma_lowest_price_with_meta(
     english_name = _clean_english_query(cleaned_name)
     english_brand = _search_brand_text(cleaned_brand)
     japanese_name = _clean_sheet_text(product_name_jp)
-    queries = build_buyma_price_search_queries(product_name, brand, musinsa_sku, japanese_name, product_name_en)
+    query_items = build_search_queries(product_name, brand, musinsa_sku, japanese_name, product_name_en)
+    queries = [str(item["query"]) for item in query_items]
     musinsa_price_value = _parse_price_number(musinsa_price)
 
     if not queries:
@@ -551,7 +707,10 @@ def fetch_buyma_lowest_price_with_meta(
     all_candidates: List[Dict[str, object]] = []
     checked_count = 0
     no_result_queries: List[str] = []
-    for idx, query in enumerate(queries, start=1):
+    for idx, query_item in enumerate(query_items, start=1):
+        query = str(query_item.get("query") or "")
+        query_type = str(query_item.get("query_type") or "standard")
+        query_keywords = list(query_item.get("keywords") or [])
         try:
             encoded = urllib.parse.quote(query, safe="")
             search_url = f"https://www.buyma.com/r/{encoded}/"
@@ -580,12 +739,19 @@ def fetch_buyma_lowest_price_with_meta(
             for entry in candidate_entries:
                 title = str(entry.get("title", ""))
                 item_url = str(entry.get("url", "")).strip()
+                query_matches_sku = bool(sku_query and normalize_sku(sku_query) in normalize_sku(query))
                 listing_score = _score_buyma_text(
                     title,
                     musinsa_sku=sku_query,
                     english_name=english_name,
                     brand=english_brand,
                     japanese_name=japanese_name,
+                )
+                listing_score = _apply_keyword_context_score(
+                    listing_score,
+                    title,
+                    query_type=query_type,
+                    keywords=query_keywords,
                 )
                 if int(listing_score["score"]) >= 60:
                     listing_candidate = {
@@ -597,6 +763,8 @@ def fetch_buyma_lowest_price_with_meta(
                         "language_match": listing_score["language_match"],
                         "source": "listing",
                         "search_query": query,
+                        "query_type": query_type,
+                        "keywords": query_keywords,
                     }
                     all_candidates.append(listing_candidate)
                     if _can_use_listing_without_detail(listing_candidate, musinsa_sku=sku_query):
@@ -605,7 +773,7 @@ def fetch_buyma_lowest_price_with_meta(
                 listing_score_value = int(listing_score["score"])
                 if (
                     not item_url
-                    or not _should_check_detail_candidate(listing_score)
+                    or (not _should_check_detail_candidate(listing_score) and not query_matches_sku)
                     or detail_checked >= detail_check_limit
                     or _can_use_listing_without_detail(
                         {
@@ -633,6 +801,12 @@ def fetch_buyma_lowest_price_with_meta(
                         brand=english_brand,
                         japanese_name=japanese_name,
                     )
+                    detail_score = _apply_keyword_context_score(
+                        detail_score,
+                        f"{detail_title} {detail_text[:3000]}",
+                        query_type=query_type,
+                        keywords=query_keywords,
+                    )
                     detail_price = extract_buyma_item_page_price(item_soup)
                     if int(detail_score["score"]) >= 60 and detail_price > 0:
                         all_candidates.append(
@@ -645,14 +819,17 @@ def fetch_buyma_lowest_price_with_meta(
                                 "language_match": detail_score["language_match"],
                                 "source": "detail",
                                 "search_query": query,
+                                "query_type": query_type,
+                                "keywords": query_keywords,
                             }
                         )
                 except Exception as detail_error:
                     print(f"    상세페이지 스킵: {detail_error}")
 
             valid_so_far = _filter_valid_buyma_candidates(all_candidates, musinsa_price_value)
-            if any(candidate.get("source") == "detail" for candidate in valid_so_far):
-                print("    신뢰 가능한 상세 가격 후보 확인 - 추가 검색 생략")
+            stop_state = _candidate_stop_state(valid_so_far)
+            if stop_state["max_score"] >= 70:
+                print("    score 70 이상 후보 확인 - 추가 검색 생략")
                 break
             if any(_can_use_listing_without_detail(candidate, musinsa_sku=sku_query) for candidate in valid_so_far):
                 print("    신뢰 가능한 카드 가격 후보 확인 - 추가 검색 생략")
@@ -670,6 +847,8 @@ def fetch_buyma_lowest_price_with_meta(
             "matched_by": "",
             "source": "",
             "search_query": queries[0] if queries else "",
+            "query_type": str(query_items[0].get("query_type") or "") if query_items else "",
+            "keywords": (query_items[0].get("keywords") or []) if query_items else [],
             "language_match": [],
             "checked_count": checked_count,
             "candidate_count": len(all_candidates),
@@ -686,6 +865,8 @@ def fetch_buyma_lowest_price_with_meta(
         "matched_by": ",".join(str(v) for v in selected.get("matched_by", []) if v),
         "source": str(selected.get("source") or ""),
         "search_query": str(selected.get("search_query") or ""),
+        "query_type": str(selected.get("query_type") or ""),
+        "keywords": selected.get("keywords") or [],
         "language_match": selected.get("language_match") or [],
         "checked_count": checked_count,
         "candidate_count": len(valid_candidates),

@@ -66,7 +66,7 @@ class ListingQueueServiceTests(unittest.TestCase):
         )
 
         self.assertEqual(product_ids, {"1111111", "2222222"})
-        self.assertEqual(service.values_api.get_calls[0]["range"], "'업로드정리'!B2:B5000")
+        self.assertEqual(service.values_api.get_calls[0]["range"], "'업로드정리'!B2:B")
 
     def test_append_product_urls_to_main_sheet_writes_after_last_b_value(self):
         service = _FakeSheetsService()
