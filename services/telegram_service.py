@@ -1,8 +1,9 @@
-"""Telegram notification helpers for operational events."""
+﻿"""Telegram notification helpers for operational events."""
 
 from __future__ import annotations
 
 import hashlib
+import json
 import os
 import re
 import time
@@ -26,12 +27,14 @@ MESSAGE_DIVIDER = "------------"
 
 _DEDUP_CACHE: dict[str, float] = {}
 _TELEGRAM_TOKEN_RE = re.compile(r"^\d{6,}:[A-Za-z0-9_-]{20,}$")
+_MISSING_TRANSLATION_CACHE: set[str] = set()
+_MISSING_TRANSLATION_LOG_PATH = os.path.join("logs", "missing_buyma_category_translations.jsonl")
 
 BUYMA_CATEGORY_KR_MAP = {
     "メンズファッション": "남성패션",
     "レディースファッション": "여성패션",
     "トップス": "상의",
-    "パンツ・ボトムス": "팬츠/하의",
+    "パンツ・ボトムス": "하의",
     "アウター・ジャケット": "아우터/재킷",
     "靴・ブーツ・サンダル": "신발/부츠/샌들",
     "バッグ・カバン": "가방",
@@ -61,9 +64,15 @@ BUYMA_CATEGORY_KR_MAP = {
     "スウェット・トレーナー": "스웨트/트레이너",
     "シャツ": "셔츠",
     "ニット・セーター": "니트/스웨터",
+    "ルームウェア・パジャマ": "룸웨어/파자마",
+    "ブラジャー": "브라",
+    "ショーツ": "팬티/쇼츠",
+    "ブラジャー＆ショーツ": "브라&팬티 세트",
+    "スリップ・インナー・キャミ": "슬립/이너/캐미",
+    "スパッツ・レギンス": "스패츠/레깅스",
+    "タイツ・ソックス": "타이즈/삭스",
+    "インナー・ルームウェアその他": "이너/룸웨어 기타",
 }
-
-
 def _read_env_file() -> dict[str, str]:
     values: dict[str, str] = {}
     local_app_data = os.environ.get("LOCALAPPDATA", "").strip()
@@ -262,24 +271,24 @@ def get_notification_status() -> dict[str, bool | str]:
 def notify_job_started(job_name: str) -> bool:
     now = datetime.now().strftime("%Y-%m-%d %H:%M")
     return send_message(
-        "🚀 작업 시작\n"
+        "?? ?묒뾽 ?쒖옉\n"
         f"{MESSAGE_DIVIDER}\n"
-        f"작업: {_truncate(job_name)}\n"
-        f"시간: {now}"
+        f"?묒뾽: {_truncate(job_name)}\n"
+        f"?쒓컙: {now}"
     )
 
 
 def notify_job_finished(job_name: str, success_count: int, fail_count: int, duration: str | float | int) -> bool:
     success = int(success_count or 0)
     fail = int(fail_count or 0)
-    title = "✅ 작업 완료" if fail == 0 else "⚠️ 작업 완료(실패 포함)"
+    title = "???묒뾽 ?꾨즺" if fail == 0 else "?좑툘 ?묒뾽 ?꾨즺(?ㅽ뙣 ?ы븿)"
     return send_message(
         f"{title}\n"
         f"{MESSAGE_DIVIDER}\n"
-        f"작업: {_truncate(job_name)}\n\n"
-        f"성공: {success}\n"
-        f"실패: {fail}\n"
-        f"소요시간: {_format_duration(duration)}"
+        f"?묒뾽: {_truncate(job_name)}\n\n"
+        f"?깃났: {success}\n"
+        f"?ㅽ뙣: {fail}\n"
+        f"?뚯슂?쒓컙: {_format_duration(duration)}"
     )
 
 
@@ -291,38 +300,38 @@ def notify_upload_success(product: dict[str, Any]) -> bool:
     if category_kr:
         category_text = f"{category} ({category_kr})" if category else category_kr
     return send_message(
-        "✅ BUYMA 업로드 성공\n"
+        "??BUYMA ?낅줈???깃났\n"
         f"{MESSAGE_DIVIDER}\n"
-        f"상품명: {_truncate(product.get('product_name') or product.get('product_name_kr'))}\n\n"
-        f"브랜드: {_truncate(product.get('brand'))}\n"
-        f"가격: {_truncate(product.get('price') or product.get('buyma_price'))}\n"
-        f"카테고리: {category_text}"
+        f"?곹뭹紐? {_truncate(product.get('product_name') or product.get('product_name_kr'))}\n\n"
+        f"釉뚮옖?? {_truncate(product.get('brand'))}\n"
+        f"媛寃? {_truncate(product.get('price') or product.get('buyma_price'))}\n"
+        f"移댄뀒怨좊━: {category_text}"
     )
 
 
 def notify_upload_failed(product: dict[str, Any], error: Any) -> bool:
     return send_message(
-        "❌ BUYMA 업로드 실패\n"
+        "??BUYMA ?낅줈???ㅽ뙣\n"
         f"{MESSAGE_DIVIDER}\n"
-        f"상품명: {_truncate(product.get('product_name') or product.get('product_name_kr'))}\n\n"
-        f"사유: {_truncate(error, 220)}"
+        f"?곹뭹紐? {_truncate(product.get('product_name') or product.get('product_name_kr'))}\n\n"
+        f"?ъ쑀: {_truncate(error, 220)}"
     )
 
 
 def notify_critical_error(module_name: str, error: Any) -> bool:
     return send_message(
-        "🔥 치명적 오류\n"
+        "?뵦 移섎챸???ㅻ쪟\n"
         f"{MESSAGE_DIVIDER}\n"
-        f"위치: {_truncate(module_name)}\n\n"
-        f"내용: {_truncate(error, 240)}"
+        f"?꾩튂: {_truncate(module_name)}\n\n"
+        f"?댁슜: {_truncate(error, 240)}"
     )
 
 
 def notify_emergency_stop(reason: str) -> bool:
     return send_message(
-        "🛑 긴급 중지\n"
+        "?썞 湲닿툒 以묒?\n"
         f"{MESSAGE_DIVIDER}\n"
-        f"사유: {_truncate(reason, 240)}"
+        f"?ъ쑀: {_truncate(reason, 240)}"
     )
 
 
@@ -344,7 +353,14 @@ def _translate_buyma_category_to_korean(category_text: Any) -> str:
     parts = [part.strip() for part in re.split(r"\s*>\s*", raw) if part.strip()]
     if not parts:
         return ""
-    translated = [BUYMA_CATEGORY_KR_MAP.get(part, part) for part in parts]
+    translated = []
+    for part in parts:
+        mapped = BUYMA_CATEGORY_KR_MAP.get(part)
+        if mapped is None:
+            _log_missing_buyma_category_translation(part)
+            translated.append(part)
+        else:
+            translated.append(mapped)
     return " > ".join(translated)
 
 
@@ -356,3 +372,24 @@ def _extract_buyma_child_category(category_text: Any) -> str:
     if parts:
         return parts[-1]
     return raw
+
+
+def _log_missing_buyma_category_translation(category_part: str) -> None:
+    key = (category_part or "").strip()
+    if not key:
+        return
+    if key in _MISSING_TRANSLATION_CACHE:
+        return
+    _MISSING_TRANSLATION_CACHE.add(key)
+    try:
+        os.makedirs(os.path.dirname(_MISSING_TRANSLATION_LOG_PATH), exist_ok=True)
+        payload = {
+            "ts": datetime.now().isoformat(),
+            "category_part": key,
+            "event": "missing_buyma_translation",
+        }
+        with open(_MISSING_TRANSLATION_LOG_PATH, "a", encoding="utf-8") as fp:
+            fp.write(json.dumps(payload, ensure_ascii=False) + "\n")
+    except Exception:
+        return
+
