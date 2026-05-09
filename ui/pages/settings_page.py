@@ -967,7 +967,10 @@ class SettingsPage(BasePage):
         self._set_bool(self.notification_vars["telegram_enabled"], notify_telegram.get("enabled", False))
         legacy_token = str(notify_telegram.get("bot_token") or "").strip()
         if legacy_token:
-            self.controller.telegram_token_store.save(legacy_token)
+            try:
+                self.controller.telegram_token_store.save(legacy_token)
+            except Exception:
+                pass
         self._set_var(self.notification_vars["telegram_bot_token"], self.controller.telegram_token_store.load() or legacy_token)
         self._set_var(self.notification_vars["telegram_chat_id"], notify_telegram.get("chat_id", ""))
         self._set_bool(self.notification_vars["notify_start"], notify_events.get("job_start", True))
@@ -1352,7 +1355,17 @@ class SettingsPage(BasePage):
                 payload = json.loads(response.read().decode("utf-8", "replace"))
             if not payload.get("ok"):
                 raise RuntimeError(str(payload))
-            self.controller.telegram_token_store.save(token)
+            try:
+                self.controller.telegram_token_store.save(token)
+            except Exception as exc:
+                self.telegram_status_var.set("전송 성공 / 저장 실패")
+                messagebox.showwarning(
+                    "Telegram 테스트",
+                    "테스트 메시지는 전송했지만 Bot Token을 OS 키링에 저장하지 못했습니다.\n\n"
+                    f"{exc}\n\n"
+                    "프로그램을 다시 켜면 토큰을 다시 입력해야 할 수 있습니다.",
+                )
+                return True
             self.telegram_status_var.set("전송 성공")
             messagebox.showinfo("Telegram 테스트", "테스트 메시지를 전송했습니다.")
             return True

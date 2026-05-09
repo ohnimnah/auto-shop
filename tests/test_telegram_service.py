@@ -63,6 +63,40 @@ class TelegramServiceTests(unittest.TestCase):
 
         self.assertEqual(fake_requests.calls, [])
 
+    def test_notification_status_reports_missing_token_without_exposing_values(self):
+        with patch.dict(os.environ, {"TELEGRAM_ENABLED": "true", "TELEGRAM_CHAT_ID": "456"}, clear=True), patch(
+            "services.telegram_service.KeyringTokenStore"
+        ) as store_class:
+            store_class.return_value.load.return_value = ""
+
+            status = telegram_service.get_notification_status()
+
+        self.assertTrue(status["enabled"])
+        self.assertFalse(status["token_set"])
+        self.assertTrue(status["chat_id_set"])
+        self.assertNotIn("456", str(status))
+
+    def test_token_load_falls_back_to_default_profile_keyring(self):
+        fake_requests = _FakeRequests()
+
+        def store_for_account(*, service_name, account_key):
+            class _Store:
+                def load(self):
+                    return "123:abc" if account_key == "default.bot_token" else ""
+
+            return _Store()
+
+        with patch.dict(
+            os.environ,
+            {"AUTO_SHOP_PROFILE": "operator-a", "TELEGRAM_ENABLED": "true", "TELEGRAM_CHAT_ID": "456"},
+            clear=True,
+        ), patch("services.telegram_service.requests", fake_requests), patch(
+            "services.telegram_service.KeyringTokenStore", side_effect=store_for_account
+        ):
+            self.assertTrue(telegram_service.send_message("fallback token"))
+
+        self.assertEqual(len(fake_requests.calls), 1)
+
     def test_sensitive_values_are_masked(self):
         fake_requests = _FakeRequests()
         env = {

@@ -58,6 +58,15 @@ class CredentialStoreTests(unittest.TestCase):
             store.delete()
             self.assertFalse(store.exists())
 
+    def test_token_store_raises_when_saved_token_cannot_be_read_back(self):
+        store = KeyringTokenStore(service_name="auto_shop.test.telegram", account_key="default.bot_token")
+
+        with patch("app.security.credential_store.keyring.set_password"), patch(
+            "app.security.credential_store.keyring.get_password", return_value=""
+        ):
+            with self.assertRaises(RuntimeError):
+                store.save("123:abc")
+
 
 if __name__ == "__main__":
     unittest.main()

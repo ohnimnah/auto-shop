@@ -13,7 +13,14 @@ a = Analysis(
         ('app', 'app'),
         ('services/crawler', 'services/crawler'),
     ],
-    hiddenimports=[],
+    hiddenimports=[
+        'keyring',
+        'keyring.backends.macOS',
+        'keyring.backends.Windows',
+        'win32ctypes.pywin32',
+        'win32ctypes.pywin32.pywintypes',
+        'win32ctypes.pywin32.win32cred',
+    ],
     hookspath=[],
     hooksconfig={},
     runtime_hooks=[],
@@ -49,4 +56,3 @@ coll = COLLECT(
     upx_exclude=[],
     name='AutoShopLauncher',
 )
-

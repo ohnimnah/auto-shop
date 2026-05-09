@@ -132,6 +132,7 @@ class AutoShopLauncher(tk.Tk):
         self.log_queue: queue.Queue[LogEvent] = queue.Queue()
         self.state_queue: queue.Queue[AppStateChange] = queue.Queue()
         self.profile_name = get_saved_profile_name()
+        os.environ["AUTO_SHOP_PROFILE"] = self.profile_name
         self.profile_config = load_profile_config(self.profile_name, create_if_missing=True)
         self.data_dir = get_default_data_dir(self.profile_name)
         self.sheet_config_path = os.path.join(self.data_dir, "sheets_config.json")
@@ -1834,6 +1835,7 @@ class AutoShopLauncher(tk.Tk):
         )
         self.logger.emit(f"프로필 변경 저장: {self.profile_name} -> {new_profile}\n", category="settings")
         self.profile_name = new_profile
+        os.environ["AUTO_SHOP_PROFILE"] = self.profile_name
         return True
 
     def import_credentials_file(self) -> bool:

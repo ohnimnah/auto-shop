@@ -7,23 +7,26 @@ from typing import Optional
 
 try:
     import keyring  # type: ignore
-except Exception:  # pragma: no cover
-    class _FallbackKeyring:
-        _bag: dict[tuple[str, str], str] = {}
+    _KEYRING_IMPORT_ERROR: Exception | None = None
+except Exception as exc:  # pragma: no cover
+    _KEYRING_IMPORT_ERROR = exc
 
-        @classmethod
-        def set_password(cls, service: str, account: str, password: str) -> None:
-            cls._bag[(service, account)] = password
+    class _UnavailableKeyring:
+        _message = "keyring 패키지를 사용할 수 없어 OS 키링에 저장할 수 없습니다."
 
         @classmethod
         def get_password(cls, service: str, account: str) -> str | None:
-            return cls._bag.get((service, account))
+            return None
+
+        @classmethod
+        def set_password(cls, service: str, account: str, password: str) -> None:
+            raise RuntimeError(cls._message)
 
         @classmethod
         def delete_password(cls, service: str, account: str) -> None:
-            cls._bag.pop((service, account), None)
+            return None
 
-    keyring = _FallbackKeyring()  # type: ignore
+    keyring = _UnavailableKeyring()  # type: ignore
 
 
 @dataclass
@@ -80,6 +83,9 @@ class KeyringTokenStore:
         token = (token or "").strip()
         if token:
             keyring.set_password(self.service_name, self.account_key, token)
+            saved_token = (keyring.get_password(self.service_name, self.account_key) or "").strip()
+            if saved_token != token:
+                raise RuntimeError("토큰을 OS 키링에 저장했지만 다시 읽을 수 없습니다.")
 
     def delete(self) -> None:
         try:

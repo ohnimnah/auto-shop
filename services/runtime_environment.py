@@ -38,8 +38,9 @@ def check_runtime_environment(credentials_path: str, logs_root: str = "logs") ->
 
     keyring_available = False
     try:
-        import keyring  # noqa: F401
+        import keyring
 
+        keyring.get_keyring()
         keyring_available = True
     except Exception:
         keyring_available = False

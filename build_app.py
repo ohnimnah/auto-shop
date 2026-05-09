@@ -28,6 +28,7 @@ def resolve_python() -> str:
 
 def ensure_pyinstaller(python_cmd: str) -> None:
     subprocess.check_call([python_cmd, "-m", "pip", "install", "--upgrade", "pip"])
+    subprocess.check_call([python_cmd, "-m", "pip", "install", "-r", "requirements.txt"], cwd=str(PROJECT_DIR))
     subprocess.check_call([python_cmd, "-m", "pip", "install", "pyinstaller"])
 
 
@@ -87,6 +88,18 @@ def build() -> Path:
         "app;app",
         "--add-data",
         "services/crawler;services/crawler",
+        "--hidden-import",
+        "keyring",
+        "--hidden-import",
+        "keyring.backends.macOS",
+        "--hidden-import",
+        "keyring.backends.Windows",
+        "--hidden-import",
+        "win32ctypes.pywin32",
+        "--hidden-import",
+        "win32ctypes.pywin32.pywintypes",
+        "--hidden-import",
+        "win32ctypes.pywin32.win32cred",
         str(ENTRY),
     ]
 

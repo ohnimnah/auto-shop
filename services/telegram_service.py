@@ -29,8 +29,11 @@ _DEDUP_CACHE: dict[str, float] = {}
 
 def _read_env_file() -> dict[str, str]:
     values: dict[str, str] = {}
+    local_app_data = os.environ.get("LOCALAPPDATA", "").strip()
+    default_data_dir = Path(local_app_data) / "auto_shop" if local_app_data else Path.home() / ".auto_shop"
     candidates = [
         Path.cwd() / ".env",
+        default_data_dir / ".env",
         Path(os.environ.get("AUTO_SHOP_DATA_DIR", "")).expanduser() / ".env"
         if os.environ.get("AUTO_SHOP_DATA_DIR")
         else None,
@@ -75,10 +78,19 @@ def _load_token(config: dict[str, Any], env_file: dict[str, str]) -> str:
     if legacy_config_token:
         return legacy_config_token
 
-    return KeyringTokenStore(
-        service_name="auto_shop.telegram",
-        account_key=f"{_profile_name()}.bot_token",
-    ).load()
+    account_keys = [f"{_profile_name()}.bot_token"]
+    fallback_key = f"{DEFAULT_PROFILE_NAME}.bot_token"
+    if fallback_key not in account_keys:
+        account_keys.append(fallback_key)
+    account_keys.append("bot_token")
+    for account_key in account_keys:
+        token = KeyringTokenStore(
+            service_name="auto_shop.telegram",
+            account_key=account_key,
+        ).load()
+        if token:
+            return token
+    return ""
 
 
 def _load_chat_id(config: dict[str, Any], env_file: dict[str, str]) -> str:
@@ -163,6 +175,21 @@ def send_message(text: str) -> bool:
         return True
     except Exception:
         return False
+
+
+def get_notification_status() -> dict[str, bool | str]:
+    """Return non-sensitive Telegram notification configuration status."""
+    config = _load_telegram_config()
+    env_file = _read_env_file()
+    token = _load_token(config, env_file)
+    chat_id = _load_chat_id(config, env_file)
+    return {
+        "profile": _profile_name(),
+        "enabled": _is_enabled(config),
+        "token_set": bool(token),
+        "chat_id_set": bool(chat_id),
+        "requests_available": requests is not None,
+    }
 
 
 def notify_job_started(job_name: str) -> bool:
