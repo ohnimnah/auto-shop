@@ -135,6 +135,18 @@ def _contains_keyword(text: str, keyword: str) -> bool:
 def _resolve_from_musinsa_category_text(text: str) -> Optional[StandardCategory]:
     normalized = _normalize_text(text)
     compact = normalized.replace(" ", "")
+    # Guardrail: mixed labels like "속옷/홈웨어" should prefer underwear.
+    has_underwear_token = any(
+        _contains_keyword(normalized, token)
+        for token in ("속옷", "언더웨어", "이너웨어", "innerwear", "underwear", "브라", "팬티", "속바지")
+    )
+    has_homewear_token = any(
+        _contains_keyword(normalized, token)
+        for token in ("홈웨어", "잠옷", "파자마", "homewear", "pajama", "loungewear")
+    )
+    if has_underwear_token and has_homewear_token:
+        return StandardCategory.INNER_UNDERWEAR
+
     for keywords, category in MUSINSA_CATEGORY_OVERRIDES:
         if all(_contains_keyword(normalized, keyword) or keyword.replace(" ", "") in compact for keyword in keywords):
             return category
