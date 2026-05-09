@@ -83,13 +83,6 @@ def _notification_product(row_data: MarketplaceRow, category_diag: Dict[str, Any
         "price": row_data.get("buyma_price") or "",
         "buyma_price": row_data.get("buyma_price") or "",
         "category": category,
-        "category_kr": " / ".join(
-            [
-                str(row_data.get("musinsa_category_large") or "").strip(),
-                str(row_data.get("musinsa_category_middle") or "").strip(),
-                str(row_data.get("musinsa_category_small") or "").strip(),
-            ]
-        ).strip(" /"),
     }
 
 

@@ -27,6 +27,42 @@ MESSAGE_DIVIDER = "------------"
 _DEDUP_CACHE: dict[str, float] = {}
 _TELEGRAM_TOKEN_RE = re.compile(r"^\d{6,}:[A-Za-z0-9_-]{20,}$")
 
+BUYMA_CATEGORY_KR_MAP = {
+    "メンズファッション": "남성패션",
+    "レディースファッション": "여성패션",
+    "トップス": "상의",
+    "パンツ・ボトムス": "팬츠/하의",
+    "アウター・ジャケット": "아우터/재킷",
+    "靴・ブーツ・サンダル": "신발/부츠/샌들",
+    "バッグ・カバン": "가방",
+    "アクセサリー": "액세서리",
+    "腕時計": "시계",
+    "財布・雑貨": "지갑/잡화",
+    "アイウェア": "아이웨어",
+    "帽子": "모자",
+    "ファッション雑貨・小物": "패션잡화/소품",
+    "スマホケース・テックアクセサリー": "폰케이스/테크액세서리",
+    "インナー・ルームウェア": "이너/홈웨어",
+    "水着・ビーチグッズ": "수영복/비치용품",
+    "フィットネス": "피트니스",
+    "スーツ": "수트",
+    "セットアップ": "셋업",
+    "ゴルフ": "골프",
+    "その他ファッション": "기타패션",
+    "サングラス": "선글라스",
+    "ベルト": "벨트",
+    "キャップ": "캡",
+    "ハット": "햇",
+    "ニットキャップ・ビーニー": "니트캡/비니",
+    "マフラー・ストール": "머플러/스토ール",
+    "ファッション雑貨・小物その他": "패션잡화/소품 기타",
+    "Tシャツ・カットソー": "티셔츠/컷소우",
+    "パーカー・フーディ": "후디/파카",
+    "スウェット・トレーナー": "스웨트/트레이너",
+    "シャツ": "셔츠",
+    "ニット・セーター": "니트/스웨터",
+}
+
 
 def _read_env_file() -> dict[str, str]:
     values: dict[str, str] = {}
@@ -248,8 +284,9 @@ def notify_job_finished(job_name: str, success_count: int, fail_count: int, dura
 
 
 def notify_upload_success(product: dict[str, Any]) -> bool:
-    category = _truncate(product.get("category"))
-    category_kr = _truncate(product.get("category_kr"))
+    category_child = _extract_buyma_child_category(product.get("category"))
+    category = _truncate(category_child)
+    category_kr = _truncate(_translate_buyma_category_to_korean(category_child))
     category_text = category
     if category_kr:
         category_text = f"{category} ({category_kr})" if category else category_kr
@@ -297,3 +334,25 @@ def _format_duration(duration: str | float | int) -> str:
     if minutes:
         return f"{minutes}분 {rem}초" if rem else f"{minutes}분"
     return f"{rem}초"
+
+
+def _translate_buyma_category_to_korean(category_text: Any) -> str:
+    raw = str(category_text or "").strip()
+    if not raw:
+        return ""
+    # Handle common path separators used by logs/messages.
+    parts = [part.strip() for part in re.split(r"\s*>\s*", raw) if part.strip()]
+    if not parts:
+        return ""
+    translated = [BUYMA_CATEGORY_KR_MAP.get(part, part) for part in parts]
+    return " > ".join(translated)
+
+
+def _extract_buyma_child_category(category_text: Any) -> str:
+    raw = str(category_text or "").strip()
+    if not raw:
+        return ""
+    parts = [part.strip() for part in re.split(r"\s*>\s*", raw) if part.strip()]
+    if parts:
+        return parts[-1]
+    return raw
