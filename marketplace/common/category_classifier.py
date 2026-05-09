@@ -135,6 +135,12 @@ def _contains_keyword(text: str, keyword: str) -> bool:
 def _resolve_from_musinsa_category_text(text: str) -> Optional[StandardCategory]:
     normalized = _normalize_text(text)
     compact = normalized.replace(" ", "")
+    # Guardrail: shirt/blouse labels should not be downgraded to t-shirt.
+    if any(_contains_keyword(normalized, token) for token in ("셔츠", "블라우스", "남방", "shirt", "blouse")):
+        if _contains_keyword(normalized, "블라우스") or _contains_keyword(normalized, "blouse"):
+            return StandardCategory.TOP_BLOUSE
+        return StandardCategory.TOP_SHIRT
+
     # Guardrail: mixed labels like "속옷/홈웨어" should prefer underwear.
     has_underwear_token = any(
         _contains_keyword(normalized, token)
