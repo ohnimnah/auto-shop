@@ -29,6 +29,7 @@ except Exception:
 IMAGE_EXTS = {".jpg", ".jpeg", ".png", ".webp", ".bmp"}
 LOGO_EXTS = (".png", ".webp", ".jpg", ".jpeg")
 LOGO_BASENAMES = {"__brand_logo", "_brand_logo", "brand_logo", "logo"}
+DEFAULT_CORNER_OVERLAY = "thumbnail_corner_overlay.png"
 YOLO_FACE_MODEL = os.environ.get("AUTO_SHOP_FACE_MODEL", "yolov8n-face.pt").strip() or "yolov8n-face.pt"
 _YOLO_FACE_MODEL_INSTANCE = None
 _YOLO_FACE_MODEL_FAILED = False
@@ -146,6 +147,37 @@ def _find_brand_logo(
             if _normalize_brand_key(p.stem) == normalized_target:
                 return p
     return None
+
+
+def _find_corner_overlay(explicit_overlay: str = "") -> Optional[Path]:
+    if explicit_overlay:
+        p = Path(explicit_overlay).expanduser()
+        if not p.is_absolute():
+            p = (Path.cwd() / p).resolve()
+        return p if p.exists() and p.is_file() else None
+
+    script_dir = Path(__file__).resolve().parent
+    for candidate in (
+        script_dir / "assets" / DEFAULT_CORNER_OVERLAY,
+        script_dir / DEFAULT_CORNER_OVERLAY,
+    ):
+        if candidate.exists() and candidate.is_file():
+            return candidate
+    return None
+
+
+def _paste_corner_overlay(canvas: Image.Image, overlay_path: Optional[Path], size: int) -> bool:
+    if not overlay_path:
+        return False
+    try:
+        with Image.open(overlay_path).convert("RGBA") as overlay:
+            fitted = overlay.resize((size, size), Image.Resampling.LANCZOS)
+        canvas_rgba = canvas.convert("RGBA")
+        canvas_rgba.alpha_composite(fitted, (0, 0))
+        canvas.paste(canvas_rgba.convert("RGB"))
+        return True
+    except Exception:
+        return False
 
 
 def _paste_brand_logo(canvas: Image.Image, logo_path: Path, left_box, size: int) -> bool:
@@ -360,6 +392,7 @@ def compose_split_style(
     blur_faces: bool = False,
     blur_radius: int = 14,
     brand_logo: Optional[Path] = None,
+    corner_overlay: Optional[Path] = None,
 ):
     """예시의 의류형 썸네일 스타일: 좌측 메인컷 + 우측 2컷 + 하단 블랙 바."""
     if len(images) < 1:
@@ -430,6 +463,8 @@ def compose_split_style(
     ty = size - footer_h + (footer_h - th) // 2
     draw.text((tx, ty), footer, fill=(0, 0, 0), font=footer_font)
 
+    _paste_corner_overlay(canvas, corner_overlay, size)
+
     dst.parent.mkdir(parents=True, exist_ok=True)
     canvas.save(dst, quality=95, optimize=True)
 
@@ -495,6 +530,7 @@ def compose_simple_logo_style(
     blur_faces: bool = False,
     blur_radius: int = 14,
     brand_logo: Optional[Path] = None,
+    corner_overlay: Optional[Path] = None,
 ):
     """1장/2장 전용 단순 레이아웃:
     - 1장: 원본 1장만 표시 + 로고 좌상단
@@ -521,6 +557,8 @@ def compose_simple_logo_style(
     if brand_logo:
         _paste_brand_logo(canvas, brand_logo, (0, 0, size, size), size)
 
+    _paste_corner_overlay(canvas, corner_overlay, size)
+
     dst.parent.mkdir(parents=True, exist_ok=True)
     canvas.save(dst, quality=95, optimize=True)
 
@@ -535,6 +573,7 @@ def main():
     parser.add_argument("--brand", default="", help="Brand name text (if set, used as title)")
     parser.add_argument("--brand-logo", default="", help="Brand logo image path (optional)")
     parser.add_argument("--logo-dir", default="", help="Directory to search brand logo file (optional)")
+    parser.add_argument("--corner-overlay", default="", help="Top-right corner overlay PNG path (optional)")
     parser.add_argument("--footer", default="", help="Bottom/footer text")
     parser.add_argument("--first-name", default="00_thumb_main.jpg", help="Filename when saving into source folder")
     parser.add_argument("--blur-face", action="store_true", help="Apply Gaussian blur on detected faces")
@@ -569,6 +608,9 @@ def main():
     )
     if logo_path:
         print(f"Brand logo found: {logo_path}")
+    corner_overlay_path = _find_corner_overlay(args.corner_overlay)
+    if corner_overlay_path:
+        print(f"Corner overlay found: {corner_overlay_path}")
     bg = (255, 255, 255)
 
     if len(images) <= 2:
@@ -580,6 +622,7 @@ def main():
             blur_faces=args.blur_face,
             blur_radius=args.blur_radius,
             brand_logo=logo_path,
+            corner_overlay=corner_overlay_path,
         )
         style_used = "simple"
     elif args.style == "split":
@@ -593,6 +636,7 @@ def main():
             blur_faces=args.blur_face,
             blur_radius=args.blur_radius,
             brand_logo=logo_path,
+            corner_overlay=corner_overlay_path,
         )
         style_used = "split"
     else:

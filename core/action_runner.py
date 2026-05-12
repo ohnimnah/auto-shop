@@ -251,6 +251,7 @@ class ActionRunner:
             "watch": "정찰 감시",
             "watch-images": "이미지 감시",
             "watch-thumbnails": "썸네일 감시",
+            "thumbnail-create": "썸네일 생성",
             "watch-upload": "BUYMA 업로드 감시",
             "save-images": "이미지 저장",
             "upload-review": "BUYMA 업로드 검토",

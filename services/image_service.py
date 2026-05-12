@@ -10,7 +10,7 @@ from typing import Dict, List
 
 from bs4 import BeautifulSoup
 
-from config.app_config import BRAND_COLUMN, BRAND_EN_COLUMN
+from config.app_config import BRAND_EN_COLUMN
 from config.config_service import DEFAULT_PROFILE_NAME, load_config
 from services.crawler_service import normalize_image_source as svc_normalize_image_source
 
@@ -24,6 +24,18 @@ def sanitize_path_component(value: str) -> str:
     return cleaned.strip(" ._") or "item"
 
 
+def _clean_english_brand_text(brand_text: str) -> str:
+    text = " ".join(str(brand_text or "").strip().split())
+    if not text:
+        return ""
+    text = text.replace("’", "'")
+    cleaned = re.sub(r"[^A-Za-z0-9&+.'/\- ]+", " ", text)
+    cleaned = re.sub(r"\s+", " ", cleaned).strip(" ./-_")
+    if not cleaned or not re.search(r"[A-Za-z]", cleaned):
+        return ""
+    return cleaned
+
+
 def resolve_image_folder_from_paths(image_paths: str) -> str:
     """Return folder path from comma-separated image paths."""
     parts = [part.strip() for part in (image_paths or "").split(",") if part.strip()]
@@ -34,12 +46,11 @@ def resolve_image_folder_from_paths(image_paths: str) -> str:
 
 
 def build_thumbnail_brand(existing_values: Dict[str, str]) -> str:
-    """Return thumbnail brand text with priority: EN brand > KR brand."""
-    brand = (existing_values.get(BRAND_EN_COLUMN, "") or "").strip()
+    """Return BUYMA-safe thumbnail brand text from the English brand column."""
+    brand = _clean_english_brand_text(existing_values.get(BRAND_EN_COLUMN, ""))
     if brand:
         return brand
-    brand = (existing_values.get(BRAND_COLUMN, "") or "").strip()
-    return brand or "BRAND"
+    return "BRAND"
 
 
 def get_thumbnail_footer_suffix() -> str:
@@ -232,9 +243,45 @@ def extract_brand_logo_url(soup: BeautifulSoup, product_json: Dict[str, object])
     return candidates[0]
 
 
-def download_brand_logo(logo_url: str, folder_name: str, images_root: str, image_paths: str = "") -> str:
+def _save_brand_text_logo(brand_text: str, logo_path: str) -> str:
+    text = _clean_english_brand_text(brand_text)
+    if not text:
+        return ""
+    try:
+        from PIL import Image, ImageDraw, ImageFont
+
+        width, height = 520, 160
+        image = Image.new("RGBA", (width, height), (255, 255, 255, 0))
+        draw = ImageDraw.Draw(image)
+        font_size = 96
+        font = ImageFont.load_default()
+        for size in range(font_size, 24, -4):
+            try:
+                candidate_font = ImageFont.truetype("Arial Bold.ttf", size)
+            except Exception:
+                try:
+                    candidate_font = ImageFont.truetype("arialbd.ttf", size)
+                except Exception:
+                    candidate_font = ImageFont.load_default()
+            bbox = draw.textbbox((0, 0), text, font=candidate_font, stroke_width=max(1, size // 18))
+            if bbox[2] - bbox[0] <= width - 24 and bbox[3] - bbox[1] <= height - 20:
+                font = candidate_font
+                break
+        bbox = draw.textbbox((0, 0), text, font=font, stroke_width=4)
+        x = (width - (bbox[2] - bbox[0])) // 2 - bbox[0]
+        y = (height - (bbox[3] - bbox[1])) // 2 - bbox[1]
+        draw.text((x, y), text, font=font, fill=(255, 255, 255, 255), stroke_width=4, stroke_fill=(0, 0, 0, 255))
+        image.save(logo_path, format="PNG")
+        print(f"    브랜드 텍스트 로고 생성: {logo_path}")
+        return logo_path.replace("\\", "/")
+    except Exception as exc:
+        print(f"    브랜드 텍스트 로고 생성 실패: {exc}")
+        return ""
+
+
+def download_brand_logo(logo_url: str, folder_name: str, images_root: str, image_paths: str = "", brand_text: str = "") -> str:
     """Save brand logo as __brand_logo.png in product image folder."""
-    if not logo_url:
+    if not logo_url and not brand_text:
         return ""
 
     image_dir = resolve_image_folder_from_paths(image_paths)
@@ -247,6 +294,8 @@ def download_brand_logo(logo_url: str, folder_name: str, images_root: str, image
 
     try:
         logo_path = os.path.join(image_dir, "__brand_logo.png")
+        if not logo_url:
+            return _save_brand_text_logo(brand_text, logo_path)
         request = urllib.request.Request(logo_url, headers={"User-Agent": "Mozilla/5.0"})
         with urllib.request.urlopen(request, timeout=30) as response:
             raw_bytes = response.read()
@@ -263,4 +312,4 @@ def download_brand_logo(logo_url: str, folder_name: str, images_root: str, image
         return logo_path.replace("\\", "/")
     except Exception as e:
         print(f"    브랜드 로고 저장 실패: {e}")
-        return ""
+        return _save_brand_text_logo(brand_text, os.path.join(image_dir, "__brand_logo.png"))

@@ -1585,6 +1585,7 @@ def scrape_musinsa_product(
             return Product(
                 product_name_kr=product_name,
                 musinsa_sku=existing_sku.strip() if existing_sku else "",
+                brand_en=brand_en_from_state or existing_brand_en,
                 image_paths=image_paths,
                 brand_logo_url=brand_logo_url,
             )

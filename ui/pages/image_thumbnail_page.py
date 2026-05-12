@@ -289,7 +289,7 @@ class ImageThumbnailPage(BasePage):
         self.controller.dispatch_ui_action("이미지 다운로드 실행", lambda: self.controller.run_action("save-images"), category="assets")
 
     def start_thumbnail_generation(self) -> None:
-        self.controller.dispatch_ui_action("썸네일 생성 실행", self.controller.run_thumbnail_action, category="design")
+        self.controller.dispatch_ui_action("썸네일 생성 실행", lambda: self.controller.run_action("thumbnail-create"), category="design")
 
     def retry_failed_images(self) -> None:
         self.controller.dispatch_ui_action("실패 이미지 재시도", self.controller.refresh_dashboard_data, category="assets")

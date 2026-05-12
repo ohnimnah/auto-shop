@@ -11,6 +11,7 @@ a = Analysis(
         ('OPERATIONS.md', '.'),
         ('TROUBLESHOOTING.md', '.'),
         ('app', 'app'),
+        ('assets', 'assets'),
         ('services/crawler', 'services/crawler'),
     ],
     hiddenimports=[

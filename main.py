@@ -502,13 +502,14 @@ def download_thumbnail_images(image_urls: List[str], folder_name: str) -> str:
     )
 
 
-def download_brand_logo(logo_url: str, folder_name: str, image_paths: str = "") -> str:
+def download_brand_logo(logo_url: str, folder_name: str, image_paths: str = "", brand_text: str = "") -> str:
     """Save brand logo as __brand_logo.png in product image folder."""
     return svc_download_brand_logo(
         logo_url=logo_url,
         folder_name=folder_name,
         images_root=IMAGES_ROOT,
         image_paths=image_paths,
+        brand_text=brand_text,
     )
 
 

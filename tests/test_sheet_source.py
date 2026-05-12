@@ -148,6 +148,60 @@ class SheetSourceTests(unittest.TestCase):
         self.assertEqual(rows[0]["musinsa_category_middle"], "상의")
         self.assertEqual(rows[0]["musinsa_category_small"], "후드티")
 
+    def test_read_upload_rows_prefilters_candidates_by_status_only(self):
+        calls = []
+
+        class StatusOnlyValues:
+            def get(self, *, spreadsheetId, range):
+                calls.append(("get", range))
+                if range.endswith("1:1"):
+                    headers = [""] * 17
+                    headers[column_letter_to_index("Q")] = "진행상태"
+                    return _FakeRequest({"values": [headers]})
+                if range == "'시트1'!Q2:Q":
+                    return _FakeRequest({"values": [["정찰완료"], ["썸네일완료"]]})
+                raise AssertionError(f"unexpected get range: {range}")
+
+            def batchGet(self, *, spreadsheetId, ranges):
+                calls.append(("batchGet", tuple(ranges)))
+                if ranges != ["'시트1'!A3:AA3"]:
+                    raise AssertionError(f"unexpected batch ranges: {ranges}")
+                row = [""] * 27
+                row[column_letter_to_index("B")] = "https://example.com/upload"
+                row[column_letter_to_index("E")] = "업로드상품"
+                row[column_letter_to_index("N")] = "222"
+                row[column_letter_to_index("Q")] = "썸네일완료"
+                row[column_letter_to_index("Y")] = "여성"
+                return _FakeRequest({"valueRanges": [{"values": [row]}]})
+
+        class StatusOnlySpreadsheets:
+            def values(self):
+                return StatusOnlyValues()
+
+        class StatusOnlyService:
+            def spreadsheets(self):
+                return StatusOnlySpreadsheets()
+
+        rows = read_upload_rows(
+            StatusOnlyService(),
+            spreadsheet_id="spreadsheet",
+            sheet_name="시트1",
+            row_start=2,
+            header_row=1,
+            max_data_column="AA",
+            upload_columns=DEFAULT_UPLOAD_COLUMNS,
+            progress_status_header="진행상태",
+            status_completed="출품완료",
+            status_upload_ready="썸네일완료",
+            status_thumbnails_done="썸네일완료",
+        )
+
+        self.assertEqual(len(rows), 1)
+        self.assertEqual(rows[0]["row_num"], 3)
+        self.assertEqual(rows[0]["product_name_kr"], "업로드상품")
+        self.assertIn(("get", "'시트1'!Q2:Q"), calls)
+        self.assertTrue(any(call[0] == "batchGet" for call in calls))
+
 
 if __name__ == "__main__":
     unittest.main()

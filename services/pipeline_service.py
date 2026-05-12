@@ -479,6 +479,7 @@ def process_sheet_once(
                     _build_header_cell_range(sheet_name, idx, header_map, cfg["PROGRESS_STATUS_HEADER"]),
                     cfg["STATUS_DOWNLOADING"],
                 )
+                _flush_updates_buffer(service, api, updates_buffer, f"image-row-{idx}-start")
             product = api["scrape_musinsa_product"](
                 driver,
                 url,
@@ -495,6 +496,13 @@ def process_sheet_once(
             image_paths = product_info.get("image_paths", "")
             if is_empty_cell(image_paths):
                 print(f" {sheet_name} row {idx}: skip {cfg['IMAGE_PATHS_COLUMN']} update (empty image paths)")
+                if has_status_header:
+                    _enqueue_update(
+                        updates_buffer,
+                        _build_header_cell_range(sheet_name, idx, header_map, cfg["PROGRESS_STATUS_HEADER"]),
+                        cfg["STATUS_ERROR"],
+                    )
+                    print(f" {sheet_name} row {idx} status -> {cfg['STATUS_ERROR']}")
             elif not is_empty_cell(existing_values_for_row.get(cfg["IMAGE_PATHS_COLUMN"], "")):
                 print(f" {sheet_name} row {idx}: skip {cfg['IMAGE_PATHS_COLUMN']} update (already filled)")
             else:
@@ -505,10 +513,15 @@ def process_sheet_once(
                 )
                 print(f" {sheet_name} row {idx}: queue {cfg['IMAGE_PATHS_COLUMN']}(image_paths) update")
 
+            brand_text = (
+                product_info.get("brand_en")
+                or existing_product_for_row.brand_en
+                or ""
+            )
             logo_url = (product_info.get("brand_logo_url") or "").strip()
-            if logo_url and image_paths:
+            if image_paths and (logo_url or brand_text):
                 folder_name = api["build_image_folder_name"](idx, product_info.get("product_name_kr", ""))
-                api["download_brand_logo"](logo_url, folder_name, image_paths)
+                api["download_brand_logo"](logo_url, folder_name, image_paths, brand_text)
             if image_paths and has_status_header:
                 _enqueue_update(
                     updates_buffer,
@@ -518,7 +531,7 @@ def process_sheet_once(
                 print(f" {sheet_name} row {idx} status -> {cfg['STATUS_IMAGES_SAVED']}")
                 LOGGER.info("[IMAGE DONE] SKU=%s ROW=%s", sheet_sku or "-", idx)
                 LOGGER.info("[DONE] SKU=%s ROW=%s", sheet_sku or "-", idx)
-            if len(updates_buffer) >= flush_size:
+            if updates_buffer:
                 _flush_updates_buffer(service, api, updates_buffer, f"image-row-{idx}")
             time.sleep(cfg["IMAGE_ROW_DELAY_SECONDS"])
         _flush_updates_buffer(service, api, updates_buffer, "image-final")

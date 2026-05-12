@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import os
 import re
+from collections import Counter
 from typing import Dict, List
 
 from google.oauth2.service_account import Credentials
@@ -112,6 +113,60 @@ def update_cell_by_header(
         return False
 
 
+def normalize_sheet_status(value: str) -> str:
+    """Normalize status text for matching, including hidden whitespace."""
+    text = str(value or "").strip()
+    return re.sub(r"[\s\u200b\u200c\u200d\ufeff]+", "", text)
+
+
+def _status_display(value: str) -> str:
+    text = str(value or "").strip()
+    return text if text else "(빈값)"
+
+
+def _is_upload_ready_status(
+    status: str,
+    *,
+    status_completed: str,
+    status_upload_ready: str,
+    status_thumbnails_done: str,
+) -> bool:
+    normalized = normalize_sheet_status(status)
+    if normalized == normalize_sheet_status(status_completed):
+        return False
+    if normalized in {normalize_sheet_status("업로드중"), "UPLOADING"}:
+        return False
+    return normalized in {
+        normalize_sheet_status(status_upload_ready),
+        normalize_sheet_status(status_thumbnails_done),
+        "THUMBNAILS_DONE",
+        normalize_sheet_status("업로드진행대기"),
+    }
+
+
+def _read_range_values(service, spreadsheet_id: str, range_a1: str) -> List[List[str]]:
+    result = service.spreadsheets().values().get(
+        spreadsheetId=spreadsheet_id,
+        range=range_a1,
+    ).execute()
+    return result.get("values", [])
+
+
+def _read_upload_rows_legacy(
+    service,
+    *,
+    spreadsheet_id: str,
+    sheet_name: str,
+    row_start: int,
+    last_col_letter: str,
+) -> List[List[str]]:
+    return _read_range_values(
+        service,
+        spreadsheet_id,
+        f"'{sheet_name}'!A{row_start}:{last_col_letter}",
+    )
+
+
 def read_upload_rows(
     service,
     *,
@@ -140,106 +195,167 @@ def read_upload_rows(
     last_index = max(max_data_index, status_index if status_index is not None else max_data_index)
     last_col_letter = column_index_to_letter(last_index)
 
+    def build_rows_data(detailed_rows: List[tuple[int, List[str]]]) -> List[Dict[str, str]]:
+        rows_data: List[Dict[str, str]] = []
+        for idx, row in detailed_rows:
+            if specific_row and idx != specific_row:
+                continue
+
+            def cell(col_letter: str) -> str:
+                col_index = column_letter_to_index(col_letter)
+                return row[col_index].strip() if col_index < len(row) and row[col_index] else ""
+
+            def field_cell(field_name: str) -> str:
+                col_letter = upload_columns.get(field_name, "")
+                return cell(col_letter) if col_letter else ""
+
+            def field_label(field_name: str, fallback_label: str) -> str:
+                col_letter = upload_columns.get(field_name, "")
+                return f"{fallback_label}({col_letter}열)" if col_letter else fallback_label
+
+            def cell_by_index(index: int | None) -> str:
+                if index is None:
+                    return ""
+                return row[index].strip() if index < len(row) and row[index] else ""
+
+            url = field_cell("url")
+            product_name = field_cell("product_name_kr")
+            buyma_price = field_cell("buyma_price")
+
+            progress_status = cell_by_index(status_index)
+            ready_status = _is_upload_ready_status(
+                progress_status,
+                status_completed=status_completed,
+                status_upload_ready=status_upload_ready,
+                status_thumbnails_done=status_thumbnails_done,
+            )
+
+            if not url or not product_name or not buyma_price:
+                if (specific_row and idx == specific_row) or ready_status:
+                    missing = []
+                    if not url:
+                        missing.append(field_label("url", "URL"))
+                    if not product_name:
+                        missing.append(field_label("product_name_kr", "상품명"))
+                    if not buyma_price:
+                        missing.append(field_label("buyma_price", "바이마판매가"))
+                    print(f"  {idx}행 제외: 필수값 누락 -> {', '.join(missing)}")
+                continue
+
+            if not specific_row and status_index is not None:
+                if normalize_sheet_status(progress_status) == normalize_sheet_status(status_completed):
+                    print(f"  {idx}행 건너뜀 (진행상태: {progress_status})")
+                    continue
+                if not ready_status:
+                    continue
+
+            cat_large = field_cell("musinsa_category_large")
+            cat_middle = field_cell("musinsa_category_middle")
+            cat_small = field_cell("musinsa_category_small")
+
+            if not (cat_large or cat_middle or cat_small):
+                cat_large = field_cell("category_legacy_large")
+                cat_middle = field_cell("category_legacy_middle")
+                cat_small = field_cell("category_legacy_small")
+
+            rows_data.append(
+                {
+                    "row_num": idx,
+                    "url": url,
+                    "brand": field_cell("brand"),
+                    "brand_en": field_cell("brand_en"),
+                    "product_name_kr": product_name,
+                    "product_name_jp": field_cell("product_name_jp"),
+                    "product_name_en": field_cell("product_name_en"),
+                    "musinsa_sku": field_cell("musinsa_sku"),
+                    "color_kr": field_cell("color_kr"),
+                    "color_en": field_cell("color_en"),
+                    "size": field_cell("size"),
+                    "actual_size": field_cell("actual_size"),
+                    "price_krw": field_cell("price_krw"),
+                    "buyma_price": buyma_price,
+                    "image_paths": field_cell("image_paths"),
+                    "shipping_cost": field_cell("shipping_cost"),
+                    "musinsa_category_large": cat_large,
+                    "musinsa_category_middle": cat_middle,
+                    "musinsa_category_small": cat_small,
+                    "progress_status": progress_status,
+                }
+            )
+        return rows_data
+
     try:
-        result = service.spreadsheets().values().get(
-            spreadsheetId=spreadsheet_id,
-            range=f"'{sheet_name}'!A{row_start}:{last_col_letter}1000",
-        ).execute()
-    except Exception as exc:
-        print(f"시트 읽기 실패: {exc}")
-        return []
+        if specific_row:
+            rows = _read_range_values(
+                service,
+                spreadsheet_id,
+                f"'{sheet_name}'!A{specific_row}:{last_col_letter}{specific_row}",
+            )
+            return build_rows_data([(specific_row, rows[0] if rows else [])])
 
-    rows_data: List[Dict[str, str]] = []
-    for idx, row in enumerate(result.get("values", []), start=row_start):
-        if specific_row and idx != specific_row:
-            continue
+        candidate_rows: List[int] = []
+        if status_index is None:
+            legacy_rows = _read_upload_rows_legacy(
+                service,
+                spreadsheet_id=spreadsheet_id,
+                sheet_name=sheet_name,
+                row_start=row_start,
+                last_col_letter=last_col_letter,
+            )
+            return build_rows_data([(idx, row) for idx, row in enumerate(legacy_rows, start=row_start)])
 
-        def cell(col_letter: str) -> str:
-            col_index = column_letter_to_index(col_letter)
-            return row[col_index].strip() if col_index < len(row) and row[col_index] else ""
-
-        def field_cell(field_name: str) -> str:
-            col_letter = upload_columns.get(field_name, "")
-            return cell(col_letter) if col_letter else ""
-
-        def field_label(field_name: str, fallback_label: str) -> str:
-            col_letter = upload_columns.get(field_name, "")
-            return f"{fallback_label}({col_letter}열)" if col_letter else fallback_label
-
-        def cell_by_index(index: int | None) -> str:
-            if index is None:
-                return ""
-            return row[index].strip() if index < len(row) and row[index] else ""
-
-        url = field_cell("url")
-        product_name = field_cell("product_name_kr")
-        buyma_price = field_cell("buyma_price")
-
-        if not url or not product_name or not buyma_price:
-            if specific_row and idx == specific_row:
-                missing = []
-                if not url:
-                    missing.append(field_label("url", "URL"))
-                if not product_name:
-                    missing.append(field_label("product_name_kr", "상품명"))
-                if not buyma_price:
-                    missing.append(field_label("buyma_price", "바이마판매가"))
-                print(f"  {idx}행 제외: 필수값 누락 -> {', '.join(missing)}")
-            continue
-
-        progress_status = cell_by_index(status_index)
-        normalized_status = (progress_status or "").strip()
-        if not specific_row:
-            if normalized_status == status_completed:
-                print(f"  {idx}행 건너뜀 (진행상태: {progress_status})")
-                continue
-
-            if normalized_status in {"업로드중", "UPLOADING"}:
-                continue
-
-            if status_index is not None and normalized_status not in {
-                status_upload_ready,
-                status_thumbnails_done,
-                "THUMBNAILS_DONE",
-                "업로드진행대기",
-            }:
-                continue
-
-        cat_large = field_cell("musinsa_category_large")
-        cat_middle = field_cell("musinsa_category_middle")
-        cat_small = field_cell("musinsa_category_small")
-
-        if not (cat_large or cat_middle or cat_small):
-            cat_large = field_cell("category_legacy_large")
-            cat_middle = field_cell("category_legacy_middle")
-            cat_small = field_cell("category_legacy_small")
-
-        rows_data.append(
-            {
-                "row_num": idx,
-                "url": url,
-                "brand": field_cell("brand"),
-                "brand_en": field_cell("brand_en"),
-                "product_name_kr": product_name,
-                "product_name_jp": field_cell("product_name_jp"),
-                "product_name_en": field_cell("product_name_en"),
-                "musinsa_sku": field_cell("musinsa_sku"),
-                "color_kr": field_cell("color_kr"),
-                "color_en": field_cell("color_en"),
-                "size": field_cell("size"),
-                "actual_size": field_cell("actual_size"),
-                "price_krw": field_cell("price_krw"),
-                "buyma_price": buyma_price,
-                "image_paths": field_cell("image_paths"),
-                "shipping_cost": field_cell("shipping_cost"),
-                "musinsa_category_large": cat_large,
-                "musinsa_category_middle": cat_middle,
-                "musinsa_category_small": cat_small,
-                "progress_status": progress_status,
-            }
+        status_col = column_index_to_letter(status_index)
+        status_rows = _read_range_values(
+            service,
+            spreadsheet_id,
+            f"'{sheet_name}'!{status_col}{row_start}:{status_col}",
         )
+        status_counts = Counter()
+        for offset, row in enumerate(status_rows):
+            progress_status = row[0] if row else ""
+            normalized_status = normalize_sheet_status(progress_status)
+            if normalized_status:
+                status_counts[_status_display(progress_status)] += 1
+            if _is_upload_ready_status(
+                progress_status,
+                status_completed=status_completed,
+                status_upload_ready=status_upload_ready,
+                status_thumbnails_done=status_thumbnails_done,
+            ):
+                candidate_rows.append(row_start + offset)
+        if candidate_rows:
+            print(f"업로드 후보 진행상태: {len(candidate_rows)}행 ({status_col}열)")
+        else:
+            summary = ", ".join(f"{name}:{count}" for name, count in status_counts.most_common(6)) or "읽힌 상태값 없음"
+            print(f"업로드 후보 없음: 진행상태 {status_col}열에서 대상 상태를 찾지 못했습니다. 상태 분포: {summary}")
 
-    return rows_data
+        detailed_rows: List[tuple[int, List[str]]] = []
+        chunk_size = 80
+        for start in range(0, len(candidate_rows), chunk_size):
+            chunk = candidate_rows[start:start + chunk_size]
+            detail_ranges = [f"'{sheet_name}'!A{row_num}:{last_col_letter}{row_num}" for row_num in chunk]
+            detail_batch = service.spreadsheets().values().batchGet(
+                spreadsheetId=spreadsheet_id,
+                ranges=detail_ranges,
+            ).execute()
+            for row_num, item in zip(chunk, detail_batch.get("valueRanges", [])):
+                values = item.get("values", [])
+                detailed_rows.append((row_num, values[0] if values else []))
+        return build_rows_data(detailed_rows)
+    except Exception as exc:
+        print(f"빠른 시트 읽기 실패, 전체 범위 읽기로 전환: {exc}")
+        try:
+            values = _read_upload_rows_legacy(
+                service,
+                spreadsheet_id=spreadsheet_id,
+                sheet_name=sheet_name,
+                row_start=row_start,
+                last_col_letter=last_col_letter,
+            )
+            return build_rows_data([(idx, row) for idx, row in enumerate(values, start=row_start)])
+        except Exception as fallback_exc:
+            print(f"시트 읽기 실패: {fallback_exc}")
+            return []
 
 
 def extract_spreadsheet_id(raw_value: str) -> str:

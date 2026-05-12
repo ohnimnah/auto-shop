@@ -87,6 +87,8 @@ def build() -> Path:
         "--add-data",
         "app;app",
         "--add-data",
+        "assets;assets",
+        "--add-data",
         "services/crawler;services/crawler",
         "--hidden-import",
         "keyring",

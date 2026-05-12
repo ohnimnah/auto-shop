@@ -1,6 +1,5 @@
 ﻿import os
 import queue
-import random
 import re
 import json
 import base64
@@ -727,7 +726,7 @@ class AutoShopLauncher(tk.Tk):
         )
 
         self.thumb_btn, self.design_watch_btn = _quick_pair(
-            lambda p: self._quick_button(p, "썸네일 1회 실행", "썸네일 일괄 제작", self.theme["purple"], self.run_thumbnail_action, compact=True, auto_pack=False),
+            lambda p: self._quick_button(p, "썸네일 1회 실행", "썸네일 일괄 제작", self.theme["purple"], lambda: self.run_action("thumbnail-create"), compact=True, auto_pack=False),
             lambda p: self._quick_button(p, "썸네일 감시 시작", "썸네일 감시 모드", "#334155", lambda: self._toggle_team_watch("design"), compact=True, auto_pack=False),
         )
 
@@ -1453,9 +1452,6 @@ class AutoShopLauncher(tk.Tk):
         if action == "sheet-config":
             self.configure_sheet_settings()
             return
-        if action == "thumbnail-create":
-            self.run_thumbnail_action()
-            return
         self.run_action(action)
 
     def _is_scout_watch_running(self) -> bool:
@@ -2090,7 +2086,7 @@ class AutoShopLauncher(tk.Tk):
         self.refresh_first_run_wizard()
 
     def _ensure_sheet_config_before_action(self, action: str) -> bool:
-        if action not in {"run", "collect-listings", "watch", "watch-images", "watch-thumbnails", "watch-upload", "upload-review", "upload-auto", "save-images"}:
+        if action not in {"run", "collect-listings", "watch", "watch-images", "watch-thumbnails", "watch-upload", "upload-review", "upload-auto", "save-images", "thumbnail-create"}:
             return True
         cfg = self._load_sheet_config()
         sid = self._normalize_spreadsheet_id(cfg.get("spreadsheet_id", ""))
@@ -2116,129 +2112,6 @@ class AutoShopLauncher(tk.Tk):
             self.logger.emit("BUYMA 계정이 없어 업로드 실행을 중단했습니다.\n", category="buyma", level="WARNING")
             return
         self.action_runner.run(action)
-
-    def _ask_style(self) -> str | None:
-        """split / banner 踰꾪듉 ?좏깮 ?앹뾽. 痍⑥냼 ??None 諛섑솚."""
-        result: list[str | None] = [None]
-        dlg = tk.Toplevel(self)
-        dlg.title("레이아웃 선택")
-        dlg.resizable(False, False)
-        dlg.grab_set()
-        dlg.focus_set()
-
-        tk.Label(dlg, text="썸네일 레이아웃을 선택하세요.", font=("Arial", 11), pady=10).pack()
-
-        desc_frame = tk.Frame(dlg, padx=20, pady=4)
-        desc_frame.pack()
-        tk.Label(desc_frame, text="split  : 좌측 큰 사진 + 우측 2칸 + 하단 텍스트", fg="#555").pack(anchor="w")
-        tk.Label(desc_frame, text="banner : 상단 타이틀 + 중앙 텍스트 + 하단 3칸", fg="#555").pack(anchor="w")
-        tk.Label(desc_frame, text="auto   : split 또는 banner를 자동으로 선택", fg="#555").pack(anchor="w")
-
-        btn_frame = tk.Frame(dlg, padx=20, pady=12)
-        btn_frame.pack()
-
-        def choose(s: str):
-            result[0] = s
-            dlg.destroy()
-
-        ColorButton(btn_frame, text="split", bg="#d97706", command=lambda: choose("split"), padx=22, font=("Arial", 10, "bold")).pack(side=tk.LEFT, padx=8)
-        ColorButton(btn_frame, text="banner", bg="#2563eb", command=lambda: choose("banner"), padx=22, font=("Arial", 10, "bold")).pack(side=tk.LEFT, padx=8)
-        ColorButton(btn_frame, text="자동 선택", bg="#22c55e", command=lambda: choose("auto"), padx=22, font=("Arial", 10, "bold")).pack(side=tk.LEFT, padx=8)
-
-        cancel_frame = tk.Frame(dlg, pady=(0))
-        cancel_frame.pack(pady=(0, 10))
-        ColorButton(cancel_frame, text="취소", bg="#334155", command=dlg.destroy, padx=18, font=("Arial", 10, "bold")).pack()
-
-        # Center the dialog on the launcher window.
-        dlg.update_idletasks()
-        w, h = dlg.winfo_width(), dlg.winfo_height()
-        x = self.winfo_x() + (self.winfo_width() - w) // 2
-        y = self.winfo_y() + (self.winfo_height() - h) // 2
-        dlg.geometry(f"+{x}+{y}")
-
-        self.wait_window(dlg)
-        return result[0]
-
-    def _guess_brand(self, folder_path: str) -> str:
-        name = os.path.basename(folder_path.rstrip("/\\"))
-        # Remove a leading folder sequence like "1. Brand Name".
-        return re.sub(r"^\d+\.\s*", "", name).strip()
-
-    def _fetch_brand_from_sheets(self, folder_path: str) -> str:
-        """Fetch the brand from sheet column D using the numbered image folder."""
-        try:
-            folder_name = os.path.basename(folder_path.rstrip("/\\"))
-            m = re.match(r"^(\d+)\.", folder_name)
-            if not m:
-                return ""
-            idx = int(m.group(1))  # 1-based folder sequence.
-
-            if SCRIPT_DIR not in sys.path:
-                sys.path.insert(0, SCRIPT_DIR)
-            import importlib
-            bu = importlib.import_module("buyma_upload")
-
-            service = bu.get_sheets_service()
-            sheet_name = bu.get_sheet_name(service)
-            result = service.spreadsheets().values().get(
-                spreadsheetId=bu.SPREADSHEET_ID,
-                range=f"'{sheet_name}'!A{bu.ROW_START}:D",
-            ).execute()
-            rows = result.get("values", [])
-            # idx=1 maps to rows[0], the first data row.
-            row = rows[idx - 1] if 0 < idx <= len(rows) else []
-            return row[3].strip() if len(row) > 3 else ""
-        except Exception:
-            return ""
-
-    def run_thumbnail_action(self) -> None:
-        if self.process_manager.is_running():
-            messagebox.showwarning("실행 중", "이미 작업이 실행 중입니다. 먼저 중지해주세요.")
-            return
-
-        folder = filedialog.askdirectory(
-            title="?몃꽕???몄쭛???대?吏 ?대뜑 ?좏깮",
-            initialdir=get_default_images_dir(),
-            mustexist=True,
-        )
-        if not folder:
-            return
-
-        sheets_brand = self._fetch_brand_from_sheets(folder)
-        default_brand = sheets_brand or self._guess_brand(folder)
-        brand = simpledialog.askstring(
-            "釉뚮옖?쒕챸",
-            "?곷떒 釉뚮옖?쒕챸???낅젰?섏꽭??",
-            initialvalue=default_brand,
-            parent=self,
-        )
-        if brand is None:
-            return
-        brand = brand.strip() or default_brand or "BRAND"
-
-        style = self._ask_style()
-        if style is None:
-            return
-        if style == "auto":
-            style = random.choice(["split", "banner"])
-            self.logger.emit(f"썸네일 레이아웃 자동 선택: {style}\n", category="thumbnail")
-
-        python_cmd = resolve_python_executable()
-        footer = f"{brand} / {self._get_thumbnail_footer_suffix()}"
-        command = [
-            python_cmd,
-            os.path.join(SCRIPT_DIR, "make_thumbnails.py"),
-            folder,
-            "--style",
-            style,
-            "--brand",
-            brand,
-            "--footer",
-            footer,
-        ]
-        if self._get_thumbnail_blur_faces_enabled():
-            command.append("--blur-face")
-        self.action_runner.run_command(command, action="thumbnail-create", stage_key="design")
 
     def _drain_log_queue(self) -> None:
         try:

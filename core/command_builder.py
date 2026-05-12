@@ -49,6 +49,8 @@ class CommandBuilder:
             return self.build_unbuffered_python_command("main.py", "--watch", "--download-images")
         if action == "watch-thumbnails":
             return self.build_unbuffered_python_command("main.py", "--watch", "--make-thumbnails")
+        if action == "thumbnail-create":
+            return self.build_unbuffered_python_command("main.py", "--make-thumbnails")
         if action == "watch-upload":
             return self.build_unbuffered_python_command("buyma_upload.py", "--watch", "--mode", "auto")
         if action == "save-images":
@@ -59,4 +61,3 @@ class CommandBuilder:
             return self.build_unbuffered_python_command("buyma_upload.py", "--mode", "auto")
 
         raise ValueError(f"Unknown action: {action}")
-

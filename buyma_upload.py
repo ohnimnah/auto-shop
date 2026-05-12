@@ -1046,7 +1046,7 @@ def main():
             if args.row:
                 print(f"감시 모드에서는 --row({args.row})를 고정하지 않고 전체 대기 행을 순차 처리합니다.")
             while True:
-                upload_products(specific_row=watch_row, upload_mode=args.mode, max_items=1, interactive=False)
+                upload_products(specific_row=watch_row, upload_mode=args.mode, max_items=0, interactive=False)
                 print(f"다음 업로드 점검까지 {interval}초 대기...")
                 time.sleep(interval)
         else:
