@@ -1,4 +1,4 @@
-"""Telegram notification helpers for operational events."""
+﻿"""Telegram notification helpers for operational events."""
 
 from __future__ import annotations
 
@@ -13,7 +13,7 @@ from typing import Any
 
 try:
     import requests
-except Exception:  # pragma: no cover - notification must never block app startup.
+except Exception:  # pragma: no cover
     requests = None  # type: ignore[assignment]
 
 from app.security import KeyringTokenStore
@@ -23,11 +23,56 @@ from config.config_service import DEFAULT_PROFILE_NAME, load_config
 DEDUP_SECONDS = 300
 MAX_FIELD_CHARS = 120
 MAX_MESSAGE_CHARS = 1200
-MESSAGE_DIVIDER = "────────────"
+MESSAGE_DIVIDER = "------------"
 
 _DEDUP_CACHE: dict[str, float] = {}
+_TELEGRAM_TOKEN_RE = re.compile(r"^\d{6,}:[A-Za-z0-9_-]{20,}$")
+_MISSING_TRANSLATION_CACHE: set[str] = set()
+_MISSING_TRANSLATION_LOG_PATH = os.path.join("logs", "missing_buyma_category_translations.jsonl")
 
-
+BUYMA_CATEGORY_KR_MAP = {
+    "メンズファッション": "남성패션",
+    "レディースファッション": "여성패션",
+    "トップス": "상의",
+    "パンツ・ボトムス": "하의",
+    "アウター・ジャケット": "아우터/재킷",
+    "靴・ブーツ・サンダル": "신발/부츠/샌들",
+    "バッグ・カバン": "가방",
+    "アクセサリー": "액세서리",
+    "腕時計": "시계",
+    "財布・雑貨": "지갑/잡화",
+    "アイウェア": "아이웨어",
+    "帽子": "모자",
+    "ファッション雑貨・小物": "패션잡화/소품",
+    "スマホケース・テックアクセサリー": "폰케이스/테크액세서리",
+    "インナー・ルームウェア": "이너/홈웨어",
+    "水着・ビーチグッズ": "수영복/비치용품",
+    "フィットネス": "피트니스",
+    "スーツ": "수트",
+    "セットアップ": "셋업",
+    "ゴルフ": "골프",
+    "その他ファッション": "기타패션",
+    "サングラス": "선글라스",
+    "ベルト": "벨트",
+    "キャップ": "캡",
+    "ハット": "햇",
+    "ニットキャップ・ビーニー": "니트캡/비니",
+    "マフラー・ストール": "머플러/스토ール",
+    "ファッション雑貨・小物その他": "패션잡화/소품 기타",
+    "Tシャツ・カットソー": "티셔츠/컷소우",
+    "パーカー・フーディ": "후디/파카",
+    "スウェット・トレーナー": "스웨트/트레이너",
+    "シャツ": "셔츠",
+    "ニット・セーター": "니트/스웨터",
+    "ルームウェア・パジャマ": "룸웨어/파자마",
+    "ブラジャー": "브라",
+    "ショーツ": "팬티/쇼츠",
+    "ブラジャー＆ショーツ": "브라&팬티 세트",
+    "スリップ・インナー・キャミ": "슬립/이너/캐미",
+    "スパッツ・レギンス": "스패츠/레깅스",
+    "タイツ・ソックス": "타이즈/삭스",
+    "インナー・ルームウェアその他": "이너/룸웨어 기타",
+}
 def _read_env_file() -> dict[str, str]:
     values: dict[str, str] = {}
     local_app_data = os.environ.get("LOCALAPPDATA", "").strip()
@@ -85,10 +130,7 @@ def _load_token(config: dict[str, Any], env_file: dict[str, str]) -> str:
         account_keys.append(fallback_key)
     account_keys.append("bot_token")
     for account_key in account_keys:
-        token = KeyringTokenStore(
-            service_name="auto_shop.telegram",
-            account_key=account_key,
-        ).load()
+        token = KeyringTokenStore(service_name="auto_shop.telegram", account_key=account_key).load()
         if token:
             return token
     return ""
@@ -105,27 +147,30 @@ def _load_chat_id(config: dict[str, Any], env_file: dict[str, str]) -> str:
     ).strip()
 
 
+def _is_valid_telegram_token(token: str) -> bool:
+    value = (token or "").strip()
+    if not value:
+        return False
+    lowered = value.lower()
+    if "setx " in lowered or "http_proxy" in lowered or "https_proxy" in lowered:
+        return False
+    return bool(_TELEGRAM_TOKEN_RE.fullmatch(value))
+
+
+def _is_valid_chat_id(chat_id: str) -> bool:
+    value = (chat_id or "").strip()
+    if not value:
+        return False
+    if value.startswith("@"):
+        return len(value) > 1 and " " not in value
+    return bool(re.fullmatch(r"-?\d{3,}", value))
+
+
 def _is_enabled(config: dict[str, Any]) -> bool:
     env_enabled = os.environ.get("TELEGRAM_ENABLED") or os.environ.get("AUTO_SHOP_TELEGRAM_ENABLED")
     if env_enabled is not None:
         return env_enabled.strip().lower() in {"1", "true", "yes", "y", "on"}
     return bool(config.get("enabled", False))
-
-
-def _truncate(value: Any, limit: int = MAX_FIELD_CHARS) -> str:
-    text = _sanitize_text(" ".join(str(value or "").split()))
-    if len(text) <= limit:
-        return text
-    return text[: max(0, limit - 3)].rstrip() + "..."
-
-
-def _truncate_message(value: Any, limit: int = MAX_MESSAGE_CHARS) -> str:
-    text = _sanitize_text(str(value or "").replace("\r\n", "\n").replace("\r", "\n"))
-    lines = [" ".join(line.split()) for line in text.split("\n")]
-    text = "\n".join(lines).strip()
-    if len(text) <= limit:
-        return text
-    return text[: max(0, limit - 3)].rstrip() + "..."
 
 
 def _sanitize_text(text: str) -> str:
@@ -143,6 +188,22 @@ def _sanitize_text(text: str) -> str:
     )
     value = re.sub(r"\b\d{6,}:[A-Za-z0-9_-]{20,}\b", "[masked-telegram-token]", value)
     return value
+
+
+def _truncate(value: Any, limit: int = MAX_FIELD_CHARS) -> str:
+    text = _sanitize_text(" ".join(str(value or "").split()))
+    if len(text) <= limit:
+        return text
+    return text[: max(0, limit - 3)].rstrip() + "..."
+
+
+def _truncate_message(value: Any, limit: int = MAX_MESSAGE_CHARS) -> str:
+    text = _sanitize_text(str(value or "").replace("\r\n", "\n").replace("\r", "\n"))
+    lines = [" ".join(line.split()) for line in text.split("\n")]
+    text = "\n".join(lines).strip()
+    if len(text) <= limit:
+        return text
+    return text[: max(0, limit - 3)].rstrip() + "..."
 
 
 def _message_key(text: str) -> str:
@@ -163,7 +224,7 @@ def _deduped(text: str) -> bool:
 
 
 def send_message(text: str) -> bool:
-    """Send a Telegram message if configured; never raise into main work."""
+    """Send a Telegram message if configured; never raise into main flow."""
     try:
         config = _load_telegram_config()
         env_file = _read_env_file()
@@ -171,16 +232,21 @@ def send_message(text: str) -> bool:
         chat_id = _load_chat_id(config, env_file)
         if not _is_enabled(config) or not token or not chat_id or requests is None:
             return False
+        if not _is_valid_telegram_token(token) or not _is_valid_chat_id(chat_id):
+            return False
 
         message = _truncate_message(text, MAX_MESSAGE_CHARS)
         if _deduped(message):
             return False
 
-        response = requests.post(
-            f"https://api.telegram.org/bot{token}/sendMessage",
-            data={"chat_id": chat_id, "text": message},
-            timeout=10,
-        )
+        with requests.Session() as session:
+            # Ignore broken OS proxy env values.
+            session.trust_env = False
+            response = session.post(
+                f"https://api.telegram.org/bot{token}/sendMessage",
+                data={"chat_id": chat_id, "text": message},
+                timeout=10,
+            )
         response.raise_for_status()
         return True
     except Exception:
@@ -188,7 +254,7 @@ def send_message(text: str) -> bool:
 
 
 def get_notification_status() -> dict[str, bool | str]:
-    """Return non-sensitive Telegram notification configuration status."""
+    """Return non-sensitive Telegram configuration status."""
     config = _load_telegram_config()
     env_file = _read_env_file()
     token = _load_token(config, env_file)
@@ -215,7 +281,7 @@ def notify_job_started(job_name: str) -> bool:
 def notify_job_finished(job_name: str, success_count: int, fail_count: int, duration: str | float | int) -> bool:
     success = int(success_count or 0)
     fail = int(fail_count or 0)
-    title = "✅ 작업 완료" if fail == 0 else "⚠️ 작업 완료"
+    title = "✅ 작업 완료" if fail == 0 else "⚠️ 작업 완료(실패 포함)"
     return send_message(
         f"{title}\n"
         f"{MESSAGE_DIVIDER}\n"
@@ -227,13 +293,19 @@ def notify_job_finished(job_name: str, success_count: int, fail_count: int, dura
 
 
 def notify_upload_success(product: dict[str, Any]) -> bool:
+    category_child = _extract_buyma_child_category(product.get("category"))
+    category = _truncate(category_child)
+    category_kr = _truncate(_translate_buyma_category_to_korean(category_child))
+    category_text = category
+    if category_kr:
+        category_text = f"{category} ({category_kr})" if category else category_kr
     return send_message(
         "✅ BUYMA 업로드 성공\n"
         f"{MESSAGE_DIVIDER}\n"
         f"상품명: {_truncate(product.get('product_name') or product.get('product_name_kr'))}\n\n"
         f"브랜드: {_truncate(product.get('brand'))}\n"
         f"가격: {_truncate(product.get('price') or product.get('buyma_price'))}\n"
-        f"카테고리: {_truncate(product.get('category'))}"
+        f"카테고리: {category_text}"
     )
 
 
@@ -248,7 +320,7 @@ def notify_upload_failed(product: dict[str, Any], error: Any) -> bool:
 
 def notify_critical_error(module_name: str, error: Any) -> bool:
     return send_message(
-        "🚨 치명적 에러\n"
+        "🔥 치명적 오류\n"
         f"{MESSAGE_DIVIDER}\n"
         f"위치: {_truncate(module_name)}\n\n"
         f"내용: {_truncate(error, 240)}"
@@ -273,13 +345,51 @@ def _format_duration(duration: str | float | int) -> str:
     return f"{rem}초"
 
 
-"""
-사용 예시:
+def _translate_buyma_category_to_korean(category_text: Any) -> str:
+    raw = str(category_text or "").strip()
+    if not raw:
+        return ""
+    # Handle common path separators used by logs/messages.
+    parts = [part.strip() for part in re.split(r"\s*>\s*", raw) if part.strip()]
+    if not parts:
+        return ""
+    translated = []
+    for part in parts:
+        mapped = BUYMA_CATEGORY_KR_MAP.get(part)
+        if mapped is None:
+            _log_missing_buyma_category_translation(part)
+            translated.append(part)
+        else:
+            translated.append(mapped)
+    return " > ".join(translated)
 
-notify_job_started("BUYMA 업로드")
-notify_job_finished("이미지/썸네일 처리", success_count=38, fail_count=2, duration="12분")
-notify_upload_success({"product_name": "상품명", "brand": "BRAND", "buyma_price": "12000", "category": "トップス"})
-notify_upload_failed({"product_name": "상품명"}, "가격 입력 필드를 찾을 수 없습니다")
-notify_critical_error("buyma_upload", "ChromeDriver start failed")
-notify_emergency_stop("사용자가 전체 중지를 눌렀습니다")
-"""
+
+def _extract_buyma_child_category(category_text: Any) -> str:
+    raw = str(category_text or "").strip()
+    if not raw:
+        return ""
+    parts = [part.strip() for part in re.split(r"\s*>\s*", raw) if part.strip()]
+    if parts:
+        return parts[-1]
+    return raw
+
+
+def _log_missing_buyma_category_translation(category_part: str) -> None:
+    key = (category_part or "").strip()
+    if not key:
+        return
+    if key in _MISSING_TRANSLATION_CACHE:
+        return
+    _MISSING_TRANSLATION_CACHE.add(key)
+    try:
+        os.makedirs(os.path.dirname(_MISSING_TRANSLATION_LOG_PATH), exist_ok=True)
+        payload = {
+            "ts": datetime.now().isoformat(),
+            "category_part": key,
+            "event": "missing_buyma_translation",
+        }
+        with open(_MISSING_TRANSLATION_LOG_PATH, "a", encoding="utf-8") as fp:
+            fp.write(json.dumps(payload, ensure_ascii=False) + "\n")
+    except Exception:
+        return
+

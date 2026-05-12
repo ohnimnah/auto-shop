@@ -62,9 +62,10 @@ CATEGORY_FALLBACK_RULES: List[Tuple[str, List[str], StandardCategory]] = [
     ("padding", ["padding", "puffer", "down jacket", "패딩"], StandardCategory.OUTER_PADDING),
     ("jacket", ["jacket", "자켓", "재킷"], StandardCategory.OUTER_JACKET),
     ("bag", ["bag", "백", "토트", "숄더백", "crossbody"], StandardCategory.BAG_SHOULDER),
-    ("cap", ["cap", "hat", "beanie", "모자", "비니"], StandardCategory.ACC_CAP),
+    ("beanie", ["beanie", "비니", "니트모자"], StandardCategory.ACC_BEANIE),
+    ("cap", ["cap", "hat", "캡", "볼캡"], StandardCategory.ACC_CAP),
     ("belt", ["belt", "벨트"], StandardCategory.ACC_BELT),
-    ("sunglasses", ["sunglasses", "선글라스"], StandardCategory.ACC_EYEWEAR),
+    ("sunglasses", ["sunglasses", "선글라스", "썬글라스"], StandardCategory.ACC_EYEWEAR),
     ("socks", ["socks", "sock", "양말"], StandardCategory.INNER_UNDERWEAR),
     ("homewear", ["홈웨어", "homewear", "lounge wear", "loungewear", "잠옷", "파자마", "pajama"], StandardCategory.HOME_PAJAMA),
     ("innerwear", ["이너", "이너프리", "inner", "innerwear", "underwear", "속옷", "속바지", "브라", "bra", "팬티", "panty", "panties", "padded"], StandardCategory.INNER_UNDERWEAR),
@@ -87,6 +88,11 @@ MUSINSA_CATEGORY_OVERRIDES: List[Tuple[Tuple[str, ...], StandardCategory]] = [
     (("팬츠", "반바지"), StandardCategory.PANTS_SHORTS),
     (("bottom", "short"), StandardCategory.PANTS_SHORTS),
     (("pants", "short"), StandardCategory.PANTS_SHORTS),
+    (("선글라스",), StandardCategory.ACC_EYEWEAR),
+    (("썬글라스",), StandardCategory.ACC_EYEWEAR),
+    (("sunglasses",), StandardCategory.ACC_EYEWEAR),
+    (("eyewear",), StandardCategory.ACC_EYEWEAR),
+    (("안경",), StandardCategory.ACC_EYEWEAR),
 ]
 
 SKIRT_TOKENS = ("미니스커트", "롱스커트", "스커트", "치마", "skirt")
@@ -129,6 +135,24 @@ def _contains_keyword(text: str, keyword: str) -> bool:
 def _resolve_from_musinsa_category_text(text: str) -> Optional[StandardCategory]:
     normalized = _normalize_text(text)
     compact = normalized.replace(" ", "")
+    # Guardrail: shirt/blouse labels should not be downgraded to t-shirt.
+    if any(_contains_keyword(normalized, token) for token in ("셔츠", "블라우스", "남방", "shirt", "blouse")):
+        if _contains_keyword(normalized, "블라우스") or _contains_keyword(normalized, "blouse"):
+            return StandardCategory.TOP_BLOUSE
+        return StandardCategory.TOP_SHIRT
+
+    # Guardrail: mixed labels like "속옷/홈웨어" should prefer underwear.
+    has_underwear_token = any(
+        _contains_keyword(normalized, token)
+        for token in ("속옷", "언더웨어", "이너웨어", "innerwear", "underwear", "브라", "팬티", "속바지")
+    )
+    has_homewear_token = any(
+        _contains_keyword(normalized, token)
+        for token in ("홈웨어", "잠옷", "파자마", "homewear", "pajama", "loungewear")
+    )
+    if has_underwear_token and has_homewear_token:
+        return StandardCategory.INNER_UNDERWEAR
+
     for keywords, category in MUSINSA_CATEGORY_OVERRIDES:
         if all(_contains_keyword(normalized, keyword) or keyword.replace(" ", "") in compact for keyword in keywords):
             return category
@@ -166,6 +190,11 @@ def classify_category_with_reason(
     has_skirt = any(_contains_keyword(force_text, token) for token in SKIRT_TOKENS)
     if has_dress and not has_skirt:
         return StandardCategory.DRESS, "dress_keyword_override"
+
+    # Guardrail: beanie should not fall into generic cap/hat buckets.
+    beanie_tokens = ("비니", "beanie", "니트모자", "니트 캡")
+    if any(_contains_keyword(force_text, token) for token in beanie_tokens):
+        return StandardCategory.ACC_BEANIE, "beanie_keyword_override"
 
     # If caller already resolved a concrete category from sheet/mapping,
     # keep it unless stronger domain-specific guardrails above overrode it.

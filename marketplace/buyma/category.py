@@ -11,6 +11,7 @@ from marketplace.buyma.standard_category import (
     StandardCategory,
     build_combined_text,
     explain_standard_category_mapping,
+    get_buyma_parent_category,
     get_standard_category_spec,
     map_standard_to_buyma_middle_and_subcategory,
     normalize_standard_category,
@@ -92,7 +93,7 @@ CATEGORY_RECOVERY_ALIASES: Dict[str, List[str]] = {
 
 COMMON_PARENT_FALLBACK_MIDDLES: Dict[str, List[str]] = {
     "レディースファッション": ["トップス", "アウター", "ボトムス", "ワンピース・オールインワン", "靴・シューズ", "バッグ・カバン", "ファッション雑貨・小物"],
-    "メンズファッション": ["トップス", "アウター・ジャケット", "パンツ・ボトムス", "靴・ブーツ・サンダル", "バッグ・カバン", "ファッション雑貨・小物", "その他ファッション"],
+    "メンズファッション": ["トップス", "アウター・ジャケット", "パンツ・ボトムス", "靴・ブーツ・サンダル", "バッグ・カバン", "アクセサリー", "腕時計", "財布・雑貨", "アイウェア", "帽子", "ファッション雑貨・小物", "スマホケース・テックアクセサリー", "インナー・ルームウェア", "水着・ビーチグッズ", "フィットネス", "スーツ", "セットアップ", "ゴルフ", "その他ファッション"],
 }
 
 
@@ -185,6 +186,13 @@ def normalize_sheet_category_labels(cat1: str, cat2: str, cat3: str) -> Tuple[st
         "구두": "パンプス",
         "펌프스": "パンプス",
         "플랫슈즈": "フラットシューズ",
+        "선글라스": "サングラス",
+        "썬글라스": "サングラス",
+        "모자": "ハット",
+        "비니": "ニットキャップ・ビーニー",
+        "캡": "キャップ",
+        "볼캡": "キャップ",
+        "버킷햇": "ハット",
         "티셔츠": "Tシャツ・カットソー",
         "후드": "パーカー・フーディ",
         "후드티": "パーカー・フーディ",
@@ -297,6 +305,19 @@ def build_buyma_category_plan(
         is_mens=is_mens_category,
         combined_text=combined_text,
     )
+    # Guardrail: eyewear frequently suffers from noisy sheet mappings.
+    # Force canonical spec path to avoid wrong child categories like "ベルト".
+    if standard_category == StandardCategory.ACC_EYEWEAR:
+        spec_mid, spec_child = map_standard_to_buyma_middle_and_subcategory(
+            standard_category,
+            combined_text,
+            is_mens=is_mens_category,
+        )
+        mapped_parent = get_buyma_parent_category(is_mens=is_mens_category)
+        if spec_mid:
+            mapped_cat2 = spec_mid
+        if spec_child:
+            mapped_cat3 = spec_child
     # 방어 로직: 매핑표가 child 값을 middle에 넣은 경우(예: パーカー・フーディ > パーカー・フーディ)
     # legacy middle/child 조합으로 자동 보정해 UI 선택 실패를 줄인다.
     if mapped_cat2 and mapped_cat3 and mapped_cat2 == mapped_cat3:
@@ -431,6 +452,17 @@ def _category_recovery_candidates(
     elif item_index == 2:
         if spec:
             candidates.append(spec.child)
+        # Precision guard: for categories with strict child labels, do not
+        # broaden to sibling children under the same middle category.
+        strict_child_categories = {
+            StandardCategory.ACC_EYEWEAR,
+            StandardCategory.ACC_BEANIE,
+            StandardCategory.ACC_BELT,
+            StandardCategory.ACC_CAP,
+            StandardCategory.ACC_HAT,
+        }
+        if standard_category in strict_child_categories:
+            return _dedupe_keep_order([value for value in candidates if value and "その他" not in value])
         target_middle = middle or category_plan.get("cat2", "")
         for other_spec in STANDARD_CATEGORY_SPECS.values():
             if other_spec.middle(is_mens=is_mens) == target_middle:

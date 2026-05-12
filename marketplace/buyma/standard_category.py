@@ -1,4 +1,4 @@
-"""Semantic StandardCategory resolver for BUYMA category correction layer."""
+﻿"""Semantic StandardCategory resolver for BUYMA category correction layer."""
 
 from __future__ import annotations
 
@@ -118,6 +118,7 @@ MIDDLE_BAGS_WOMEN = "バッグ・カバン"
 MIDDLE_BAGS_MEN = "バッグ・カバン"
 MIDDLE_ACCESSORIES_WOMEN = "ファッション雑貨・小物"
 MIDDLE_ACCESSORIES_MEN = "ファッション雑貨・小物"
+MIDDLE_EYEWEAR_MEN = "アイウェア"
 MIDDLE_HATS = "帽子"
 MIDDLE_WATCH = "腕時計"
 
@@ -182,7 +183,7 @@ STANDARD_CATEGORY_SPECS = {
     StandardCategory.ACC_BELT: StandardCategorySpec(StandardCategory.ACC_BELT, MIDDLE_ACCESSORIES_WOMEN, MIDDLE_ACCESSORIES_MEN, "ベルト", ("벨트", "belt")),
     StandardCategory.ACC_SCARF: StandardCategorySpec(StandardCategory.ACC_SCARF, MIDDLE_ACCESSORIES_WOMEN, MIDDLE_ACCESSORIES_MEN, "マフラー・ストール", ("머플러", "스카프", "scarf", "muffler")),
     StandardCategory.ACC_JEWELRY: StandardCategorySpec(StandardCategory.ACC_JEWELRY, "アクセサリー", "アクセサリー", "", ("목걸이", "반지", "귀걸이", "팔찌", "necklace", "ring", "earring", "bracelet")),
-    StandardCategory.ACC_EYEWEAR: StandardCategorySpec(StandardCategory.ACC_EYEWEAR, MIDDLE_ACCESSORIES_WOMEN, MIDDLE_ACCESSORIES_MEN, "サングラス", ("선글라스", "안경", "sunglasses", "eyewear")),
+    StandardCategory.ACC_EYEWEAR: StandardCategorySpec(StandardCategory.ACC_EYEWEAR, MIDDLE_ACCESSORIES_WOMEN, MIDDLE_EYEWEAR_MEN, "サングラス", ("선글라스", "안경", "sunglasses", "eyewear")),
     StandardCategory.ACC_WATCH: StandardCategorySpec(StandardCategory.ACC_WATCH, MIDDLE_WATCH, MIDDLE_WATCH, "", ("시계", "watch")),
 }
 
@@ -305,10 +306,10 @@ RESOLUTION_PRIORITY: Tuple[StandardCategory, ...] = (
     StandardCategory.ACC_BELT,
     StandardCategory.TOP_HOODIE,
     StandardCategory.TOP_SWEAT,
-    StandardCategory.TOP_LONG_SLEEVE,
-    StandardCategory.TOP_TSHIRT,
     StandardCategory.TOP_BLOUSE,
     StandardCategory.TOP_SHIRT,
+    StandardCategory.TOP_LONG_SLEEVE,
+    StandardCategory.TOP_TSHIRT,
     StandardCategory.TOP_KNIT,
     StandardCategory.TOP_CARDIGAN,
     StandardCategory.TOP_POLO,

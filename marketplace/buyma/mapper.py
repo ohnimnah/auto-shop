@@ -47,6 +47,71 @@ def truncate_buyma_title_text(text: str, limit: int) -> str:
     return body + ellipsis
 
 
+def _extract_keyword_tokens(text: str) -> List[str]:
+    """Extract compact, high-signal tokens for long title fallback."""
+    raw = normalize_buyma_title_text(text)
+    if not raw:
+        return []
+    # Keep alnum model codes and Korean words.
+    tokens = re.findall(r"[A-Za-z0-9]+(?:[-_/][A-Za-z0-9]+)*|[가-힣]+", raw)
+    stopwords = {
+        "for", "with", "and", "the", "a", "an", "of", "in", "on", "to",
+        "남성", "여성", "키즈", "공용", "정품", "신상",
+    }
+    out: List[str] = []
+    seen = set()
+    for token in tokens:
+        norm = token.lower().strip()
+        if not norm or norm in stopwords:
+            continue
+        if norm in seen:
+            continue
+        seen.add(norm)
+        out.append(token.strip())
+    return out
+
+
+def build_buyma_keyword_title(brand_en: str, name_en: str, color_en: str, max_length: int) -> str:
+    """Build keyword-only title for over-limit cases (no ellipsis)."""
+    brand = normalize_buyma_title_text(brand_en)
+    name = normalize_buyma_title_text(name_en)
+    color = normalize_buyma_title_text(color_en)
+
+    tokens: List[str] = []
+    if brand:
+        tokens.extend(_extract_keyword_tokens(brand))
+    tokens.extend(_extract_keyword_tokens(name))
+    if color:
+        tokens.extend(_extract_keyword_tokens(color))
+
+    deduped: List[str] = []
+    seen = set()
+    for token in tokens:
+        key = token.lower()
+        if key in seen:
+            continue
+        seen.add(key)
+        deduped.append(token)
+
+    if not deduped:
+        return slice_buyma_title_by_units(name or brand or color, max_length).strip()
+
+    if max_length <= 0:
+        return " ".join(deduped).strip()
+
+    selected: List[str] = []
+    for token in deduped:
+        candidate = normalize_buyma_title_text(" ".join([*selected, token]))
+        if buyma_title_units(candidate) <= max_length:
+            selected.append(token)
+        elif not selected:
+            selected.append(slice_buyma_title_by_units(token, max_length))
+            break
+        else:
+            break
+    return normalize_buyma_title_text(" ".join(selected))
+
+
 def build_buyma_product_title(brand_en: str, name_en: str, color_en: str, max_length: int = 0) -> str:
     brand_en = normalize_buyma_title_text(brand_en)
     name_en = normalize_buyma_title_text(name_en)
@@ -88,9 +153,12 @@ def build_buyma_product_title(brand_en: str, name_en: str, color_en: str, max_le
         for candidate in unique_candidates:
             if buyma_title_units(candidate) <= max_length:
                 return candidate
+        keyword_title = build_buyma_keyword_title(brand_en, name_en, color_en, max_length)
+        if keyword_title:
+            return keyword_title
         if name_en:
-            return truncate_buyma_title_text(name_en, max_length)
-        return truncate_buyma_title_text(unique_candidates[0] if unique_candidates else "", max_length)
+            return slice_buyma_title_by_units(name_en, max_length)
+        return slice_buyma_title_by_units(unique_candidates[0] if unique_candidates else "", max_length)
 
     return unique_candidates[0] if unique_candidates else ""
 
@@ -105,7 +173,7 @@ def build_buyma_title_retry_candidates(brand_en: str, name_en: str, color_en: st
         if not text:
             return ""
         if max_length > 0 and buyma_title_units(text) > max_length:
-            return truncate_buyma_title_text(text, max_length)
+            return build_buyma_keyword_title(brand, text, color, max_length)
         return text
 
     candidates: List[str] = []
@@ -115,9 +183,9 @@ def build_buyma_title_retry_candidates(brand_en: str, name_en: str, color_en: st
 
     base_name = name
     if max_length > 0:
-        candidates.append(truncate_buyma_title_text(base_name, max_length))
-        candidates.append(truncate_buyma_title_text(base_name, max(10, max_length - 3)))
-        candidates.append(truncate_buyma_title_text(base_name, max(8, max_length - 6)))
+        candidates.append(build_buyma_keyword_title(brand, base_name, color, max_length))
+        candidates.append(build_buyma_keyword_title("", base_name, color, max(10, max_length - 3)))
+        candidates.append(build_buyma_keyword_title("", base_name, "", max(8, max_length - 6)))
     else:
         candidates.append(truncate_buyma_title_text(base_name, 60))
         candidates.append(truncate_buyma_title_text(base_name, 45))
