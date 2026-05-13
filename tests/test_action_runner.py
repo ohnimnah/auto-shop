@@ -1,6 +1,9 @@
 import sys
 import time
+import tempfile
 import unittest
+from pathlib import Path
+from unittest.mock import patch
 
 from core.action_runner import ActionRunner
 from core.process_manager import ProcessManager
@@ -9,7 +12,7 @@ from state.app_state import AppLogger, AppState
 
 
 class ActionRunnerTests(unittest.TestCase):
-    def _runner(self, command_builder, policy=None):
+    def _runner(self, command_builder, policy=None, buyma_account_provider=None, owner_provider=None):
         state = AppState()
         logger = AppLogger()
         events = []
@@ -22,6 +25,8 @@ class ActionRunnerTests(unittest.TestCase):
             process_manager=manager,
             command_builder=command_builder,
             ensure_ready=lambda _action: True,
+            buyma_account_provider=buyma_account_provider,
+            owner_provider=owner_provider,
             pipeline_service=LauncherPipelineService(policy),
         )
         return runner, state, manager, events
@@ -65,6 +70,61 @@ class ActionRunnerTests(unittest.TestCase):
         self.assertFalse(state.team_watch_enabled["assets"])
         self.assertEqual(state.pipeline_status["assets"], "실패")
         self.assertTrue(any("TEAM_WATCH_FAILURE_LIMIT" in event.message for event in events))
+
+    def test_same_buyma_account_upload_is_blocked_by_lock(self):
+        with tempfile.TemporaryDirectory() as tmp, patch.dict("os.environ", {"AUTO_SHOP_LOCK_DIR": tmp}, clear=False):
+            command = lambda _action: [sys.executable, "-u", "-c", "import time; time.sleep(1)"]
+            runner_a, _state_a, _manager_a, _events_a = self._runner(
+                command,
+                buyma_account_provider=lambda: "main@example.com",
+                owner_provider=lambda: "형",
+            )
+            runner_b, state_b, _manager_b, events_b = self._runner(
+                command,
+                buyma_account_provider=lambda: "main@example.com",
+                owner_provider=lambda: "누나",
+            )
+
+            self.assertTrue(runner_a.run("upload-auto"))
+            self.assertFalse(runner_b.run("upload-auto"))
+            runner_a.stop()
+
+            self.assertEqual(state_b.status_text, "업로드 중복 차단")
+            self.assertTrue(any("BUYMA 업로드 lock" in event.message for event in events_b))
+
+    def test_different_buyma_account_uploads_are_allowed_by_lock(self):
+        with tempfile.TemporaryDirectory() as tmp, patch.dict("os.environ", {"AUTO_SHOP_LOCK_DIR": tmp}, clear=False):
+            command = lambda _action: [sys.executable, "-u", "-c", "import time; time.sleep(1)"]
+            runner_a, _state_a, _manager_a, _events_a = self._runner(
+                command,
+                buyma_account_provider=lambda: "main@example.com",
+                owner_provider=lambda: "형",
+            )
+            runner_b, _state_b, _manager_b, _events_b = self._runner(
+                command,
+                buyma_account_provider=lambda: "sub@example.com",
+                owner_provider=lambda: "누나",
+            )
+
+            self.assertTrue(runner_a.run("upload-auto"))
+            self.assertTrue(runner_b.run("upload-auto"))
+            runner_a.stop()
+            runner_b.stop()
+
+    def test_upload_lock_is_released_after_process_exception(self):
+        with tempfile.TemporaryDirectory() as tmp, patch.dict("os.environ", {"AUTO_SHOP_LOCK_DIR": tmp}, clear=False):
+            def bad_command(_action):
+                raise RuntimeError("boom")
+
+            runner, _state, _manager, _events = self._runner(
+                bad_command,
+                buyma_account_provider=lambda: "main@example.com",
+                owner_provider=lambda: "형",
+            )
+
+            self.assertFalse(runner.run("upload-auto"))
+
+            self.assertFalse(list(Path(tmp).glob("upload_*.lock")))
 
 
 if __name__ == "__main__":

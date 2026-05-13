@@ -7,12 +7,14 @@ from typing import Callable
 
 from core.errors import AppError, ErrorCode
 from core.process_manager import ProcessManager
+from services.lock_service import acquire_upload_lock, build_upload_account_id, release_upload_lock
 from services.pipeline_service import LauncherPipelineService
 from services.telegram_service import (
     notify_critical_error,
     notify_emergency_stop,
     notify_job_finished,
     notify_job_started,
+    notify_upload_locked,
 )
 from state.app_state import AppLogger, AppState, LogEvent
 
@@ -27,6 +29,8 @@ class ActionRunner:
         process_manager: ProcessManager,
         command_builder: Callable[[str], list[str]],
         ensure_ready: Callable[[str], bool],
+        buyma_account_provider: Callable[[], str] | None = None,
+        owner_provider: Callable[[], str] | None = None,
         pipeline_service: LauncherPipelineService | None = None,
     ) -> None:
         self.script_dir = script_dir
@@ -35,11 +39,15 @@ class ActionRunner:
         self.process_manager = process_manager
         self.command_builder = command_builder
         self.ensure_ready = ensure_ready
+        self.buyma_account_provider = buyma_account_provider or (lambda: "")
+        self.owner_provider = owner_provider or (lambda: "")
         self.pipeline_service = pipeline_service or LauncherPipelineService()
         self.team_watch_actions = dict(self.pipeline_service.team_watch_actions)
         self._job_started_at: float = 0.0
         self._job_name: str = ""
         self._team_started_at: dict[str, float] = {}
+        self._upload_lock_account_id: str = ""
+        self._team_upload_lock_account_ids: dict[str, str] = {}
 
     def run(self, action: str) -> bool:
         if self.process_manager.is_running():
@@ -48,6 +56,8 @@ class ActionRunner:
         if not self.ensure_ready(action):
             self._log_error(ErrorCode.ACTION_NOT_READY, f"실행 준비가 완료되지 않았습니다: {action}\n", level="WARN")
             return False
+        if self._is_upload_action(action) and not self._acquire_upload_lock(action):
+            return False
         self.state.reset_stage_statuses()
         stage_key = self.pipeline_service.stage_for_action(action)
         self.state.set_current_action(action, stage_key)
@@ -55,27 +65,31 @@ class ActionRunner:
             self.state.set_stage_status(stage_key, "진행중")
         self.state.set_status("작전 준비중")
 
-        command = self.command_builder(action)
-        self._log("\n" + "=" * 70 + "\n", category="process")
-        self._log(f"실행: {' '.join(command)}\n", category="process")
         try:
+            command = self.command_builder(action)
+            self._log("\n" + "=" * 70 + "\n", category="process")
+            self._log(f"실행: {' '.join(command)}\n", category="process")
             started = self.process_manager.start(
                 command,
                 on_line=lambda line: self._handle_line(action, line),
                 on_done=self._handle_done,
             )
         except AppError as exc:
+            self._release_upload_lock()
             self._log_error(exc.code, f"실행 실패: {exc.message}\n", category="process")
             notify_critical_error("ActionRunner.run", exc.message)
             self.state.set_status("실행 실패")
             self.state.mark_current_stage_done(False)
             return False
         except Exception as exc:
+            self._release_upload_lock()
             self._log(f"실행 실패: {exc}\n", level="ERROR", category="process")
             notify_critical_error("ActionRunner.run", exc)
             self.state.set_status("실행 실패")
             self.state.mark_current_stage_done(False)
             return False
+        if not started:
+            self._release_upload_lock()
         if started:
             self._job_started_at = time.time()
             self._job_name = self._job_label(action)
@@ -86,6 +100,8 @@ class ActionRunner:
     def run_command(self, command: list[str], *, action: str, stage_key: str = "") -> bool:
         if self.process_manager.is_running():
             self._log_error(ErrorCode.ACTION_ALREADY_RUNNING, "이미 작업이 실행 중입니다. 먼저 중지해주세요.\n", level="WARN")
+            return False
+        if self._is_upload_action(action) and not self._acquire_upload_lock(action):
             return False
         stage_key = stage_key or self.pipeline_service.stage_for_action(action)
         self.state.set_current_action(action, stage_key)
@@ -104,14 +120,18 @@ class ActionRunner:
                 self._job_started_at = time.time()
                 self._job_name = self._job_label(action)
                 notify_job_started(self._job_name)
+            else:
+                self._release_upload_lock()
             return started
         except AppError as exc:
+            self._release_upload_lock()
             self._log_error(exc.code, f"실행 실패: {exc.message}\n", category="process")
             notify_critical_error("ActionRunner.run_command", exc.message)
             self.state.set_status("실행 실패")
             self.state.mark_current_stage_done(False)
             return False
         except Exception as exc:
+            self._release_upload_lock()
             self._log(f"실행 실패: {exc}\n", level="ERROR", category="process")
             notify_critical_error("ActionRunner.run_command", exc)
             self.state.set_status("실행 실패")
@@ -126,6 +146,8 @@ class ActionRunner:
             self.process_manager.stop()
         except AppError as exc:
             self._log_error(exc.code, f"중지 실패: {exc.message}\n", category="process")
+        finally:
+            self._release_upload_lock()
         self.state.set_status("대기중")
 
     def start_team_watch(self, team_key: str) -> bool:
@@ -140,6 +162,13 @@ class ActionRunner:
                 category=team_key,
             )
             return False
+        account_id = ""
+        if self._is_upload_action(action):
+            account_id = self._upload_account_id()
+            ok, info = acquire_upload_lock(account_id, self._owner_name())
+            if not ok:
+                self._log_upload_lock_blocked(info, category=team_key)
+                return False
         self.state.set_team_watch_enabled(team_key, True)
         self.state.set_stage_status(team_key, "감시중")
         command = self.command_builder(action)
@@ -153,14 +182,22 @@ class ActionRunner:
             )
             if started:
                 self._team_started_at[team_key] = time.time()
+                if account_id:
+                    self._team_upload_lock_account_ids[team_key] = account_id
                 notify_job_started(self._team_label(team_key))
+            elif account_id:
+                release_upload_lock(account_id)
             return started
         except AppError as exc:
+            if account_id:
+                release_upload_lock(account_id)
             self._log_error(exc.code, f"워커 실행 실패: {exc.message}\n", category=team_key)
             notify_critical_error(f"ActionRunner.start_team_watch.{team_key}", exc.message)
             self.state.set_stage_status(team_key, "실패")
             return False
         except Exception as exc:
+            if account_id:
+                release_upload_lock(account_id)
             self._log(f"워커 실행 실패: {exc}\n", level="ERROR", category=team_key)
             notify_critical_error(f"ActionRunner.start_team_watch.{team_key}", exc)
             self.state.set_stage_status(team_key, "실패")
@@ -173,6 +210,8 @@ class ActionRunner:
             self.process_manager.stop_team(team_key)
         except AppError as exc:
             self._log_error(exc.code, f"팀 감시 중지 실패: {exc.message}\n", category=team_key)
+        finally:
+            self._release_team_upload_lock(team_key)
         self.state.set_stage_status(team_key, "대기")
         self._log("팀 감시 중지\n", category=team_key)
 
@@ -183,6 +222,10 @@ class ActionRunner:
             self.process_manager.stop_all_teams()
         except AppError as exc:
             self._log_error(exc.code, f"전체 중지 실패: {exc.message}\n", category="process")
+        finally:
+            self._release_upload_lock()
+            for team_key in list(self._team_upload_lock_account_ids):
+                self._release_team_upload_lock(team_key)
 
     def _handle_line(self, action: str, line: str) -> None:
         if action == "watch":
@@ -211,6 +254,7 @@ class ActionRunner:
         self.state.set_status("대기중")
         self._job_started_at = 0.0
         self._job_name = ""
+        self._release_upload_lock()
 
     def _handle_team_done(self, team_key: str, return_code: int) -> None:
         self._log(f"워커 종료 (code: {return_code})\n", category=team_key)
@@ -232,10 +276,53 @@ class ActionRunner:
                     "실패 누적 한도에 도달해 팀 감시를 일시 중지합니다.\n",
                     category=team_key,
                 )
+                self._release_team_upload_lock(team_key)
                 return
         elif return_code == 0:
             self.state.reset_team_watch_failures(team_key)
         self.state.set_stage_status(team_key, self.pipeline_service.team_done_status(enabled))
+        self._release_team_upload_lock(team_key)
+
+    def _is_upload_action(self, action: str) -> bool:
+        return action in {"upload-review", "upload-auto", "watch-upload"}
+
+    def _upload_account_id(self) -> str:
+        return build_upload_account_id(self.buyma_account_provider())
+
+    def _owner_name(self) -> str:
+        return (self.owner_provider() or "").strip() or "unknown"
+
+    def _acquire_upload_lock(self, action: str) -> bool:
+        account_id = self._upload_account_id()
+        ok, info = acquire_upload_lock(account_id, self._owner_name())
+        if ok:
+            self._upload_lock_account_id = account_id
+            return True
+        self._log_upload_lock_blocked(info, category="process")
+        return False
+
+    def _log_upload_lock_blocked(self, info: dict, *, category: str) -> None:
+        account = info.get("account_id", "unknown")
+        owner = info.get("owner", "unknown")
+        started_at = info.get("started_at", "")
+        self._log(
+            f"BUYMA 업로드 lock으로 실행 차단: account={account} owner={owner} started_at={started_at}\n",
+            level="WARN",
+            category=category,
+        )
+        notify_upload_locked(info)
+        self.state.set_status("업로드 중복 차단")
+
+    def _release_upload_lock(self) -> None:
+        if not self._upload_lock_account_id:
+            return
+        release_upload_lock(self._upload_lock_account_id)
+        self._upload_lock_account_id = ""
+
+    def _release_team_upload_lock(self, team_key: str) -> None:
+        account_id = self._team_upload_lock_account_ids.pop(team_key, "")
+        if account_id:
+            release_upload_lock(account_id)
 
     def _log(self, message: str, *, level: str = "INFO", category: str = "runner") -> None:
         self.logger.log(LogEvent(level=level, category=category, message=message))

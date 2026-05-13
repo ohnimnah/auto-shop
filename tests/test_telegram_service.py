@@ -179,6 +179,22 @@ class TelegramServiceTests(unittest.TestCase):
                 text = send_message.call_args.args[0]
                 self.assertIn(f"카테고리: {category} ({translated})", text)
 
+    def test_upload_lock_notification_is_readable(self):
+        with patch("services.telegram_service.send_message") as send_message:
+            telegram_service.notify_upload_locked(
+                {
+                    "account_id": "buyma_main",
+                    "owner": "누나",
+                    "started_at": "2026-05-13 15:22:00",
+                }
+            )
+
+        text = send_message.call_args.args[0]
+        self.assertIn("⚠️ 현재 업로드 실행 중", text)
+        self.assertIn("계정: buyma_main", text)
+        self.assertIn("사용자: 누나", text)
+        self.assertIn("시작시간: 15:22", text)
+
     def test_sensitive_values_are_masked(self):
         fake_requests = _FakeRequests()
         env = {

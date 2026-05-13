@@ -175,6 +175,8 @@ class AutoShopLauncher(tk.Tk):
             process_manager=self.process_manager,
             command_builder=self.command_builder.build,
             ensure_ready=self._ensure_sheet_config_before_action,
+            buyma_account_provider=self._load_buyma_email,
+            owner_provider=lambda: self.profile_name,
         )
         self.telegram_remote = TelegramRemoteController(
             command_callback=self._enqueue_remote_command,

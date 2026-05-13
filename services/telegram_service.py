@@ -467,6 +467,19 @@ def notify_upload_failed(product: dict[str, Any], error: Any) -> bool:
     )
 
 
+def notify_upload_locked(lock_info: dict[str, Any]) -> bool:
+    started_at = _truncate(lock_info.get("started_at"), 40)
+    if len(started_at) >= 16:
+        started_at = started_at[11:16]
+    return send_message(
+        "⚠️ 현재 업로드 실행 중\n"
+        f"{MESSAGE_DIVIDER}\n"
+        f"계정: {_truncate(lock_info.get('account_id'))}\n"
+        f"사용자: {_truncate(lock_info.get('owner'))}\n"
+        f"시작시간: {started_at}"
+    )
+
+
 def notify_critical_error(module_name: str, error: Any) -> bool:
     return send_message(
         "🔥 치명적 오류\n"
