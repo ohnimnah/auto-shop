@@ -5,6 +5,8 @@ dist/
 _debug/
 _parallel_test_logs/
 *.log
+logs/*.jsonl
+logs/screenshots/
 
 # Secrets
 credentials.json
