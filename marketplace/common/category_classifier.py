@@ -44,13 +44,21 @@ class ClassificationRule:
 
 
 CATEGORY_FALLBACK_RULES: List[Tuple[str, List[str], StandardCategory]] = [
-    ("long_sleeve_tshirt", ["긴팔", "long sleeve", "ls tee"], StandardCategory.TOP_LONG_SLEEVE),
+    ("long_sleeve_tshirt", ["긴팔", "롱슬리브", "long sleeve", "longsleeve", "ls tee", "lst"], StandardCategory.TOP_LONG_SLEEVE),
     ("short_sleeve_tshirt", ["반팔", "short sleeve", "t-shirt", "tee"], StandardCategory.TOP_TSHIRT),
+    ("sleeveless_top", ["슬리브리스", "민소매", "나시", "sleeveless", "tank", "tank top", "halter", "camisole"], StandardCategory.TOP_TANK),
+    ("generic_top", ["세미크롭", "크롭탑", "탑", "top"], StandardCategory.TOP_TSHIRT),
     ("shorts", ["숏팬츠", "반바지", "shorts", "short pants", "half pants"], StandardCategory.PANTS_SHORTS),
     ("denim_pants", ["청바지", "denim", "jeans"], StandardCategory.PANTS_DENIM),
-    ("jogger_pants", ["조거", "jogger", "sweatpants", "track pants"], StandardCategory.PANTS_JOGGER),
+    ("cargo_pants", ["카고", "cargo"], StandardCategory.PANTS_CARGO),
+    ("training_pants", ["스웻팬츠", "스웨트팬츠", "트레이닝팬츠", "sweatpants", "sweat pants", "track pants"], StandardCategory.PANTS_TRAINING),
+    ("jogger_pants", ["조거", "jogger"], StandardCategory.PANTS_JOGGER),
+    ("regular_pants", ["팬츠", "바지", "pants"], StandardCategory.PANTS_REGULAR),
+    ("backpack", ["백팩", "데이팩", "데이 팩", "라이트팩", "backpack", "daypack", "rucksack"], StandardCategory.BAG_BACKPACK),
     ("sneakers", ["sneakers", "sneaker", "운동화", "스니커즈"], StandardCategory.SHOES_SNEAKER),
+    ("sneaker_models", ["보메로", "vomero", "올드스쿨", "old skool", "oldskool", "컴피쿠시", "comfycush", "ld 1000", "ld-1000"], StandardCategory.SHOES_SNEAKER),
     ("sports_shoes", ["인도어화", "스포츠화", "코트화", "풋살화", "배드민턴화", "핸드볼화"], StandardCategory.SHOES_SNEAKER),
+    ("mary_jane", ["메리제인", "mary jane"], StandardCategory.SHOES_FLAT),
     ("sandals", ["슬리퍼", "샌들", "sandal", "slide"], StandardCategory.SHOES_SANDAL),
     ("hoodie", ["hoodie", "후드", "후디", "맨투맨", "sweatshirt"], StandardCategory.TOP_HOODIE),
     ("dress", ["dress", "드레스", "원피스"], StandardCategory.DRESS),
@@ -62,16 +70,17 @@ CATEGORY_FALLBACK_RULES: List[Tuple[str, List[str], StandardCategory]] = [
     ("padding", ["padding", "puffer", "down jacket", "패딩"], StandardCategory.OUTER_PADDING),
     ("jacket", ["jacket", "자켓", "재킷"], StandardCategory.OUTER_JACKET),
     ("bag", ["bag", "백", "토트", "숄더백", "crossbody"], StandardCategory.BAG_SHOULDER),
-    ("beanie", ["beanie", "비니", "니트모자"], StandardCategory.ACC_BEANIE),
+    ("beanie", ["beanie", "비니", "니트모자", "토크", "toque"], StandardCategory.ACC_BEANIE),
     ("cap", ["cap", "hat", "캡", "볼캡"], StandardCategory.ACC_CAP),
     ("belt", ["belt", "벨트"], StandardCategory.ACC_BELT),
+    ("scarf", ["머플러", "스카프", "muffler", "scarf"], StandardCategory.ACC_SCARF),
     ("sunglasses", ["sunglasses", "선글라스", "썬글라스"], StandardCategory.ACC_EYEWEAR),
     ("socks", ["socks", "sock", "양말"], StandardCategory.INNER_UNDERWEAR),
     ("homewear", ["홈웨어", "homewear", "lounge wear", "loungewear", "잠옷", "파자마", "pajama"], StandardCategory.HOME_PAJAMA),
     ("innerwear", ["이너", "이너프리", "inner", "innerwear", "underwear", "속옷", "속바지", "브라", "bra", "팬티", "panty", "panties", "padded"], StandardCategory.INNER_UNDERWEAR),
     ("seamless_innerwear", ["심리스", "seamless", "seamless inner", "심리스 이너"], StandardCategory.INNER_UNDERWEAR),
     ("leggings", ["레깅스", "leggings", "legging"], StandardCategory.PANTS_LEGGINGS),
-    ("loafer", ["loafer"], StandardCategory.SHOES_LOAFER),
+    ("loafer", ["로퍼", "loafer"], StandardCategory.SHOES_LOAFER),
 ]
 
 FORCE_CATEGORY_MAP: Dict[Tuple[str, ...], StandardCategory] = {
@@ -81,6 +90,7 @@ FORCE_CATEGORY_MAP: Dict[Tuple[str, ...], StandardCategory] = {
     ("bra", "브라", "sports bra", "sportsbra", "padded", "panty", "panties", "팬티"): StandardCategory.INNER_UNDERWEAR,
     ("홈웨어", "homewear", "잠옷", "파자마", "pajama", "loungewear", "lounge wear"): StandardCategory.HOME_PAJAMA,
     ("인도어화", "스포츠화", "코트화", "풋살화", "배드민턴화", "핸드볼화", "실내화"): StandardCategory.SHOES_SNEAKER,
+    ("리에티", "rieti"): StandardCategory.ACC_EYEWEAR,
 }
 
 MUSINSA_CATEGORY_OVERRIDES: List[Tuple[Tuple[str, ...], StandardCategory]] = [
@@ -175,6 +185,7 @@ def classify_category_with_reason(
 ) -> Tuple[StandardCategory, str]:
     clean_name = normalize_product_name(name)
     force_text = f"{clean_name} {(brand or '').lower()}".strip()
+    raw_text = _normalize_text(f"{name or ''} {brand or ''}")
     result: StandardCategory | None = None
     reason = "unresolved"
 
@@ -190,6 +201,10 @@ def classify_category_with_reason(
     has_skirt = any(_contains_keyword(force_text, token) for token in SKIRT_TOKENS)
     if has_dress and not has_skirt:
         return StandardCategory.DRESS, "dress_keyword_override"
+
+    sneaker_model_tokens = ("ld 1000", "ld1000")
+    if any(_contains_keyword(raw_text, token) for token in sneaker_model_tokens):
+        return StandardCategory.SHOES_SNEAKER, "sneaker_model_keyword_override"
 
     # Guardrail: beanie should not fall into generic cap/hat buckets.
     beanie_tokens = ("비니", "beanie", "니트모자", "니트 캡")
