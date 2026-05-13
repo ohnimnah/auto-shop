@@ -185,6 +185,7 @@ class TelegramServiceTests(unittest.TestCase):
                 {
                     "account_id": "buyma_main",
                     "owner": "누나",
+                    "pc_name": "DESKTOP-NUNA",
                     "started_at": "2026-05-13 15:22:00",
                 }
             )
@@ -193,6 +194,7 @@ class TelegramServiceTests(unittest.TestCase):
         self.assertIn("⚠️ 현재 업로드 실행 중", text)
         self.assertIn("계정: buyma_main", text)
         self.assertIn("사용자: 누나", text)
+        self.assertIn("PC: DESKTOP-NUNA", text)
         self.assertIn("시작시간: 15:22", text)
 
     def test_sensitive_values_are_masked(self):

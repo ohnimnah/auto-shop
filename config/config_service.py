@@ -58,6 +58,7 @@ def default_config() -> dict[str, Any]:
         "paths": {
             "images_dir": "",
             "log_dir": "",
+            "lock_dir": "",
         },
         "columns": dict(DEFAULT_SHEET_COLUMNS),
         "buyma": {
@@ -208,6 +209,7 @@ def _legacy_to_config(legacy: dict[str, Any]) -> dict[str, Any]:
         "paths": {
             "images_dir": str(legacy.get("images_dir") or "").strip(),
             "log_dir": str(legacy.get("log_dir") or "").strip(),
+            "lock_dir": str(legacy.get("lock_dir") or "").strip(),
         },
         "columns": _migrate_japanese_name_column(dict(legacy.get("columns") or legacy.get("upload_columns") or {})),
     }

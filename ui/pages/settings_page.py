@@ -137,6 +137,7 @@ class SettingsPage(BasePage):
         self.service_account_path_var = tk.StringVar()
         self.images_dir_var = tk.StringVar()
         self.log_dir_var = tk.StringVar()
+        self.lock_dir_var = tk.StringVar()
         self.thumbnail_footer_suffix_var = tk.StringVar()
         self.buyma_email_var = tk.StringVar()
         self.buyma_password_var = tk.StringVar()
@@ -741,7 +742,8 @@ class SettingsPage(BasePage):
         card.grid(row=row, column=column, sticky="ew", padx=padx)
         self._build_entry_row(body, 0, "images_dir", self.images_dir_var, button_text="폴더 선택", button_command=lambda: self._choose_directory(self.images_dir_var))
         self._build_entry_row(body, 2, "log_dir", self.log_dir_var, button_text="폴더 선택", button_command=lambda: self._choose_directory(self.log_dir_var))
-        self._build_entry_row(body, 4, "thumbnail_footer_suffix", self.thumbnail_footer_suffix_var)
+        self._build_entry_row(body, 4, "lock_dir", self.lock_dir_var, button_text="폴더 선택", button_command=lambda: self._choose_directory(self.lock_dir_var))
+        self._build_entry_row(body, 6, "thumbnail_footer_suffix", self.thumbnail_footer_suffix_var)
 
     def _build_columns_card(self, parent: tk.Widget, row: int) -> None:
         fields = [(label, self.column_vars[key]) for key, label in self.COLUMN_FIELDS]
@@ -997,6 +999,7 @@ class SettingsPage(BasePage):
         yield self.service_account_path_var
         yield self.images_dir_var
         yield self.log_dir_var
+        yield self.lock_dir_var
         yield self.thumbnail_footer_suffix_var
         yield self.buyma_email_var
         yield self.buyma_password_var
@@ -1052,6 +1055,7 @@ class SettingsPage(BasePage):
             self.column_vars[key].set(str(columns.get(key) or DEFAULT_SHEET_COLUMNS.get(key, "")).strip())
         self.images_dir_var.set(str(paths.get("images_dir") or "").strip() or self.controller._get_configured_images_dir())
         self.log_dir_var.set(str(paths.get("log_dir") or "").strip() or os.path.join(self.controller.data_dir, "logs"))
+        self.lock_dir_var.set(str(paths.get("lock_dir") or "").strip() or self.controller._get_configured_lock_dir())
         footer_suffix = str(paths.get("thumbnail_footer_suffix") or "").strip()
         if not footer_suffix:
             legacy_cfg = self.controller._load_sheet_config()
@@ -1193,6 +1197,7 @@ class SettingsPage(BasePage):
             {
                 "images_dir": self.images_dir_var.get().strip(),
                 "log_dir": self.log_dir_var.get().strip(),
+                "lock_dir": self.lock_dir_var.get().strip(),
                 "thumbnail_footer_suffix": self.thumbnail_footer_suffix_var.get().strip(),
             }
         )
@@ -1330,6 +1335,13 @@ class SettingsPage(BasePage):
                 os.makedirs(path, exist_ok=True)
             except Exception as exc:
                 issues.append(f"{label}를 준비할 수 없습니다: {exc}")
+        lock_dir = self.lock_dir_var.get().strip()
+        if lock_dir:
+            path = os.path.abspath(os.path.expanduser(lock_dir))
+            try:
+                os.makedirs(path, exist_ok=True)
+            except Exception as exc:
+                issues.append(f"lock_dir를 준비할 수 없습니다: {exc}")
         if full:
             numeric_checks = [
                 ("크롤링 최대 페이지", self.crawling_vars["max_pages"]),
@@ -1616,6 +1628,7 @@ class SettingsPage(BasePage):
                     "category_mapping_candidates_sheet_name": config["spreadsheet"]["tabs"]["category_mapping_candidates"],
                     "images_dir": config["paths"]["images_dir"],
                     "log_dir": config["paths"]["log_dir"],
+                    "lock_dir": config["paths"].get("lock_dir", ""),
                     "thumbnail_footer_suffix": config["paths"].get("thumbnail_footer_suffix", ""),
                     "credentials_path": config["spreadsheet"].get("credentials_path", ""),
                     "columns": columns,
@@ -1722,6 +1735,8 @@ class SettingsPage(BasePage):
         mosaic_state = self.controller.system_checker.get_mosaic_runtime_state()
         images_dir = os.path.abspath(os.path.expanduser(self.images_dir_var.get().strip() or self.controller._get_configured_images_dir()))
         log_dir = os.path.abspath(os.path.expanduser(self.log_dir_var.get().strip() or self.controller._get_configured_log_dir()))
+        lock_dir_raw = self.lock_dir_var.get().strip() or self.controller._get_configured_lock_dir()
+        lock_dir = os.path.abspath(os.path.expanduser(lock_dir_raw)) if lock_dir_raw else ""
         credentials_path = self.controller._get_available_credentials_path() or self.service_account_path_var.get().strip()
 
         rows: list[dict[str, object]] = [
@@ -1780,6 +1795,14 @@ class SettingsPage(BasePage):
                 "detail": log_dir,
                 "action_label": "폴더 열기" if os.path.isdir(log_dir) else "폴더 선택",
                 "action": (lambda path=log_dir: self._open_directory(path)) if os.path.isdir(log_dir) else (lambda: self._choose_directory(self.log_dir_var)),
+            },
+            {
+                "label": "공유 Lock 폴더",
+                "state": "ok" if lock_dir and self._is_directory_writable(lock_dir) else "warn",
+                "status": "공유 사용" if lock_dir and self._is_directory_writable(lock_dir) else "로컬 fallback",
+                "detail": lock_dir or "미설정 시 PC별 로컬 lock을 사용합니다.",
+                "action_label": "폴더 열기" if lock_dir and os.path.isdir(lock_dir) else "폴더 선택",
+                "action": (lambda path=lock_dir: self._open_directory(path)) if lock_dir and os.path.isdir(lock_dir) else (lambda: self._choose_directory(self.lock_dir_var)),
             },
             {
                 "label": "OpenCV 얼굴 블러",

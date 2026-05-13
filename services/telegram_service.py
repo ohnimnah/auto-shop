@@ -476,6 +476,7 @@ def notify_upload_locked(lock_info: dict[str, Any]) -> bool:
         f"{MESSAGE_DIVIDER}\n"
         f"계정: {_truncate(lock_info.get('account_id'))}\n"
         f"사용자: {_truncate(lock_info.get('owner'))}\n"
+        f"PC: {_truncate(lock_info.get('pc_name'))}\n"
         f"시작시간: {started_at}"
     )
 

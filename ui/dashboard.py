@@ -166,6 +166,7 @@ class AutoShopLauncher(tk.Tk):
                 self._get_configured_images_dir(),
                 self.profile_name,
                 thumbnail_blur_faces=self._get_thumbnail_blur_faces_enabled(),
+                lock_dir=self._get_configured_lock_dir(),
             ),
         )
         self.action_runner = ActionRunner(
@@ -177,6 +178,7 @@ class AutoShopLauncher(tk.Tk):
             ensure_ready=self._ensure_sheet_config_before_action,
             buyma_account_provider=self._load_buyma_email,
             owner_provider=lambda: self.profile_name,
+            upload_lock_dir_provider=self._get_configured_lock_dir,
         )
         self.telegram_remote = TelegramRemoteController(
             command_callback=self._enqueue_remote_command,
@@ -1941,6 +1943,16 @@ class AutoShopLauncher(tk.Tk):
             return os.path.abspath(os.path.expanduser(configured))
         return os.path.join(self.data_dir, "logs")
 
+    def _get_configured_lock_dir(self) -> str:
+        env_lock_dir = (os.environ.get("AUTO_SHOP_LOCK_DIR") or "").strip()
+        if env_lock_dir:
+            return os.path.abspath(os.path.expanduser(env_lock_dir))
+        cfg = self._load_sheet_config()
+        configured = (cfg.get("lock_dir") or "").strip()
+        if configured:
+            return os.path.abspath(os.path.expanduser(configured))
+        return ""
+
     def _save_sheet_config(self, config: dict) -> bool:
         try:
             return self.system_checker.save_sheet_config(config)
@@ -2081,6 +2093,7 @@ class AutoShopLauncher(tk.Tk):
             "sheet_gids": gids,
             "row_start": 2,
             "images_dir": (current.get("images_dir") or "").strip(),
+            "lock_dir": (current.get("lock_dir") or "").strip(),
             "queue_sheet_url": (queue_sheet_url or "").strip(),
             "thumbnail_footer_suffix": (current.get("thumbnail_footer_suffix") or "").strip(),
         }

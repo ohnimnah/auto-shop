@@ -1,12 +1,15 @@
 import json
+import os
 import tempfile
 import unittest
 from datetime import datetime, timedelta
 from pathlib import Path
+from unittest.mock import patch
 
 from services.lock_service import (
     acquire_upload_lock,
     build_upload_account_id,
+    get_upload_lock_dir,
     get_upload_lock_info,
     is_upload_locked,
     release_upload_lock,
@@ -14,6 +17,13 @@ from services.lock_service import (
 
 
 class UploadLockServiceTests(unittest.TestCase):
+    def setUp(self):
+        self.sleep_patch = patch("services.lock_service.time.sleep", return_value=None)
+        self.sleep_patch.start()
+
+    def tearDown(self):
+        self.sleep_patch.stop()
+
     def test_same_account_duplicate_is_blocked(self):
         with tempfile.TemporaryDirectory() as tmp:
             lock_dir = Path(tmp)
@@ -24,6 +34,28 @@ class UploadLockServiceTests(unittest.TestCase):
 
             self.assertFalse(ok)
             self.assertEqual(info["owner"], "형")
+
+    def test_lock_payload_includes_pc_name(self):
+        with tempfile.TemporaryDirectory() as tmp, patch.dict(os.environ, {"COMPUTERNAME": "DESKTOP-HYUNG"}, clear=False):
+            lock_dir = Path(tmp)
+            ok, info = acquire_upload_lock("buyma_main", "형", lock_dir=lock_dir)
+
+            self.assertTrue(ok)
+            self.assertEqual(info["pc_name"], "DESKTOP-HYUNG")
+            self.assertEqual(get_upload_lock_info("buyma_main", lock_dir=lock_dir)["pc_name"], "DESKTOP-HYUNG")
+
+    def test_shared_lock_folder_can_be_used_from_multiple_pc_names(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            lock_dir = Path(tmp)
+            with patch.dict(os.environ, {"COMPUTERNAME": "PC-A"}, clear=False):
+                ok, _ = acquire_upload_lock("buyma_main", "형", lock_dir=lock_dir)
+                self.assertTrue(ok)
+
+            with patch.dict(os.environ, {"COMPUTERNAME": "PC-B"}, clear=False):
+                ok, info = acquire_upload_lock("buyma_main", "누나", lock_dir=lock_dir)
+
+            self.assertFalse(ok)
+            self.assertEqual(info["pc_name"], "PC-A")
 
     def test_different_accounts_are_allowed(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -72,6 +104,20 @@ class UploadLockServiceTests(unittest.TestCase):
 
         self.assertTrue(account_id.startswith("buyma_user.name_shop_"))
         self.assertNotIn("@", account_id)
+
+    def test_auto_shop_lock_dir_env_has_priority(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            configured = Path(tmp) / "Dropbox" / "AutoShop" / "locks"
+            with patch.dict(os.environ, {"AUTO_SHOP_LOCK_DIR": str(configured), "AUTO_SHOP_DATA_DIR": str(Path(tmp) / "local")}, clear=False):
+                self.assertEqual(get_upload_lock_dir(), configured)
+
+    def test_fallback_uses_local_data_dir_when_lock_dir_missing(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            data_dir = Path(tmp) / "data"
+            with patch.dict(os.environ, {"AUTO_SHOP_DATA_DIR": str(data_dir)}, clear=False):
+                os.environ.pop("AUTO_SHOP_LOCK_DIR", None)
+
+                self.assertEqual(get_upload_lock_dir(), data_dir / "locks")
 
 
 if __name__ == "__main__":

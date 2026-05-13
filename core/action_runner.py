@@ -7,6 +7,8 @@ from typing import Callable
 
 from core.errors import AppError, ErrorCode
 from core.process_manager import ProcessManager
+from pathlib import Path
+
 from services.lock_service import acquire_upload_lock, build_upload_account_id, release_upload_lock
 from services.pipeline_service import LauncherPipelineService
 from services.telegram_service import (
@@ -31,6 +33,7 @@ class ActionRunner:
         ensure_ready: Callable[[str], bool],
         buyma_account_provider: Callable[[], str] | None = None,
         owner_provider: Callable[[], str] | None = None,
+        upload_lock_dir_provider: Callable[[], str] | None = None,
         pipeline_service: LauncherPipelineService | None = None,
     ) -> None:
         self.script_dir = script_dir
@@ -41,6 +44,7 @@ class ActionRunner:
         self.ensure_ready = ensure_ready
         self.buyma_account_provider = buyma_account_provider or (lambda: "")
         self.owner_provider = owner_provider or (lambda: "")
+        self.upload_lock_dir_provider = upload_lock_dir_provider or (lambda: "")
         self.pipeline_service = pipeline_service or LauncherPipelineService()
         self.team_watch_actions = dict(self.pipeline_service.team_watch_actions)
         self._job_started_at: float = 0.0
@@ -165,7 +169,7 @@ class ActionRunner:
         account_id = ""
         if self._is_upload_action(action):
             account_id = self._upload_account_id()
-            ok, info = acquire_upload_lock(account_id, self._owner_name())
+            ok, info = acquire_upload_lock(account_id, self._owner_name(), lock_dir=self._upload_lock_dir())
             if not ok:
                 self._log_upload_lock_blocked(info, category=team_key)
                 return False
@@ -186,18 +190,18 @@ class ActionRunner:
                     self._team_upload_lock_account_ids[team_key] = account_id
                 notify_job_started(self._team_label(team_key))
             elif account_id:
-                release_upload_lock(account_id)
+                release_upload_lock(account_id, lock_dir=self._upload_lock_dir())
             return started
         except AppError as exc:
             if account_id:
-                release_upload_lock(account_id)
+                release_upload_lock(account_id, lock_dir=self._upload_lock_dir())
             self._log_error(exc.code, f"워커 실행 실패: {exc.message}\n", category=team_key)
             notify_critical_error(f"ActionRunner.start_team_watch.{team_key}", exc.message)
             self.state.set_stage_status(team_key, "실패")
             return False
         except Exception as exc:
             if account_id:
-                release_upload_lock(account_id)
+                release_upload_lock(account_id, lock_dir=self._upload_lock_dir())
             self._log(f"워커 실행 실패: {exc}\n", level="ERROR", category=team_key)
             notify_critical_error(f"ActionRunner.start_team_watch.{team_key}", exc)
             self.state.set_stage_status(team_key, "실패")
@@ -292,9 +296,13 @@ class ActionRunner:
     def _owner_name(self) -> str:
         return (self.owner_provider() or "").strip() or "unknown"
 
+    def _upload_lock_dir(self) -> Path | None:
+        configured = (self.upload_lock_dir_provider() or "").strip()
+        return Path(configured).expanduser() if configured else None
+
     def _acquire_upload_lock(self, action: str) -> bool:
         account_id = self._upload_account_id()
-        ok, info = acquire_upload_lock(account_id, self._owner_name())
+        ok, info = acquire_upload_lock(account_id, self._owner_name(), lock_dir=self._upload_lock_dir())
         if ok:
             self._upload_lock_account_id = account_id
             return True
@@ -316,13 +324,13 @@ class ActionRunner:
     def _release_upload_lock(self) -> None:
         if not self._upload_lock_account_id:
             return
-        release_upload_lock(self._upload_lock_account_id)
+        release_upload_lock(self._upload_lock_account_id, lock_dir=self._upload_lock_dir())
         self._upload_lock_account_id = ""
 
     def _release_team_upload_lock(self, team_key: str) -> None:
         account_id = self._team_upload_lock_account_ids.pop(team_key, "")
         if account_id:
-            release_upload_lock(account_id)
+            release_upload_lock(account_id, lock_dir=self._upload_lock_dir())
 
     def _log(self, message: str, *, level: str = "INFO", category: str = "runner") -> None:
         self.logger.log(LogEvent(level=level, category=category, message=message))

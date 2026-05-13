@@ -187,6 +187,7 @@ def build_default_env(
     images_dir: str,
     profile_name: str = "",
     thumbnail_blur_faces: bool | None = None,
+    lock_dir: str = "",
 ) -> dict[str, str]:
     env = os.environ.copy()
     env["PYTHONUNBUFFERED"] = "1"
@@ -194,6 +195,8 @@ def build_default_env(
     env["PYTHONUTF8"] = "1"
     env["AUTO_SHOP_IMAGES_DIR"] = images_dir
     env["AUTO_SHOP_DATA_DIR"] = data_dir
+    if lock_dir:
+        env["AUTO_SHOP_LOCK_DIR"] = lock_dir
     if profile_name:
         env["AUTO_SHOP_PROFILE"] = profile_name
     if thumbnail_blur_faces is not None:

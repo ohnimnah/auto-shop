@@ -5,7 +5,9 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+import socket
 import re
+import time
 from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any
@@ -13,6 +15,7 @@ from typing import Any
 
 LOCK_TIMEOUT_MINUTES = 30
 LOCK_TYPE_BUYMA_UPLOAD = "buyma_upload"
+LOCK_RECHECK_DELAY_SECONDS = 1.0
 
 
 def get_upload_lock_dir() -> Path:
@@ -43,6 +46,15 @@ def normalize_upload_account_id(value: str) -> str:
 
 def build_upload_account_id(email: str) -> str:
     return normalize_upload_account_id(email)
+
+
+def get_pc_name() -> str:
+    return (
+        os.environ.get("COMPUTERNAME")
+        or os.environ.get("HOSTNAME")
+        or socket.gethostname()
+        or "unknown"
+    ).strip() or "unknown"
 
 
 def _safe_lock_name(account_id: str) -> str:
@@ -123,6 +135,7 @@ def acquire_upload_lock(
     payload = {
         "account_id": account_id,
         "owner": (owner or "").strip() or "unknown",
+        "pc_name": get_pc_name(),
         "started_at": _now().strftime("%Y-%m-%d %H:%M:%S"),
         "type": LOCK_TYPE_BUYMA_UPLOAD,
     }
@@ -130,6 +143,10 @@ def acquire_upload_lock(
         fd = os.open(str(path), os.O_CREAT | os.O_EXCL | os.O_WRONLY)
         with os.fdopen(fd, "w", encoding="utf-8") as fp:
             json.dump(payload, fp, ensure_ascii=False, indent=2)
+        time.sleep(LOCK_RECHECK_DELAY_SECONDS)
+        current = get_upload_lock_info(account_id, lock_dir=root)
+        if current and current.get("owner") != payload["owner"]:
+            return False, current
         return True, payload
     except FileExistsError:
         info = get_upload_lock_info(account_id, lock_dir=root)
@@ -145,4 +162,3 @@ def release_upload_lock(account_id: str, *, lock_dir: Path | None = None) -> Non
         path.unlink(missing_ok=True)
     except Exception:
         return
-

@@ -61,6 +61,11 @@ class ProcessManagerTests(unittest.TestCase):
         self.assertEqual(enabled_env["AUTO_SHOP_THUMBNAIL_BLUR_FACES"], "1")
         self.assertEqual(disabled_env["AUTO_SHOP_THUMBNAIL_BLUR_FACES"], "0")
 
+    def test_default_env_exports_lock_dir_when_configured(self):
+        env = build_default_env("/tmp/data", "/tmp/images", "operator-a", lock_dir="/tmp/shared-locks")
+
+        self.assertEqual(env["AUTO_SHOP_LOCK_DIR"], "/tmp/shared-locks")
+
 
 if __name__ == "__main__":
     unittest.main()
