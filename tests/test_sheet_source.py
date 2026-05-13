@@ -50,6 +50,7 @@ class _FakeValues:
         row[column_letter_to_index("Y")] = "여성"
         row[column_letter_to_index("Z")] = "바지"
         row[column_letter_to_index("AA")] = "데님"
+        row[column_letter_to_index("A")] = "썸네일완료"
         return _FakeRequest({"values": [row]})
 
 
@@ -115,6 +116,7 @@ class SheetSourceTests(unittest.TestCase):
                 row[column_letter_to_index("AD")] = "남성"
                 row[column_letter_to_index("AE")] = "상의"
                 row[column_letter_to_index("AF")] = "후드티"
+                row[column_letter_to_index("A")] = "썸네일완료"
                 return _FakeRequest({"values": [row]})
 
         class CustomSpreadsheets:
@@ -201,6 +203,74 @@ class SheetSourceTests(unittest.TestCase):
         self.assertEqual(rows[0]["product_name_kr"], "업로드상품")
         self.assertIn(("get", "'시트1'!Q2:Q"), calls)
         self.assertTrue(any(call[0] == "batchGet" for call in calls))
+
+    def test_read_upload_rows_skips_completed_specific_row(self):
+        class CompletedValues:
+            def get(self, *, spreadsheetId, range):
+                if range.endswith("1:1"):
+                    return _FakeRequest({"values": [["진행상태"]]})
+                row = [""] * 27
+                row[column_letter_to_index("A")] = "출품완료"
+                row[column_letter_to_index("B")] = "https://example.com/done"
+                row[column_letter_to_index("E")] = "완료상품"
+                row[column_letter_to_index("N")] = "999"
+                return _FakeRequest({"values": [row]})
+
+        class CompletedSpreadsheets:
+            def values(self):
+                return CompletedValues()
+
+        class CompletedService:
+            def spreadsheets(self):
+                return CompletedSpreadsheets()
+
+        rows = read_upload_rows(
+            CompletedService(),
+            spreadsheet_id="spreadsheet",
+            sheet_name="시트1",
+            row_start=2,
+            header_row=1,
+            max_data_column="AA",
+            upload_columns=DEFAULT_UPLOAD_COLUMNS,
+            progress_status_header="진행상태",
+            status_completed="출품완료",
+            status_upload_ready="썸네일완료",
+            status_thumbnails_done="썸네일완료",
+            specific_row=2,
+        )
+
+        self.assertEqual(rows, [])
+
+    def test_read_upload_rows_stops_when_status_header_missing(self):
+        class MissingStatusValues:
+            def get(self, *, spreadsheetId, range):
+                if range.endswith("1:1"):
+                    return _FakeRequest({"values": [["링크", "상품명"]]})
+                raise AssertionError(f"unexpected get range: {range}")
+
+        class MissingStatusSpreadsheets:
+            def values(self):
+                return MissingStatusValues()
+
+        class MissingStatusService:
+            def spreadsheets(self):
+                return MissingStatusSpreadsheets()
+
+        rows = read_upload_rows(
+            MissingStatusService(),
+            spreadsheet_id="spreadsheet",
+            sheet_name="시트1",
+            row_start=2,
+            header_row=1,
+            max_data_column="AA",
+            upload_columns=DEFAULT_UPLOAD_COLUMNS,
+            progress_status_header="진행상태",
+            status_completed="출품완료",
+            status_upload_ready="썸네일완료",
+            status_thumbnails_done="썸네일완료",
+        )
+
+        self.assertEqual(rows, [])
 
 
 if __name__ == "__main__":

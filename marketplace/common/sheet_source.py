@@ -194,6 +194,9 @@ def read_upload_rows(
     max_data_index = max(configured_indexes)
     last_index = max(max_data_index, status_index if status_index is not None else max_data_index)
     last_col_letter = column_index_to_letter(last_index)
+    if status_index is None:
+        print(f"업로드 후보 없음: '{progress_status_header}' 헤더를 찾지 못해 안전상 업로드를 중단합니다.")
+        return []
 
     def build_rows_data(detailed_rows: List[tuple[int, List[str]]]) -> List[Dict[str, str]]:
         rows_data: List[Dict[str, str]] = []
@@ -242,12 +245,13 @@ def read_upload_rows(
                     print(f"  {idx}행 제외: 필수값 누락 -> {', '.join(missing)}")
                 continue
 
-            if not specific_row and status_index is not None:
-                if normalize_sheet_status(progress_status) == normalize_sheet_status(status_completed):
-                    print(f"  {idx}행 건너뜀 (진행상태: {progress_status})")
-                    continue
-                if not ready_status:
-                    continue
+            if normalize_sheet_status(progress_status) == normalize_sheet_status(status_completed):
+                print(f"  {idx}행 건너뜀 (진행상태: {progress_status})")
+                continue
+            if not ready_status:
+                if specific_row and idx == specific_row:
+                    print(f"  {idx}행 제외: 업로드 대상 상태가 아닙니다 -> {progress_status or '(빈값)'}")
+                continue
 
             cat_large = field_cell("musinsa_category_large")
             cat_middle = field_cell("musinsa_category_middle")
@@ -294,16 +298,6 @@ def read_upload_rows(
             return build_rows_data([(specific_row, rows[0] if rows else [])])
 
         candidate_rows: List[int] = []
-        if status_index is None:
-            legacy_rows = _read_upload_rows_legacy(
-                service,
-                spreadsheet_id=spreadsheet_id,
-                sheet_name=sheet_name,
-                row_start=row_start,
-                last_col_letter=last_col_letter,
-            )
-            return build_rows_data([(idx, row) for idx, row in enumerate(legacy_rows, start=row_start)])
-
         status_col = column_index_to_letter(status_index)
         status_rows = _read_range_values(
             service,
