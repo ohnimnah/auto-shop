@@ -1,4 +1,5 @@
 import os
+import json
 import unittest
 from unittest.mock import patch
 
@@ -30,14 +31,14 @@ class TelegramServiceTests(unittest.TestCase):
         fake_requests = _FakeRequests()
         env = {
             "TELEGRAM_ENABLED": "true",
-            "TELEGRAM_BOT_TOKEN": "123:abc",
+            "TELEGRAM_BOT_TOKEN": "123456:abcdefghijklmnopqrstuvwxyz",
             "TELEGRAM_CHAT_ID": "456",
         }
         with patch.dict(os.environ, env, clear=False), patch("services.telegram_service.requests", fake_requests):
             self.assertTrue(telegram_service.send_message("hello"))
 
         self.assertEqual(len(fake_requests.calls), 1)
-        self.assertIn("/bot123:abc/sendMessage", fake_requests.calls[0]["url"])
+        self.assertIn("/bot123456:abcdefghijklmnopqrstuvwxyz/sendMessage", fake_requests.calls[0]["url"])
         self.assertEqual(fake_requests.calls[0]["data"]["chat_id"], "456")
         self.assertEqual(fake_requests.calls[0]["timeout"], 10)
 
@@ -45,7 +46,7 @@ class TelegramServiceTests(unittest.TestCase):
         fake_requests = _FakeRequests()
         env = {
             "TELEGRAM_ENABLED": "true",
-            "TELEGRAM_BOT_TOKEN": "123:abc",
+            "TELEGRAM_BOT_TOKEN": "123456:abcdefghijklmnopqrstuvwxyz",
             "TELEGRAM_CHAT_ID": "456",
         }
         with patch.dict(os.environ, env, clear=False), patch("services.telegram_service.requests", fake_requests):
@@ -58,14 +59,36 @@ class TelegramServiceTests(unittest.TestCase):
         fake_requests = _FakeRequests()
         env = {
             "TELEGRAM_ENABLED": "true",
-            "TELEGRAM_BOT_TOKEN": "123:abc",
+            "TELEGRAM_BOT_TOKEN": "123456:abcdefghijklmnopqrstuvwxyz",
             "TELEGRAM_CHAT_ID": "456",
         }
-        text = "✅ 작업 완료\n────────────\n작업: 정찰\n\n성공: 1\n실패: 0"
+        text = "✅ 작업 완료\n------------\n작업: 정찰\n\n성공: 1\n실패: 0"
         with patch.dict(os.environ, env, clear=False), patch("services.telegram_service.requests", fake_requests):
             self.assertTrue(telegram_service.send_message(text))
 
         self.assertEqual(fake_requests.calls[0]["data"]["text"], text)
+
+    def test_send_control_panel_posts_inline_keyboard(self):
+        fake_requests = _FakeRequests()
+        env = {
+            "TELEGRAM_ENABLED": "true",
+            "TELEGRAM_BOT_TOKEN": "123456:abcdefghijklmnopqrstuvwxyz",
+            "TELEGRAM_CHAT_ID": "456",
+        }
+        with patch.dict(os.environ, env, clear=False), patch("services.telegram_service.requests", fake_requests):
+            self.assertTrue(telegram_service.send_control_panel())
+
+        payload = fake_requests.calls[0]["data"]
+        keyboard = json.loads(payload["reply_markup"])
+        callbacks = [
+            button["callback_data"]
+            for row in keyboard["inline_keyboard"]
+            for button in row
+            if "callback_data" in button
+        ]
+        self.assertIn("auto_shop:run:scout", callbacks)
+        self.assertIn("auto_shop:run:upload", callbacks)
+        self.assertIn("auto_shop:stop", callbacks)
 
     def test_missing_credentials_disables_notification(self):
         fake_requests = _FakeRequests()
@@ -95,7 +118,7 @@ class TelegramServiceTests(unittest.TestCase):
         def store_for_account(*, service_name, account_key):
             class _Store:
                 def load(self):
-                    return "123:abc" if account_key == "default.bot_token" else ""
+                    return "123456:abcdefghijklmnopqrstuvwxyz" if account_key == "default.bot_token" else ""
 
             return _Store()
 
@@ -116,7 +139,7 @@ class TelegramServiceTests(unittest.TestCase):
 
         text = send_message.call_args.args[0]
         self.assertIn("✅ 작업 완료", text)
-        self.assertIn("────────────", text)
+        self.assertIn("------------", text)
         self.assertIn("작업: 정찰\n\n성공: 1", text)
         self.assertIn("실패: 0\n소요시간: 6초", text)
 
@@ -132,7 +155,7 @@ class TelegramServiceTests(unittest.TestCase):
         fake_requests = _FakeRequests()
         env = {
             "TELEGRAM_ENABLED": "true",
-            "TELEGRAM_BOT_TOKEN": "123:abc",
+            "TELEGRAM_BOT_TOKEN": "123456:abcdefghijklmnopqrstuvwxyz",
             "TELEGRAM_CHAT_ID": "456",
         }
         message = "user@example.com /tmp/auto_shop/credentials.json 123456:abcdefghijklmnopqrstuvwxyz"

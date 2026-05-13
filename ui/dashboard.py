@@ -22,6 +22,7 @@ from services.buyma_service import BuymaCredentialService
 from services.dashboard_data_service import DashboardDataService
 from services.log_store import FileLogWriter
 from services.system_checker import SystemChecker
+from services.telegram_remote_control import TelegramRemoteController
 from state.app_state import AppLogger, AppState, AppStateChange, LogEvent
 from state.snapshot_store import StateSnapshotStore
 from ui.components import ColorButton
@@ -130,6 +131,7 @@ class AutoShopLauncher(tk.Tk):
 
         self.log_queue: queue.Queue[LogEvent] = queue.Queue()
         self.state_queue: queue.Queue[AppStateChange] = queue.Queue()
+        self.remote_command_queue: queue.Queue[tuple[str, queue.Queue[str]]] = queue.Queue()
         self.profile_name = get_saved_profile_name()
         os.environ["AUTO_SHOP_PROFILE"] = self.profile_name
         self.profile_config = load_profile_config(self.profile_name, create_if_missing=True)
@@ -173,6 +175,10 @@ class AutoShopLauncher(tk.Tk):
             process_manager=self.process_manager,
             command_builder=self.command_builder.build,
             ensure_ready=self._ensure_sheet_config_before_action,
+        )
+        self.telegram_remote = TelegramRemoteController(
+            command_callback=self._enqueue_remote_command,
+            log_callback=lambda message: self.logger.emit(f"{message}\n", category="telegram"),
         )
         self.dashboard_data = DashboardDataService(
             data_dir=self.data_dir,
@@ -261,9 +267,11 @@ class AutoShopLauncher(tk.Tk):
         self._refresh_action_button_labels()
         self.after(100, self._drain_log_queue)
         self.after(100, self._drain_state_queue)
+        self.after(100, self._drain_remote_command_queue)
         # Defer heavy data sync so window renders first.
         self.after(300, self.refresh_dashboard_data)
         self.after(250, self._ensure_sheet_config_on_startup)
+        self.after(1200, lambda: self.telegram_remote.start(send_panel=True))
 
     def _enqueue_log(self, event: LogEvent) -> None:
         self.log_queue.put(event)
@@ -2135,6 +2143,74 @@ class AutoShopLauncher(tk.Tk):
         finally:
             self.after(100, self._drain_state_queue)
 
+    def _enqueue_remote_command(self, action: str) -> str:
+        response_queue: queue.Queue[str] = queue.Queue(maxsize=1)
+        self.remote_command_queue.put((action, response_queue))
+        try:
+            return response_queue.get(timeout=5)
+        except queue.Empty:
+            return "명령 접수됨"
+
+    def _drain_remote_command_queue(self) -> None:
+        try:
+            while not self.remote_command_queue.empty():
+                action, response_queue = self.remote_command_queue.get_nowait()
+                result = self._handle_remote_command(action)
+                try:
+                    response_queue.put_nowait(result)
+                except queue.Full:
+                    pass
+        finally:
+            self.after(100, self._drain_remote_command_queue)
+
+    def _handle_remote_command(self, action: str) -> str:
+        if action == "status":
+            current = self.state.status_text or "대기중"
+            running = self.state.current_action or "없음"
+            active_teams = [
+                label
+                for key, label in {"assets": "이미지", "design": "썸네일", "sales": "업로드"}.items()
+                if self.team_watch_enabled.get(key) or self.process_manager.is_team_running(key)
+            ]
+            team_text = ", ".join(active_teams) if active_teams else "없음"
+            return f"현재 상태: {current}\n실행 작업: {running}\n감시 작업: {team_text}"
+        if action == "stop":
+            team_running = any(
+                self.team_watch_enabled.get(key) or self.process_manager.is_team_running(key)
+                for key in self.team_watch_actions
+            )
+            if not self.process_manager.is_running() and not team_running:
+                return "실행 중인 작업이 없습니다."
+            if team_running:
+                for job_id in list(self.team_watch_jobs.values()):
+                    try:
+                        self.after_cancel(job_id)
+                    except Exception:
+                        pass
+                self.team_watch_jobs.clear()
+                for key in self.team_watch_actions:
+                    self.state.set_team_watch_enabled(key, False)
+                    self.state.set_stage_status(key, "대기")
+                self.action_runner.stop_all()
+                self.state.set_current_action("", "")
+                self.state.set_status("대기중")
+                self._set_running_ui(False)
+                self._refresh_action_button_labels()
+            elif self.process_manager.is_running():
+                self.stop_action()
+            return "전체 작업 중지를 요청했습니다."
+        allowed_actions = {"run", "save-images", "thumbnail-create", "upload-auto"}
+        if action not in allowed_actions:
+            return "허용되지 않은 명령입니다."
+        if self.process_manager.is_running():
+            return "이미 작업이 실행 중입니다."
+        if action == "upload-auto" and not self._has_buyma_credentials():
+            return "BUYMA 계정 저장이 필요합니다."
+        if not self._ensure_sheet_config_before_action(action):
+            return "시트 설정이 필요합니다."
+        self.action_runner.run(action)
+        return "실행을 시작했습니다."
+
     def stop_action(self) -> None:
         if not self.process_manager.is_running():
             self.state.set_status("대기중")
@@ -2150,6 +2226,10 @@ class AutoShopLauncher(tk.Tk):
 
     def on_close(self) -> None:
         self._close_action_bubble()
+        try:
+            self.telegram_remote.stop()
+        except Exception:
+            pass
         if self.auto_refresh_job:
             try:
                 self.after_cancel(self.auto_refresh_job)

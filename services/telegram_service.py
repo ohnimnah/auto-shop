@@ -223,32 +223,136 @@ def _deduped(text: str) -> bool:
     return False
 
 
-def send_message(text: str) -> bool:
+def _telegram_post(token: str, method: str, data: dict[str, Any], timeout: int = 10) -> dict[str, Any]:
+    if requests is None:
+        return {}
+    url = f"https://api.telegram.org/bot{token}/{method}"
+    if hasattr(requests, "Session"):
+        with requests.Session() as session:
+            session.trust_env = False
+            response = session.post(url, data=data, timeout=timeout)
+    else:  # useful for small test doubles
+        response = requests.post(url, data=data, timeout=timeout)
+    response.raise_for_status()
+    try:
+        return response.json()
+    except Exception:
+        return {}
+
+
+def _telegram_get(token: str, method: str, params: dict[str, Any], timeout: int = 35) -> dict[str, Any]:
+    if requests is None:
+        return {}
+    url = f"https://api.telegram.org/bot{token}/{method}"
+    if hasattr(requests, "Session"):
+        with requests.Session() as session:
+            session.trust_env = False
+            response = session.get(url, params=params, timeout=timeout)
+    else:
+        response = requests.get(url, params=params, timeout=timeout)
+    response.raise_for_status()
+    try:
+        return response.json()
+    except Exception:
+        return {}
+
+
+def _runtime_credentials() -> tuple[dict[str, Any], str, str]:
+    config = _load_telegram_config()
+    env_file = _read_env_file()
+    token = _load_token(config, env_file)
+    chat_id = _load_chat_id(config, env_file)
+    return config, token, chat_id
+
+
+def send_message(text: str, reply_markup: dict[str, Any] | None = None) -> bool:
     """Send a Telegram message if configured; never raise into main flow."""
     try:
-        config = _load_telegram_config()
-        env_file = _read_env_file()
-        token = _load_token(config, env_file)
-        chat_id = _load_chat_id(config, env_file)
+        config, token, chat_id = _runtime_credentials()
         if not _is_enabled(config) or not token or not chat_id or requests is None:
             return False
         if not _is_valid_telegram_token(token) or not _is_valid_chat_id(chat_id):
             return False
 
         message = _truncate_message(text, MAX_MESSAGE_CHARS)
-        if _deduped(message):
+        if reply_markup is None and _deduped(message):
             return False
 
-        with requests.Session() as session:
-            # Ignore broken OS proxy env values.
-            session.trust_env = False
-            response = session.post(
-                f"https://api.telegram.org/bot{token}/sendMessage",
-                data={"chat_id": chat_id, "text": message},
-                timeout=10,
-            )
-        response.raise_for_status()
+        data = {"chat_id": chat_id, "text": message}
+        if reply_markup is not None:
+            data["reply_markup"] = json.dumps(reply_markup, ensure_ascii=False)
+        _telegram_post(token, "sendMessage", data, timeout=10)
         return True
+    except Exception:
+        return False
+
+
+def send_control_panel() -> bool:
+    """Send a Telegram remote-control panel with approved actions only."""
+    keyboard = {
+        "inline_keyboard": [
+            [
+                {"text": "정찰", "callback_data": "auto_shop:run:scout"},
+                {"text": "이미지", "callback_data": "auto_shop:run:image"},
+            ],
+            [
+                {"text": "썸네일", "callback_data": "auto_shop:run:thumbnail"},
+                {"text": "업로드", "callback_data": "auto_shop:run:upload"},
+            ],
+            [
+                {"text": "상태", "callback_data": "auto_shop:status"},
+                {"text": "중지", "callback_data": "auto_shop:stop"},
+            ],
+        ]
+    }
+    return send_message("Auto Shop 원격제어\n------------\n실행할 작업을 선택하세요.", reply_markup=keyboard)
+
+
+def get_updates(offset: int = 0, timeout: int = 25) -> list[dict[str, Any]]:
+    """Fetch Telegram updates for remote control; returns [] on any issue."""
+    try:
+        config, token, chat_id = _runtime_credentials()
+        if not _is_enabled(config) or not token or not chat_id or requests is None:
+            return []
+        if not _is_valid_telegram_token(token) or not _is_valid_chat_id(chat_id):
+            return []
+        payload = _telegram_get(
+            token,
+            "getUpdates",
+            {
+                "offset": offset,
+                "timeout": max(1, int(timeout)),
+                "allowed_updates": json.dumps(["message", "callback_query"]),
+            },
+            timeout=max(5, int(timeout) + 5),
+        )
+        result = payload.get("result", [])
+        return result if isinstance(result, list) else []
+    except Exception:
+        return []
+
+
+def answer_callback_query(callback_query_id: str, text: str = "") -> bool:
+    """Acknowledge an inline button click."""
+    try:
+        config, token, chat_id = _runtime_credentials()
+        if not _is_enabled(config) or not token or not chat_id or requests is None:
+            return False
+        if not callback_query_id or not _is_valid_telegram_token(token):
+            return False
+        _telegram_post(token, "answerCallbackQuery", {"callback_query_id": callback_query_id, "text": _truncate(text, 180)}, timeout=10)
+        return True
+    except Exception:
+        return False
+
+
+def is_authorized_chat(chat_id: Any) -> bool:
+    """Return whether a Telegram update came from the configured chat."""
+    try:
+        config, _token, configured_chat_id = _runtime_credentials()
+        if not _is_enabled(config) or not configured_chat_id:
+            return False
+        return str(chat_id or "").strip() == str(configured_chat_id).strip()
     except Exception:
         return False
 
@@ -392,4 +496,3 @@ def _log_missing_buyma_category_translation(category_part: str) -> None:
             fp.write(json.dumps(payload, ensure_ascii=False) + "\n")
     except Exception:
         return
-
