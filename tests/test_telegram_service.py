@@ -152,6 +152,33 @@ class TelegramServiceTests(unittest.TestCase):
         self.assertIn("⚠️ 작업 완료", text)
         self.assertIn("실패: 1", text)
 
+    def test_upload_success_translates_common_buyma_child_categories(self):
+        product = {
+            "product_name": "sample",
+            "brand": "brand",
+            "buyma_price": "10000",
+            "category": "レディースファッション > ボトムス > デニム・ジーパン",
+        }
+        with patch("services.telegram_service.send_message") as send_message:
+            telegram_service.notify_upload_success(product)
+
+        text = send_message.call_args.args[0]
+        self.assertIn("카테고리: デニム・ジーパン (데님/청바지)", text)
+
+    def test_upload_success_translates_missing_log_categories(self):
+        expected = {
+            "ショートパンツ": "반바지",
+            "ワンピース": "원피스",
+            "スカート": "스커트",
+            "カーディガン": "가디건",
+        }
+
+        for category, translated in expected.items():
+            with self.subTest(category=category), patch("services.telegram_service.send_message") as send_message:
+                telegram_service.notify_upload_success({"product_name": "sample", "category": category})
+                text = send_message.call_args.args[0]
+                self.assertIn(f"카테고리: {category} ({translated})", text)
+
     def test_sensitive_values_are_masked(self):
         fake_requests = _FakeRequests()
         env = {

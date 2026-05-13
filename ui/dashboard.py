@@ -2141,7 +2141,23 @@ class AutoShopLauncher(tk.Tk):
             for change in pending_changes:
                 self._render_state_change(change)
         finally:
+            self._sync_one_shot_action_state()
             self.after(100, self._drain_state_queue)
+
+    def _sync_one_shot_action_state(self) -> None:
+        """Recover the quick-action UI if a one-shot subprocess has already exited."""
+        if self.process_manager.is_running():
+            if self.state.current_action:
+                self._set_running_ui(True)
+            return
+        if not self.state.current_action:
+            self._set_running_ui(False)
+            self._refresh_action_button_labels()
+            return
+        self.state.set_current_action("", "")
+        self.state.set_status("대기중")
+        self._set_running_ui(False)
+        self._refresh_action_button_labels()
 
     def _enqueue_remote_command(self, action: str) -> str:
         response_queue: queue.Queue[str] = queue.Queue(maxsize=1)
