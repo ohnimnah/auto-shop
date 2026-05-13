@@ -292,15 +292,18 @@ def send_control_panel() -> bool:
     keyboard = {
         "inline_keyboard": [
             [
+                {"text": "목록수집", "callback_data": "auto_shop:run:collect-listings"},
                 {"text": "정찰", "callback_data": "auto_shop:run:scout"},
+            ],
+            [
                 {"text": "이미지", "callback_data": "auto_shop:run:image"},
-            ],
-            [
                 {"text": "썸네일", "callback_data": "auto_shop:run:thumbnail"},
-                {"text": "업로드", "callback_data": "auto_shop:run:upload"},
             ],
             [
+                {"text": "업로드", "callback_data": "auto_shop:run:upload"},
                 {"text": "상태", "callback_data": "auto_shop:status"},
+            ],
+            [
                 {"text": "중지", "callback_data": "auto_shop:stop"},
             ],
         ]

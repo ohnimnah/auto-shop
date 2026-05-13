@@ -16,6 +16,7 @@ from services.telegram_service import (
 
 
 REMOTE_ACTIONS = {
+    "auto_shop:run:collect-listings": ("collect-listings", "목록 수집"),
     "auto_shop:run:scout": ("run", "정찰"),
     "auto_shop:run:image": ("save-images", "이미지 저장"),
     "auto_shop:run:thumbnail": ("thumbnail-create", "썸네일 생성"),

@@ -86,6 +86,7 @@ class TelegramServiceTests(unittest.TestCase):
             for button in row
             if "callback_data" in button
         ]
+        self.assertIn("auto_shop:run:collect-listings", callbacks)
         self.assertIn("auto_shop:run:scout", callbacks)
         self.assertIn("auto_shop:run:upload", callbacks)
         self.assertIn("auto_shop:stop", callbacks)

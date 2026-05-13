@@ -2199,7 +2199,7 @@ class AutoShopLauncher(tk.Tk):
             elif self.process_manager.is_running():
                 self.stop_action()
             return "전체 작업 중지를 요청했습니다."
-        allowed_actions = {"run", "save-images", "thumbnail-create", "upload-auto"}
+        allowed_actions = {"collect-listings", "run", "save-images", "thumbnail-create", "upload-auto"}
         if action not in allowed_actions:
             return "허용되지 않은 명령입니다."
         if self.process_manager.is_running():
