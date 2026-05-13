@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+import json
 import re
 from datetime import datetime
 from typing import Dict, List
@@ -26,6 +27,23 @@ SELECT_OPTION_QUERY = (
     "[class*='Select__option'], [class*='select__option'], "
     "[role='listbox'] [role='option'], [role='option']"
 )
+
+
+def _write_actual_size_event(event: str, **payload) -> None:
+    """Append actual-size diagnostics without interrupting upload flow."""
+    try:
+        logs_dir = os.path.join(os.getcwd(), "logs")
+        os.makedirs(logs_dir, exist_ok=True)
+        record = {
+            "ts": datetime.now().isoformat(timespec="seconds"),
+            "event": event,
+            **payload,
+        }
+        path = os.path.join(logs_dir, "actual_size_events.jsonl")
+        with open(path, "a", encoding="utf-8") as fp:
+            fp.write(json.dumps(record, ensure_ascii=False) + "\n")
+    except Exception:
+        return
 
 
 def _find_select_controls(scope):
@@ -1129,8 +1147,17 @@ def fill_size_edit_details(
 
     all_rows = extract_actual_size_rows_fn(actual_size_text)
     fallback_pairs = extract_actual_measure_map_fn(actual_size_text)
+    _write_actual_size_event(
+        "parsed",
+        text_preview=(actual_size_text or "")[:300],
+        row_keys=list(all_rows.keys()),
+        row_count=len(all_rows),
+        fallback_keys=list(fallback_pairs.keys()),
+        fallback_count=len(fallback_pairs),
+    )
     if not all_rows and not fallback_pairs:
         print("  [actual-size] skip: no parsed measurement rows")
+        _write_actual_size_event("skip_no_parsed_rows")
         return 0
 
     try:
@@ -1186,6 +1213,7 @@ def fill_size_edit_details(
                 "//div[contains(@class,'sell-variation')]//*[self::button or self::a][contains(normalize-space(.), '編集')]",
             )
         print(f"  [actual-size] edit buttons found: total={len(edit_buttons)}")
+        _write_actual_size_event("edit_buttons_found", total=len(edit_buttons))
         filled_count = 0
         main_handle = driver.current_window_handle
         ordered_size_keys = list(all_rows.keys())
@@ -1218,6 +1246,13 @@ def fill_size_edit_details(
                 if not selected_pairs:
                     selected_pairs = fallback_pairs
                 print(f"  [actual-size] open edit: size_key='{current_size_key or 'N/A'}' pairs={len(selected_pairs or {})}")
+                _write_actual_size_event(
+                    "open_edit",
+                    button_index=btn_idx,
+                    size_key=current_size_key or "",
+                    pair_keys=list((selected_pairs or {}).keys()),
+                    pair_count=len(selected_pairs or {}),
+                )
                 before_handles = set(driver.window_handles)
                 before_modal_count = len(driver.find_elements(By.CSS_SELECTOR, "[role='dialog'], .ReactModal__Content, .bmm-c-modal"))
                 before_url = driver.current_url
@@ -1298,6 +1333,14 @@ def fill_size_edit_details(
                     "tr, .bmm-c-field, .bmm-c-form-table__table tbody tr, .sell-size-detail-form__item",
                 )
                 print(f"  [actual-size] label rows: {len(rows)}")
+                _write_actual_size_event(
+                    "dialog_detected",
+                    button_index=btn_idx,
+                    visible_inputs=len(visible_inputs),
+                    label_rows=len(rows),
+                    active_frame=active_frame,
+                    popup=bool(popup_handle),
+                )
                 local_filled = 0
                 used_inputs = set()
                 for row in rows:
@@ -1336,10 +1379,22 @@ def fill_size_edit_details(
 
                 if local_filled == 0 and selected_pairs:
                     print("  [actual-size] label matching failed; skip order-based numeric fill")
+                    _write_actual_size_event(
+                        "label_matching_failed",
+                        button_index=btn_idx,
+                        size_key=current_size_key or "",
+                        pair_keys=list((selected_pairs or {}).keys()),
+                    )
 
                 if local_filled > 0:
                     filled_count += local_filled
                     print(f"  [actual-size] filled fields: {local_filled}")
+                    _write_actual_size_event(
+                        "filled_dialog",
+                        button_index=btn_idx,
+                        size_key=current_size_key or "",
+                        filled_fields=local_filled,
+                    )
                     save_scope = driver if active_frame is not None else dialog
                     save_buttons = save_scope.find_elements(
                         By.XPATH,
@@ -1353,6 +1408,11 @@ def fill_size_edit_details(
                         scroll_and_click(driver, save_buttons[0])
                 else:
                     print("  [actual-size] no fields filled in this dialog")
+                    _write_actual_size_event(
+                        "no_fields_filled",
+                        button_index=btn_idx,
+                        size_key=current_size_key or "",
+                    )
                     _dump_edit_debug(f"nofield_{btn_idx}")
 
                 if active_frame is not None and popup_handle is None:
@@ -1381,9 +1441,11 @@ def fill_size_edit_details(
 
         if filled_count == 0:
             print("  [actual-size] result: 0 fields filled")
+        _write_actual_size_event("result", filled_count=filled_count)
         return filled_count
     except Exception:
         print("  [actual-size] failed: unexpected error")
+        _write_actual_size_event("failed_unexpected_error")
         return 0
 
 
