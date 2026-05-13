@@ -16,6 +16,7 @@ from marketplace.buyma.failure_tracking import capture_failure_artifacts
 from marketplace.buyma.mapper import buyma_title_units
 from marketplace.buyma.retry_ops import safe_click
 from marketplace.common.interfaces import MarketplaceRow, MarketplaceUploader
+from marketplace.common.browser_cleanup import quit_driver_safely
 from services.telegram_service import notify_upload_failed, notify_upload_success
 try:
     from selenium.webdriver.common.by import By
@@ -294,7 +295,7 @@ def upload_products(
         else:
             if interactive:
                 safe_input("\n브라우저를 모두 닫으면 Enter를 눌러주세요...")
-            driver.quit()
+            quit_driver_safely(driver, log=print)
             print("브라우저가 종료되었습니다.")
 
 

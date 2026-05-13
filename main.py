@@ -132,6 +132,7 @@ from services.shipping_service import (
 from services.browser_service import setup_chrome_driver as svc_setup_chrome_driver
 from models.product_model import Product, product_to_sheet_field_map
 from services.listing_queue_service import collect_listing_queue_once, resolve_listing_queue_target
+from marketplace.common.browser_cleanup import quit_driver_safely
 
 # 런처 subprocess 로그가 OS 로케일과 무관하게 UTF-8로 흐르도록 고정한다.
 try:
@@ -1186,7 +1187,7 @@ def main():
                 product_url_column=URL_COLUMN,
             )
         finally:
-            driver.quit()
+            quit_driver_safely(driver, log=print)
             print("브라우저를 종료합니다.")
         return
 
@@ -1256,7 +1257,7 @@ def main():
                 )
             print("모든 시트 처리가 완료되었습니다.")
     finally:
-        driver.quit()
+        quit_driver_safely(driver, log=print)
         print("브라우저를 종료합니다.")
 
 

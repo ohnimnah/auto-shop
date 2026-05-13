@@ -50,6 +50,7 @@ from googleapiclient.discovery import build
 from category_correction import correct_buyma_category
 from config.config_service import load_config as load_profile_config
 from marketplace.common import sheet_source as common_sheet_source_mod
+from marketplace.common.browser_cleanup import quit_driver_safely
 from marketplace.common.runtime import get_runtime_data_dir as common_get_runtime_data_dir
 from marketplace.buyma import category as buyma_category_mod
 from marketplace.buyma import images as buyma_images_mod
@@ -1149,7 +1150,7 @@ def main():
             scan_form_structure(driver)
         finally:
             _safe_input("\nEnter를 눌러 브라우저를 닫습니다...")
-            driver.quit()
+            quit_driver_safely(driver, log=print)
     else:
         if args.watch:
             interval = max(5, int(args.interval))
