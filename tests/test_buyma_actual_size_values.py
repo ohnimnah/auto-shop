@@ -91,6 +91,48 @@ class BuymaActualSizeValueTests(unittest.TestCase):
         self.assertEqual(pick_measure_value_by_label("もも周り", measures), "29")
         self.assertEqual(pick_measure_value_by_label("すそ周り", measures), "27")
 
+    def test_pick_measure_value_matches_common_buyma_japanese_labels(self):
+        measures = {
+            "총장": "70",
+            "어깨너비": "45",
+            "가슴단면": "55",
+            "소매길이": "60",
+            "목둘레": "18",
+            "암홀": "24",
+        }
+
+        self.assertEqual(pick_measure_value_by_label("着丈", measures), "70")
+        self.assertEqual(pick_measure_value_by_label("肩幅", measures), "45")
+        self.assertEqual(pick_measure_value_by_label("身幅", measures), "55")
+        self.assertEqual(pick_measure_value_by_label("袖丈", measures), "60")
+        self.assertEqual(pick_measure_value_by_label("首周り", measures), "18")
+        self.assertEqual(pick_measure_value_by_label("アームホール", measures), "24")
+
+    def test_pick_measure_value_matches_bag_hat_and_shoes_labels(self):
+        measures = {
+            "가로": "25",
+            "세로": "18",
+            "폭": "7",
+            "손잡이": "20",
+            "스트랩": "110",
+            "머리둘레": "58",
+            "챙길이": "7",
+            "발볼": "9",
+            "발길이": "24",
+            "굽높이": "5",
+        }
+
+        self.assertEqual(pick_measure_value_by_label("横", measures), "25")
+        self.assertEqual(pick_measure_value_by_label("高さ", measures), "18")
+        self.assertEqual(pick_measure_value_by_label("マチ", measures), "7")
+        self.assertEqual(pick_measure_value_by_label("持ち手", measures), "20")
+        self.assertEqual(pick_measure_value_by_label("ストラップ", measures), "110")
+        self.assertEqual(pick_measure_value_by_label("頭周り", measures), "58")
+        self.assertEqual(pick_measure_value_by_label("つば", measures), "7")
+        self.assertEqual(pick_measure_value_by_label("ワイズ", measures), "9")
+        self.assertEqual(pick_measure_value_by_label("インソール", measures), "24")
+        self.assertEqual(pick_measure_value_by_label("ヒール高", measures), "5")
+
 
 if __name__ == "__main__":
     unittest.main()
