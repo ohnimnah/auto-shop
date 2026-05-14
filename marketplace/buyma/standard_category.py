@@ -86,6 +86,9 @@ class StandardCategory(str, Enum):
     ACC_EYEWEAR = "ACC_EYEWEAR"
     ACC_WATCH = "ACC_WATCH"
 
+    # Phone / tech accessories
+    TECH_ACCESSORY = "TECH_ACCESSORY"
+
     ETC = "ETC"
 
 
@@ -121,6 +124,7 @@ MIDDLE_ACCESSORIES_MEN = "ファッション雑貨・小物"
 MIDDLE_EYEWEAR_MEN = "アイウェア"
 MIDDLE_HATS = "帽子"
 MIDDLE_WATCH = "腕時計"
+MIDDLE_TECH_ACCESSORY = "スマホケース・テックアクセサリー"
 
 
 STANDARD_CATEGORY_SPECS = {
@@ -185,6 +189,7 @@ STANDARD_CATEGORY_SPECS = {
     StandardCategory.ACC_JEWELRY: StandardCategorySpec(StandardCategory.ACC_JEWELRY, "アクセサリー", "アクセサリー", "", ("목걸이", "반지", "귀걸이", "팔찌", "necklace", "ring", "earring", "bracelet")),
     StandardCategory.ACC_EYEWEAR: StandardCategorySpec(StandardCategory.ACC_EYEWEAR, MIDDLE_ACCESSORIES_WOMEN, MIDDLE_EYEWEAR_MEN, "サングラス", ("선글라스", "안경", "sunglasses", "eyewear")),
     StandardCategory.ACC_WATCH: StandardCategorySpec(StandardCategory.ACC_WATCH, MIDDLE_WATCH, MIDDLE_WATCH, "", ("시계", "watch")),
+    StandardCategory.TECH_ACCESSORY: StandardCategorySpec(StandardCategory.TECH_ACCESSORY, MIDDLE_TECH_ACCESSORY, MIDDLE_TECH_ACCESSORY, "テックアクセサリー", ("디지털", "가전", "디지털가전", "digital", "electronics", "tech accessory", "tech accessories", "phone case", "smartphone case", "airpods", "airpod", "에어팟", "폰케이스", "핸드폰케이스")),
 }
 
 
@@ -296,6 +301,7 @@ RESOLUTION_PRIORITY: Tuple[StandardCategory, ...] = (
     StandardCategory.BAG_TOTE,
     StandardCategory.BAG_CLUTCH,
     StandardCategory.BAG_WALLET,
+    StandardCategory.TECH_ACCESSORY,
     StandardCategory.ACC_WATCH,
     StandardCategory.ACC_EYEWEAR,
     StandardCategory.ACC_JEWELRY,

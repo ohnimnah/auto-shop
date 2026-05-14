@@ -70,6 +70,7 @@ CATEGORY_FALLBACK_RULES: List[Tuple[str, List[str], StandardCategory]] = [
     ("padding", ["padding", "puffer", "down jacket", "패딩"], StandardCategory.OUTER_PADDING),
     ("jacket", ["jacket", "jumper", "blouson", "자켓", "재킷", "점퍼"], StandardCategory.OUTER_JACKET),
     ("bag", ["bag", "백", "토트", "숄더백", "crossbody"], StandardCategory.BAG_SHOULDER),
+    ("tech_accessory", ["디지털", "가전", "digital", "electronics", "tech accessory", "phone case", "airpods", "에어팟", "폰케이스"], StandardCategory.TECH_ACCESSORY),
     ("beanie", ["beanie", "비니", "니트모자", "토크", "toque"], StandardCategory.ACC_BEANIE),
     ("cap", ["cap", "hat", "캡", "볼캡"], StandardCategory.ACC_CAP),
     ("belt", ["belt", "벨트"], StandardCategory.ACC_BELT),
@@ -93,6 +94,10 @@ FORCE_CATEGORY_MAP: Dict[Tuple[str, ...], StandardCategory] = {
 }
 
 MUSINSA_CATEGORY_OVERRIDES: List[Tuple[Tuple[str, ...], StandardCategory]] = [
+    (("디지털",), StandardCategory.TECH_ACCESSORY),
+    (("가전",), StandardCategory.TECH_ACCESSORY),
+    (("digital",), StandardCategory.TECH_ACCESSORY),
+    (("electronics",), StandardCategory.TECH_ACCESSORY),
     (("아우터", "패딩"), StandardCategory.OUTER_PADDING),
     (("아우터", "다운"), StandardCategory.OUTER_PADDING),
     (("아우터", "puffer"), StandardCategory.OUTER_PADDING),

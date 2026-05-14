@@ -118,6 +118,18 @@ class MusinsaCategoryOverrideTests(unittest.TestCase):
         self.assertEqual(result, StandardCategory.OUTER_JACKET)
         self.assertEqual(meta["reason"], "musinsa_category_override")
 
+    def test_musinsa_digital_category_wins_over_tshirt_keywords(self):
+        result, meta = classify_standard_category_from_sheet(
+            musinsa_large="여성",
+            musinsa_middle="디지털/가전",
+            musinsa_small="",
+            product_name="GRAPHIC TEE AIRPODS CASE",
+            brand="BRAND",
+        )
+
+        self.assertEqual(result, StandardCategory.TECH_ACCESSORY)
+        self.assertEqual(meta["reason"], "musinsa_category_override")
+
 
 if __name__ == "__main__":
     unittest.main()

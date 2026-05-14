@@ -178,6 +178,23 @@ class StandardCategoryTests(unittest.TestCase):
         self.assertEqual(plan["cat3"], "ジャケット")
         self.assertTrue(plan["category_path_valid"])
 
+    def test_buyma_category_plan_maps_digital_to_tech_accessory(self):
+        row = {
+            "product_name_kr": "",
+            "product_name_en": "GRAPHIC TEE AIRPODS CASE",
+            "brand": "BRAND",
+            "musinsa_category_large": "여성",
+            "musinsa_category_middle": "디지털/가전",
+            "musinsa_category_small": "",
+        }
+
+        plan = build_buyma_category_plan(row, category_corrector=_identity_corrector)
+
+        self.assertEqual(plan["standard_category"], "TECH_ACCESSORY")
+        self.assertEqual(plan["cat2"], "スマホケース・テックアクセサリー")
+        self.assertEqual(plan["cat3"], "テックアクセサリー")
+        self.assertTrue(plan["category_path_valid"])
+
     def test_category_recovery_aliases(self):
         self.assertIn("デニム・ジーンズ", _category_recovery_aliases("デニム・ジーパン"))
         self.assertIn("スウェット", _category_recovery_aliases("スウェット・トレーナー"))
