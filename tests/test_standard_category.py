@@ -161,6 +161,23 @@ class StandardCategoryTests(unittest.TestCase):
         self.assertEqual(plan["cat3"], "デニム・ジーパン")
         self.assertTrue(plan["category_path_valid"])
 
+    def test_buyma_category_plan_maps_sports_outer_to_outer_jacket(self):
+        row = {
+            "product_name_kr": "",
+            "product_name_en": "URBAN SUEDE JUMPER",
+            "brand": "GLOWNY",
+            "musinsa_category_large": "여성",
+            "musinsa_category_middle": "스포츠/레저",
+            "musinsa_category_small": "아우터",
+        }
+
+        plan = build_buyma_category_plan(row, category_corrector=_identity_corrector)
+
+        self.assertEqual(plan["standard_category"], "OUTER_JACKET")
+        self.assertEqual(plan["cat2"], "アウター")
+        self.assertEqual(plan["cat3"], "ジャケット")
+        self.assertTrue(plan["category_path_valid"])
+
     def test_category_recovery_aliases(self):
         self.assertIn("デニム・ジーンズ", _category_recovery_aliases("デニム・ジーパン"))
         self.assertIn("スウェット", _category_recovery_aliases("スウェット・トレーナー"))

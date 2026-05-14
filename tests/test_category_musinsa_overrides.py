@@ -106,6 +106,18 @@ class MusinsaCategoryOverrideTests(unittest.TestCase):
                 self.assertEqual(result, expected)
                 self.assertEqual(meta["reason"], "musinsa_category_override")
 
+    def test_musinsa_outer_category_wins_over_broad_sports_label(self):
+        result, meta = classify_standard_category_from_sheet(
+            musinsa_large="여성",
+            musinsa_middle="스포츠/레저",
+            musinsa_small="아우터",
+            product_name="URBAN SUEDE JUMPER",
+            brand="GLOWNY",
+        )
+
+        self.assertEqual(result, StandardCategory.OUTER_JACKET)
+        self.assertEqual(meta["reason"], "musinsa_category_override")
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -138,7 +138,7 @@ STANDARD_CATEGORY_SPECS = {
     StandardCategory.OUTER_PADDING: StandardCategorySpec(StandardCategory.OUTER_PADDING, MIDDLE_OUTER_WOMEN, MIDDLE_OUTER_MEN, "ダウンジャケット・コート", ("패딩", "다운", "down jacket", "puffer", "padding")),
     StandardCategory.OUTER_COAT: StandardCategorySpec(StandardCategory.OUTER_COAT, MIDDLE_OUTER_WOMEN, MIDDLE_OUTER_MEN, "コート", ("코트", "coat", "duffle coat")),
     StandardCategory.OUTER_TRENCH: StandardCategorySpec(StandardCategory.OUTER_TRENCH, MIDDLE_OUTER_WOMEN, MIDDLE_OUTER_MEN, "トレンチコート", ("트렌치", "trench")),
-    StandardCategory.OUTER_JACKET: StandardCategorySpec(StandardCategory.OUTER_JACKET, MIDDLE_OUTER_WOMEN, MIDDLE_OUTER_MEN, "ジャケット", ("자켓", "재킷", "jacket")),
+    StandardCategory.OUTER_JACKET: StandardCategorySpec(StandardCategory.OUTER_JACKET, MIDDLE_OUTER_WOMEN, MIDDLE_OUTER_MEN, "ジャケット", ("자켓", "재킷", "점퍼", "jacket", "jumper", "blouson")),
     StandardCategory.OUTER_BLAZER: StandardCategorySpec(StandardCategory.OUTER_BLAZER, MIDDLE_OUTER_WOMEN, MIDDLE_OUTER_MEN, "テーラードジャケット", ("블레이저", "blazer", "tailored jacket")),
     StandardCategory.OUTER_DENIM_JACKET: StandardCategorySpec(StandardCategory.OUTER_DENIM_JACKET, MIDDLE_OUTER_WOMEN, MIDDLE_OUTER_MEN, "デニムジャケット", ("데님 자켓", "데님재킷", "denim jacket", "truck jacket")),
     StandardCategory.OUTER_LEATHER_JACKET: StandardCategorySpec(StandardCategory.OUTER_LEATHER_JACKET, MIDDLE_OUTER_WOMEN, MIDDLE_OUTER_MEN, "レザージャケット・コート", ("레더 자켓", "레더재킷", "가죽 자켓", "가죽재킷", "leather jacket")),
