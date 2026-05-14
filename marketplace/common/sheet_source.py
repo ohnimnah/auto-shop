@@ -319,6 +319,9 @@ def read_upload_rows(
                 candidate_rows.append(row_start + offset)
         if candidate_rows:
             print(f"업로드 후보 진행상태: {len(candidate_rows)}행 ({status_col}열)")
+            preview = ", ".join(str(row_num) for row_num in candidate_rows[:20])
+            suffix = "..." if len(candidate_rows) > 20 else ""
+            print(f"업로드 후보 행: {preview}{suffix}")
         else:
             summary = ", ".join(f"{name}:{count}" for name, count in status_counts.most_common(6)) or "읽힌 상태값 없음"
             print(f"업로드 후보 없음: 진행상태 {status_col}열에서 대상 상태를 찾지 못했습니다. 상태 분포: {summary}")

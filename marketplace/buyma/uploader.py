@@ -125,7 +125,9 @@ def upload_products(
 
     print(f"출품 행수: {len(rows)}개품\n")
     for row in rows:
-        print(f"  {row['row_num']}행 {row['brand']} - {row['product_name_kr']} (JPY {row['buyma_price']})")
+        status = row.get("progress_status", "")
+        status_text = f" / 상태: {status}" if status else ""
+        print(f"  {row['row_num']}행 {row['brand']} - {row['product_name_kr']} (JPY {row['buyma_price']}){status_text}")
     print()
 
     driver = setup_visible_chrome_driver()
