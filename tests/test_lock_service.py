@@ -35,6 +35,32 @@ class UploadLockServiceTests(unittest.TestCase):
             self.assertFalse(ok)
             self.assertEqual(info["owner"], "형")
 
+    def test_active_claim_blocks_later_upload_before_main_lock_syncs(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            lock_dir = Path(tmp)
+            lock_dir.mkdir(parents=True, exist_ok=True)
+            claim_path = lock_dir / "upload_buyma_main.early.claim"
+            claim_path.write_text(
+                json.dumps(
+                    {
+                        "account_id": "buyma_main",
+                        "owner": "형",
+                        "pc_name": "PC-A",
+                        "started_at": (datetime.now() - timedelta(seconds=1)).strftime("%Y-%m-%d %H:%M:%S"),
+                        "claim_id": "early",
+                        "type": "buyma_upload",
+                    },
+                    ensure_ascii=False,
+                ),
+                encoding="utf-8",
+            )
+
+            ok, info = acquire_upload_lock("buyma_main", "누나", lock_dir=lock_dir)
+
+            self.assertFalse(ok)
+            self.assertEqual(info["owner"], "형")
+            self.assertEqual(info["pc_name"], "PC-A")
+
     def test_lock_payload_includes_pc_name(self):
         with tempfile.TemporaryDirectory() as tmp, patch.dict(os.environ, {"COMPUTERNAME": "DESKTOP-HYUNG"}, clear=False):
             lock_dir = Path(tmp)
@@ -98,6 +124,7 @@ class UploadLockServiceTests(unittest.TestCase):
 
             self.assertFalse(is_upload_locked("buyma_main", lock_dir=lock_dir))
             self.assertIsNone(get_upload_lock_info("buyma_main", lock_dir=lock_dir))
+            self.assertFalse(list(lock_dir.glob("upload_buyma_main.*.claim")))
 
     def test_account_id_is_stable_and_filename_safe(self):
         account_id = build_upload_account_id("User.Name+Shop@example.com")

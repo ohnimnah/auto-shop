@@ -8,6 +8,7 @@ import os
 import socket
 import re
 import time
+import uuid
 from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any
@@ -15,7 +16,7 @@ from typing import Any
 
 LOCK_TIMEOUT_MINUTES = 30
 LOCK_TYPE_BUYMA_UPLOAD = "buyma_upload"
-LOCK_RECHECK_DELAY_SECONDS = 1.0
+LOCK_RECHECK_DELAY_SECONDS = 5.0
 
 
 def get_upload_lock_dir() -> Path:
@@ -67,6 +68,16 @@ def _lock_path(account_id: str, lock_dir: Path | None = None) -> Path:
     return root / f"upload_{_safe_lock_name(account_id)}.lock"
 
 
+def _claim_glob(account_id: str) -> str:
+    return f"upload_{_safe_lock_name(account_id)}.*.claim"
+
+
+def _claim_path(account_id: str, claim_id: str, lock_dir: Path | None = None) -> Path:
+    root = lock_dir or get_upload_lock_dir()
+    safe_claim = re.sub(r"[^a-zA-Z0-9._-]+", "_", (claim_id or "").strip()).strip("._-")
+    return root / f"upload_{_safe_lock_name(account_id)}.{safe_claim or 'claim'}.claim"
+
+
 def _now() -> datetime:
     return datetime.now()
 
@@ -93,16 +104,53 @@ def _is_stale(info: dict[str, Any], *, now: datetime | None = None, timeout_minu
     return (now or _now()) - started_at >= timedelta(minutes=timeout_minutes)
 
 
-def get_upload_lock_info(account_id: str, *, lock_dir: Path | None = None) -> dict[str, Any] | None:
-    path = _lock_path(account_id, lock_dir)
+def _read_json_file(path: Path) -> dict[str, Any] | None:
     try:
-        if not path.exists():
-            return None
         with path.open("r", encoding="utf-8") as fp:
             data = json.load(fp)
         return data if isinstance(data, dict) else None
     except Exception:
         return None
+
+
+def _write_json_exclusive(path: Path, payload: dict[str, Any]) -> None:
+    fd = os.open(str(path), os.O_CREAT | os.O_EXCL | os.O_WRONLY)
+    with os.fdopen(fd, "w", encoding="utf-8") as fp:
+        json.dump(payload, fp, ensure_ascii=False, indent=2)
+
+
+def _cleanup_stale_claims(account_id: str, root: Path) -> None:
+    for path in root.glob(_claim_glob(account_id)):
+        info = _read_json_file(path)
+        if not info or _is_stale(info):
+            try:
+                path.unlink(missing_ok=True)
+            except Exception:
+                pass
+
+
+def _active_claims(account_id: str, root: Path) -> list[dict[str, Any]]:
+    claims: list[dict[str, Any]] = []
+    for path in root.glob(_claim_glob(account_id)):
+        info = _read_json_file(path)
+        if not info or _is_stale(info):
+            continue
+        info["_path"] = str(path)
+        claims.append(info)
+    return sorted(
+        claims,
+        key=lambda item: (
+            str(item.get("started_at") or ""),
+            str(item.get("claim_id") or ""),
+        ),
+    )
+
+
+def get_upload_lock_info(account_id: str, *, lock_dir: Path | None = None) -> dict[str, Any] | None:
+    path = _lock_path(account_id, lock_dir)
+    if not path.exists():
+        return None
+    return _read_json_file(path)
 
 
 def is_upload_locked(account_id: str, *, lock_dir: Path | None = None) -> bool:
@@ -124,6 +172,7 @@ def acquire_upload_lock(
     root = lock_dir or get_upload_lock_dir()
     root.mkdir(parents=True, exist_ok=True)
     path = _lock_path(account_id, root)
+    _cleanup_stale_claims(account_id, root)
 
     info = get_upload_lock_info(account_id, lock_dir=root)
     if info and _is_stale(info):
@@ -132,23 +181,38 @@ def acquire_upload_lock(
     if info:
         return False, info
 
+    now = _now()
+    claim_id = f"{now.strftime('%Y%m%d%H%M%S%f')}_{get_pc_name()}_{os.getpid()}_{uuid.uuid4().hex[:8]}"
     payload = {
         "account_id": account_id,
         "owner": (owner or "").strip() or "unknown",
         "pc_name": get_pc_name(),
-        "started_at": _now().strftime("%Y-%m-%d %H:%M:%S"),
+        "started_at": now.strftime("%Y-%m-%d %H:%M:%S"),
+        "claim_id": claim_id,
         "type": LOCK_TYPE_BUYMA_UPLOAD,
     }
+    claim_path = _claim_path(account_id, claim_id, root)
     try:
-        fd = os.open(str(path), os.O_CREAT | os.O_EXCL | os.O_WRONLY)
-        with os.fdopen(fd, "w", encoding="utf-8") as fp:
-            json.dump(payload, fp, ensure_ascii=False, indent=2)
+        _write_json_exclusive(claim_path, payload)
         time.sleep(LOCK_RECHECK_DELAY_SECONDS)
+        info = get_upload_lock_info(account_id, lock_dir=root)
+        if info and not _is_stale(info):
+            claim_path.unlink(missing_ok=True)
+            return False, info
+
+        claims = _active_claims(account_id, root)
+        if claims and claims[0].get("claim_id") != claim_id:
+            claim_path.unlink(missing_ok=True)
+            return False, claims[0]
+
+        _write_json_exclusive(path, payload)
         current = get_upload_lock_info(account_id, lock_dir=root)
         if current and current.get("owner") != payload["owner"]:
+            claim_path.unlink(missing_ok=True)
             return False, current
         return True, payload
     except FileExistsError:
+        claim_path.unlink(missing_ok=True)
         info = get_upload_lock_info(account_id, lock_dir=root)
         if info and _is_stale(info):
             release_upload_lock(account_id, lock_dir=root)
@@ -159,6 +223,10 @@ def acquire_upload_lock(
 def release_upload_lock(account_id: str, *, lock_dir: Path | None = None) -> None:
     path = _lock_path(account_id, lock_dir)
     try:
+        info = get_upload_lock_info(account_id, lock_dir=lock_dir)
         path.unlink(missing_ok=True)
+        claim_id = str((info or {}).get("claim_id") or "").strip()
+        if claim_id:
+            _claim_path(account_id, claim_id, lock_dir).unlink(missing_ok=True)
     except Exception:
         return
