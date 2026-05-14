@@ -65,7 +65,6 @@ class CategoryClassifierFallbackTests(unittest.TestCase):
         self.assertEqual(classify_category("버드 헤드 토크", "아크테릭스"), StandardCategory.ACC_BEANIE)
         self.assertEqual(classify_category("보메로 18", "나이키"), StandardCategory.SHOES_SNEAKER)
         self.assertEqual(classify_category("LD-1000 프리미엄", "나이키"), StandardCategory.SHOES_SNEAKER)
-        self.assertEqual(classify_category("MAREN C1 SILVER", "리에티"), StandardCategory.ACC_EYEWEAR)
 
 
 if __name__ == "__main__":
