@@ -108,6 +108,25 @@ class BuymaActualSizeValueTests(unittest.TestCase):
         self.assertEqual(pick_measure_value_by_label("首周り", measures), "18")
         self.assertEqual(pick_measure_value_by_label("アームホール", measures), "24")
 
+    def test_pick_measure_value_matches_common_buyma_label_variants(self):
+        top_measures = {
+            "어깨너비": "45",
+            "가슴단면": "55",
+            "소매길이": "60",
+        }
+        bottom_measures = {
+            "허리단면": "32",
+            "허벅지단면": "29",
+            "밑단단면": "27",
+        }
+
+        self.assertEqual(pick_measure_value_by_label("肩巾", top_measures), "45")
+        self.assertEqual(pick_measure_value_by_label("胸囲", top_measures), "55")
+        self.assertEqual(pick_measure_value_by_label("裄丈", top_measures), "60")
+        self.assertEqual(pick_measure_value_by_label("ウエスト幅", bottom_measures), "32")
+        self.assertEqual(pick_measure_value_by_label("渡り幅", bottom_measures), "29")
+        self.assertEqual(pick_measure_value_by_label("裾周り", bottom_measures), "27")
+
     def test_pick_measure_value_matches_bag_hat_and_shoes_labels(self):
         measures = {
             "가로": "25",
@@ -132,6 +151,20 @@ class BuymaActualSizeValueTests(unittest.TestCase):
         self.assertEqual(pick_measure_value_by_label("ワイズ", measures), "9")
         self.assertEqual(pick_measure_value_by_label("インソール", measures), "24")
         self.assertEqual(pick_measure_value_by_label("ヒール高", measures), "5")
+
+    def test_pick_measure_value_matches_belt_labels_and_ignores_zero_placeholders(self):
+        measures = {
+            "버클가로": "0",
+            "버클세로": "0",
+            "총길이": "109",
+            "벨트폭": "3.7",
+            "바지사이즈 최소": "0",
+            "바지사이즈 최대": "0",
+        }
+
+        self.assertEqual(pick_measure_value_by_label("全長", measures), "109")
+        self.assertEqual(pick_measure_value_by_label("長さ", measures), "109")
+        self.assertEqual(pick_measure_value_by_label("幅", measures), "3.7")
 
 
 if __name__ == "__main__":

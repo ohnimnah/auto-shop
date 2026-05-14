@@ -1136,6 +1136,14 @@ def fill_size_edit_details(
 
     def _log_measure(label: str, selected_pairs: dict, matched: str, skip: str = "") -> None:
         keys = list((selected_pairs or {}).keys())
+        _write_actual_size_event(
+            "measure_match",
+            label=str(label or "")[:120],
+            normalized_label=_normalize_measure_label(label),
+            keys=keys,
+            matched=str(matched or ""),
+            skip=skip,
+        )
         message = (
             f"  [measure] label={_safe_measure_log(label)} "
             f"normalized={_safe_measure_log(_normalize_measure_label(label))} "

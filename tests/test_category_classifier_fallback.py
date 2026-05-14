@@ -33,6 +33,8 @@ class CategoryClassifierFallbackTests(unittest.TestCase):
         self.assertEqual(classify_category("crossbody bag", ""), StandardCategory.BAG_SHOULDER)
         self.assertEqual(classify_category("logo beanie", ""), StandardCategory.ACC_BEANIE)
         self.assertEqual(classify_category("leather belt", ""), StandardCategory.ACC_BELT)
+        self.assertEqual(classify_category("padded waist belt", ""), StandardCategory.ACC_BELT)
+        self.assertEqual(classify_category("보정 벨트", ""), StandardCategory.ACC_BELT)
         self.assertEqual(classify_category("black sunglasses", ""), StandardCategory.ACC_EYEWEAR)
         self.assertEqual(classify_category("sports socks", ""), StandardCategory.INNER_UNDERWEAR)
         self.assertEqual(classify_category("심리스 이너프리 브라", "카인다미"), StandardCategory.INNER_UNDERWEAR)

@@ -344,6 +344,12 @@ def classify_category_with_reason(
     if any(_contains_keyword(force_text, token) for token in beanie_tokens):
         return StandardCategory.ACC_BEANIE, "beanie_keyword_override"
 
+    # Guardrail: belt products may include noisy shape/innerwear words like
+    # "padded" or "body-shaping"; explicit belt signals should stay in belts.
+    belt_tokens = ("벨트", "belt", "ベルト")
+    if any(_contains_keyword(force_text, token) for token in belt_tokens):
+        return StandardCategory.ACC_BELT, "belt_keyword_override"
+
     # If caller already resolved a concrete category from sheet/mapping,
     # keep it unless stronger domain-specific guardrails above overrode it.
     if existing_category is not None and existing_category != StandardCategory.ETC:

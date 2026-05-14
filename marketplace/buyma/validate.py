@@ -100,20 +100,22 @@ def extract_actual_size_rows(actual_size_text: str) -> Dict[str, Dict[str, str]]
 
 MEASURE_ALIASES: Dict[str, List[str]] = {
     "총장": ["총장", "기장", "length", "着丈", "身丈", "総丈", "スカート丈"],
-    "어깨너비": ["어깨너비", "어깨", "shoulder", "shoulderwidth", "肩幅"],
-    "가슴단면": ["가슴단면", "가슴", "품", "chest", "chestwidth", "bust", "身幅", "胸幅", "バスト"],
-    "소매길이": ["소매길이", "소매", "sleeve", "sleevelength", "袖丈"],
+    "어깨너비": ["어깨너비", "어깨", "shoulder", "shoulderwidth", "肩幅", "肩巾"],
+    "가슴단면": ["가슴단면", "가슴", "품", "chest", "chestwidth", "bust", "身幅", "胸幅", "胸囲", "胸回り", "バスト"],
+    "소매길이": ["소매길이", "소매", "sleeve", "sleevelength", "袖丈", "裄丈", "ゆき丈"],
     "목둘레": ["목둘레", "목너비", "넥", "neck", "首周り", "ネック"],
     "암홀": ["암홀", "armhole", "アームホール"],
-    "허리단면": ["허리단면", "허리", "waist", "ウエスト"],
+    "총길이": ["총길이", "전체길이", "길이", "length", "全長", "長さ"],
+    "허리단면": ["허리단면", "허리", "waist", "ウエスト", "ウエスト幅", "腰幅"],
     "힙단면": ["힙단면", "힙", "엉덩이", "hip", "ヒップ"],
-    "허벅지단면": ["허벅지단면", "허벅지", "thigh", "わたり幅", "もも幅", "もも周り"],
+    "허벅지단면": ["허벅지단면", "허벅지", "thigh", "わたり幅", "渡り幅", "ワタリ", "もも幅", "もも周り"],
     "밑위": ["밑위", "rise", "股上"],
     "인심": ["인심", "밑아래", "inseam", "股下"],
-    "밑단단면": ["밑단단면", "밑단", "hem", "hemwidth", "裾幅", "すそ幅", "すそ周り"],
+    "밑단단면": ["밑단단면", "밑단", "hem", "hemwidth", "裾幅", "すそ幅", "裾周り", "すそ周り"],
     "가로": ["가로", "너비", "width", "横", "幅"],
     "세로": ["세로", "높이", "height", "縦", "高さ"],
     "폭": ["폭", "깊이", "마치", "depth", "マチ", "奥行き"],
+    "벨트폭": ["벨트폭", "벨트 폭", "beltwidth", "belt width", "ベルト幅", "幅"],
     "손잡이": ["손잡이", "핸들", "handle", "持ち手"],
     "스트랩": ["스트랩", "strap", "shoulderstrap", "ショルダー", "ストラップ"],
     "머리둘레": ["머리둘레", "머리", "circumference", "頭周り", "頭囲"],
@@ -147,16 +149,29 @@ def pick_measure_value_by_label(label_text: str, measure_map: Dict[str, str]) ->
         if nk and (nk in normalized_label or normalized_label in nk):
             return value
 
-    # 2) Alias match
+    def _value_sort_key(raw_value: str) -> int:
+        return 1 if is_zero_measure_value(raw_value) else 0
+
+    zero_candidate = ""
     for _, aliases in MEASURE_ALIASES.items():
         normalized_aliases = [_normalize_measure_text(alias) for alias in aliases if _normalize_measure_text(alias)]
         if not any(alias in normalized_label or normalized_label in alias for alias in normalized_aliases):
             continue
+        candidates = []
         for key, value in measure_map.items():
             if not (value or "").strip():
                 continue
             nk = _normalize_measure_text(key)
             if any(alias in nk or nk in alias for alias in normalized_aliases):
-                return value
+                candidates.append(value)
+        if not candidates:
+            continue
+        picked = sorted(candidates, key=_value_sort_key)[0]
+        if not is_zero_measure_value(picked):
+            return picked
+        if not zero_candidate:
+            zero_candidate = picked
+    if zero_candidate:
+        return zero_candidate
 
     return ""
