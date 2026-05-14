@@ -516,8 +516,6 @@ def normalize_korean_color(color_text: str) -> str:
     tokens = []
     for token in normalized.split(","):
         value = token.strip()
-        if value.endswith("색") and len(value) > 1 and has_hangul(value):
-            value = value[:-1].strip()
         if value and not is_color_count_placeholder(value):
             tokens.append(value)
 

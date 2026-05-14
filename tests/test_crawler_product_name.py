@@ -1,6 +1,6 @@
 import unittest
 
-from services.crawler_service_legacy import clean_product_name, remove_trailing_product_name_suffix
+from services.crawler_service_legacy import clean_product_name, normalize_korean_color, remove_trailing_product_name_suffix
 
 
 class CrawlerProductNameTests(unittest.TestCase):
@@ -31,6 +31,10 @@ class CrawlerProductNameTests(unittest.TestCase):
 
     def test_keeps_non_color_parenthesized_suffix(self):
         self.assertEqual(clean_product_name("클래식 탱크 (기획상품)"), "클래식 탱크 (기획상품)")
+
+    def test_keeps_korean_color_suffix_character(self):
+        self.assertEqual(normalize_korean_color("회색"), "회색")
+        self.assertEqual(normalize_korean_color("빨강색, 노랑색"), "빨강색, 노랑색")
 
 
 if __name__ == "__main__":
