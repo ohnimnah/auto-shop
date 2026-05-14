@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+import signal
 import subprocess
 import threading
 from typing import Callable, Dict, Optional
@@ -94,6 +95,11 @@ class ProcessManager:
 
     def _popen(self, command: list[str]) -> subprocess.Popen:
         env = self.env_factory()
+        kwargs = {}
+        if os.name == "nt":
+            kwargs["creationflags"] = getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0)
+        else:
+            kwargs["start_new_session"] = True
         try:
             return subprocess.Popen(
                 command,
@@ -105,6 +111,7 @@ class ProcessManager:
                 encoding="utf-8",
                 errors="replace",
                 bufsize=1,
+                **kwargs,
             )
         except OSError as exc:
             raise ProcessStartError(str(exc)) from exc
@@ -161,19 +168,50 @@ class ProcessManager:
         if not proc or proc.poll() is not None:
             return
         try:
-            proc.terminate()
+            self._terminate_process_tree(proc, force=False)
             proc.wait(timeout=5)
         except subprocess.TimeoutExpired:
             try:
-                proc.kill()
+                self._terminate_process_tree(proc, force=True)
                 proc.wait(timeout=5)
             except Exception:
                 raise ProcessStopError("프로세스를 강제 종료하지 못했습니다.")
         except Exception:
             try:
-                proc.kill()
+                self._terminate_process_tree(proc, force=True)
             except Exception:
                 raise ProcessStopError("프로세스를 종료하지 못했습니다.")
+
+    def _terminate_process_tree(self, proc: subprocess.Popen, *, force: bool) -> None:
+        """Terminate only the subprocess tree started by this manager."""
+        if os.name == "nt":
+            cmd = ["taskkill", "/PID", str(proc.pid), "/T"]
+            if force:
+                cmd.append("/F")
+            result = subprocess.run(
+                cmd,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+                check=False,
+            )
+            if result.returncode == 0 or proc.poll() is not None:
+                return
+            if force:
+                proc.kill()
+            else:
+                proc.terminate()
+            return
+
+        try:
+            pgid = os.getpgid(proc.pid)
+            os.killpg(pgid, signal.SIGKILL if force else signal.SIGTERM)
+        except ProcessLookupError:
+            return
+        except Exception:
+            if force:
+                proc.kill()
+            else:
+                proc.terminate()
 
     def _join_thread(self, thread: Optional[threading.Thread]) -> None:
         if not thread or thread is threading.current_thread():
