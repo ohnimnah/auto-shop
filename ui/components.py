@@ -5,6 +5,38 @@ from __future__ import annotations
 import tkinter as tk
 
 
+def create_theme_checkbutton(
+    parent: tk.Widget,
+    *,
+    text: str = "",
+    variable: tk.Variable | None = None,
+    command=None,
+    bg: str = "#0f1c2e",
+    fg: str = "#dbeafe",
+    selectcolor: str = "#2563eb",
+    activebackground: str | None = None,
+    activeforeground: str = "#ffffff",
+    font=None,
+) -> tk.Checkbutton:
+    """Create a dark-theme checkbutton whose checked state is visible on Windows."""
+    return tk.Checkbutton(
+        parent,
+        text=text,
+        variable=variable,
+        command=command,
+        bg=bg,
+        fg=fg,
+        selectcolor=selectcolor,
+        activebackground=activebackground or bg,
+        activeforeground=activeforeground,
+        disabledforeground="#7f93aa",
+        font=font or ("Segoe UI", 9),
+        relief=tk.FLAT,
+        bd=0,
+        highlightthickness=0,
+    )
+
+
 class ColorButton(tk.Frame):
     """Tk button replacement whose colors render consistently on macOS."""
 
@@ -95,4 +127,3 @@ class ColorButton(tk.Frame):
             tk.Frame.configure(self, cnf, **kwargs)
 
     config = configure
-

@@ -6,6 +6,7 @@ import base64
 import shutil
 import sys
 import tkinter as tk
+import tkinter.font as tkfont
 from datetime import datetime
 from tkinter import filedialog
 from tkinter import messagebox
@@ -25,7 +26,7 @@ from services.system_checker import SystemChecker
 from services.telegram_remote_control import TelegramRemoteController
 from state.app_state import AppLogger, AppState, AppStateChange, LogEvent
 from state.snapshot_store import StateSnapshotStore
-from ui.components import ColorButton
+from ui.components import ColorButton, create_theme_checkbutton
 from ui.pages.automation_page import AutomationPage
 from ui.pages.buyma_upload_page import BuymaUploadPage
 from ui.pages.dashboard_page import DashboardPage
@@ -40,6 +41,38 @@ SCRIPT_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 DEFAULT_PROFILE_NAME = "default"
 PROFILE_CONFIG_FILENAME = "launcher_profile.json"
 DEFAULT_THUMBNAIL_FOOTER_SUFFIX = "angduss k-closet"
+DEFAULT_1080P_WINDOWS_SCALING = 1.55
+
+
+def _parse_ui_scale_override(raw_value: str | None) -> float | None:
+    if not raw_value:
+        return None
+    try:
+        value = float(str(raw_value).strip())
+    except (TypeError, ValueError):
+        return None
+    if 0.8 <= value <= 2.4:
+        return value
+    return None
+
+
+def _recommended_ui_scaling(
+    current_scaling: float,
+    screen_width: int,
+    screen_height: int,
+    *,
+    platform_name: str | None = None,
+    override: str | None = None,
+) -> float:
+    """Return a conservative Tk scaling value for the launcher UI."""
+    manual_scale = _parse_ui_scale_override(override)
+    if manual_scale is not None:
+        return manual_scale
+
+    platform_value = (platform_name or sys.platform).lower()
+    if platform_value.startswith("win") and screen_width >= 1800 and screen_height <= 1152:
+        return max(current_scaling, DEFAULT_1080P_WINDOWS_SCALING)
+    return current_scaling
 
 
 def resolve_python_executable() -> str:
@@ -123,6 +156,7 @@ def get_default_images_dir(profile_name: str | None = None) -> str:
 class AutoShopLauncher(tk.Tk):
     def __init__(self) -> None:
         super().__init__()
+        self._apply_display_scaling()
         self.title("auto_shop launcher")
         self.geometry("1360x780")
         self.minsize(1180, 640)
@@ -388,6 +422,39 @@ class AutoShopLauncher(tk.Tk):
         icon.put("#1f7aec", to=(12, 12, 19, 19))
         self.iconphoto(True, icon)
         self._icon_image = icon
+
+    def _apply_display_scaling(self) -> None:
+        """Make the desktop launcher easier to read on common 1080p Windows displays."""
+        try:
+            current_scaling = float(self.tk.call("tk", "scaling"))
+            target_scaling = _recommended_ui_scaling(
+                current_scaling,
+                int(self.winfo_screenwidth()),
+                int(self.winfo_screenheight()),
+                platform_name=sys.platform,
+                override=os.environ.get("AUTO_SHOP_UI_SCALE"),
+            )
+            if abs(target_scaling - current_scaling) >= 0.01:
+                self.tk.call("tk", "scaling", target_scaling)
+            self._configure_named_fonts(target_scaling)
+        except Exception:
+            pass
+
+    def _configure_named_fonts(self, target_scaling: float) -> None:
+        base_size = 10 if target_scaling >= DEFAULT_1080P_WINDOWS_SCALING else 9
+        for font_name in (
+            "TkDefaultFont",
+            "TkTextFont",
+            "TkMenuFont",
+            "TkHeadingFont",
+            "TkTooltipFont",
+            "TkFixedFont",
+        ):
+            try:
+                font = tkfont.nametofont(font_name)
+                font.configure(size=max(abs(int(font.cget("size"))), base_size))
+            except Exception:
+                continue
 
     def _build_ui(self) -> None:
         self.theme = {
@@ -659,16 +726,14 @@ class AutoShopLauncher(tk.Tk):
         )
         search.pack(side=tk.LEFT, fill=tk.X, expand=True, ipady=5, padx=(0, 8))
         search.bind("<KeyRelease>", lambda _e: self._refresh_product_table())
-        tk.Checkbutton(
+        create_theme_checkbutton(
             toolbar,
             text="자동 새로고침",
             variable=self.auto_refresh_var,
             command=self.toggle_auto_refresh,
             bg=self.theme["panel"],
             fg="#cbd5e1",
-            selectcolor="#102033",
-            activebackground=self.theme["panel"],
-            activeforeground="#ffffff",
+            selectcolor=self.theme["blue"],
             font=("Segoe UI", 9, "bold"),
         ).pack(side=tk.LEFT, padx=(0, 8))
         self._mini_button(toolbar, "바로고침", self.refresh_dashboard_data, "#1e3350", "#294565").pack(side=tk.LEFT)

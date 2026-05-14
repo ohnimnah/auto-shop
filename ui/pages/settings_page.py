@@ -23,6 +23,7 @@ from tkinter.scrolledtext import ScrolledText
 
 from config.app_config import DEFAULT_SHEET_COLUMNS
 from config.config_service import get_profile_config_path, load_config, save_config
+from ui.components import create_theme_checkbutton
 from ui.pages.base_page import BasePage, SECTION_GAP
 
 
@@ -961,14 +962,27 @@ class SettingsPage(BasePage):
         return combo
 
     def _build_check(self, parent: tk.Widget, row: int, label: str, variable: tk.BooleanVar) -> None:
-        tk.Checkbutton(parent, text=label, variable=variable, bg=self.controller.theme["panel"], fg="#dbeafe", selectcolor="#102033", activebackground=self.controller.theme["panel"], activeforeground="#ffffff", font=("Segoe UI", 9)).grid(row=row, column=0, sticky="w", pady=(0, 4))
+        create_theme_checkbutton(
+            parent,
+            text=label,
+            variable=variable,
+            bg=self.controller.theme["panel"],
+            fg="#dbeafe",
+            selectcolor=self.controller.theme["blue"],
+            font=("Segoe UI", 9),
+        ).grid(row=row, column=0, sticky="w", pady=(0, 4))
 
     def _build_switch(self, parent: tk.Widget, row: int, label: str, variable: tk.BooleanVar) -> None:
         row_frame = tk.Frame(parent, bg=self.controller.theme["panel"])
         row_frame.grid(row=row, column=0, sticky="ew", pady=(0, 6))
         row_frame.grid_columnconfigure(0, weight=1)
         tk.Label(row_frame, text=label, bg=self.controller.theme["panel"], fg=self.controller.theme["text"], font=("Segoe UI", 9, "bold")).grid(row=0, column=0, sticky="w")
-        tk.Checkbutton(row_frame, variable=variable, bg=self.controller.theme["panel"], selectcolor="#102033", activebackground=self.controller.theme["panel"]).grid(row=0, column=1, sticky="e")
+        create_theme_checkbutton(
+            row_frame,
+            variable=variable,
+            bg=self.controller.theme["panel"],
+            selectcolor=self.controller.theme["blue"],
+        ).grid(row=0, column=1, sticky="e")
 
     def _build_status_row(self, parent: tk.Widget, row: int, label: str, value_var: tk.StringVar, color_var: tk.StringVar) -> None:
         wrap = tk.Frame(parent, bg=self.controller.theme["panel"])
