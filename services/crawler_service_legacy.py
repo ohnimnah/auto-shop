@@ -1541,14 +1541,20 @@ def scrape_musinsa_product(
         soup = BeautifulSoup(driver.page_source, "html.parser")
         title_text = soup.title.string.strip() if soup.title else ""
         product_json = extract_product_json(soup)
+        mss_state = extract_mss_product_state(soup)
         brand_logo_url = ""
         try:
             from services.image_service import extract_brand_logo_url
 
-            brand_logo_url = extract_brand_logo_url(soup, product_json)
+            brand_logo_url = extract_brand_logo_url(
+                soup,
+                {
+                    "product": product_json,
+                    "mss_state": mss_state,
+                },
+            )
         except Exception:
             brand_logo_url = ""
-        mss_state = extract_mss_product_state(soup)
         brand_en_from_state = ""
         try:
             brand_info = mss_state.get("brandInfo") if isinstance(mss_state, dict) else None

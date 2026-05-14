@@ -3,6 +3,7 @@ from pathlib import Path
 from tempfile import TemporaryDirectory
 from unittest.mock import Mock, patch
 
+from bs4 import BeautifulSoup
 from PIL import Image
 
 from config.app_config import BRAND_COLUMN, BRAND_EN_COLUMN
@@ -103,6 +104,33 @@ class ImageServiceThumbnailBlurTests(unittest.TestCase):
 
             self.assertTrue(saved.endswith("__brand_logo.png"))
             self.assertTrue((folder / "__brand_logo.png").exists())
+
+    def test_extract_brand_logo_url_uses_musinsa_brand_info_state(self):
+        soup = BeautifulSoup("<html><body></body></html>", "html.parser")
+        payload = {
+            "mss_state": {
+                "brandInfo": {
+                    "brandEnglishName": "BAUF",
+                    "brandLogoImageUrl": "//image.msscdn.net/brand/bauf/logo.png?width=120",
+                }
+            }
+        }
+
+        self.assertEqual(
+            image_service.extract_brand_logo_url(soup, payload),
+            "https://image.msscdn.net/brand/bauf/logo.png",
+        )
+
+    def test_extract_brand_logo_url_uses_brand_img_srcset(self):
+        soup = BeautifulSoup(
+            '<a href="/brand/bauf"><img srcset="//image.msscdn.net/brand/bauf/small.png 1x, //image.msscdn.net/brand/bauf/big.png 2x"></a>',
+            "html.parser",
+        )
+
+        self.assertEqual(
+            image_service.extract_brand_logo_url(soup, {}),
+            "https://image.msscdn.net/brand/bauf/small.png",
+        )
 
 
 if __name__ == "__main__":

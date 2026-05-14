@@ -6,7 +6,7 @@ import subprocess
 import sys
 import urllib.parse
 import urllib.request
-from typing import Dict, List
+from typing import Any, Dict, List
 
 from bs4 import BeautifulSoup
 
@@ -196,8 +196,8 @@ def download_thumbnail_images(
     return ",".join(saved_paths)
 
 
-def extract_brand_logo_url(soup: BeautifulSoup, product_json: Dict[str, object]) -> str:
-    """Extract probable brand logo URL from page/json."""
+def extract_brand_logo_url(soup: BeautifulSoup, page_state: Dict[str, object]) -> str:
+    """Extract probable brand logo URL from page JSON/state and image tags."""
     candidates: List[str] = []
 
     def add_candidate(src: str):
@@ -205,8 +205,35 @@ def extract_brand_logo_url(soup: BeautifulSoup, product_json: Dict[str, object])
         if normalized and normalized not in candidates:
             candidates.append(normalized)
 
-    if isinstance(product_json, dict):
-        brand_obj = product_json.get("brand")
+    def add_srcset(srcset: str):
+        for part in (srcset or "").split(","):
+            src = part.strip().split(" ")[0].strip()
+            if src:
+                add_candidate(src)
+
+    def walk_brand_images(obj: Any, path: str = ""):
+        if isinstance(obj, dict):
+            for key, value in obj.items():
+                key_text = str(key or "")
+                key_lower = key_text.lower()
+                next_path = f"{path}.{key_lower}" if path else key_lower
+                path_lower = next_path.lower()
+                if isinstance(value, str):
+                    is_brand_context = "brand" in path_lower or "logo" in path_lower
+                    is_image_key = any(token in key_lower for token in ("logo", "image", "img", "thumbnail"))
+                    if is_brand_context and is_image_key:
+                        add_candidate(value)
+                elif isinstance(value, (dict, list)):
+                    walk_brand_images(value, next_path)
+        elif isinstance(obj, list):
+            for item in obj:
+                walk_brand_images(item, path)
+
+    if isinstance(page_state, dict):
+        walk_brand_images(page_state)
+        brand_obj = page_state.get("brand")
+        if not isinstance(brand_obj, dict) and isinstance(page_state.get("product"), dict):
+            brand_obj = page_state["product"].get("brand")
         if isinstance(brand_obj, dict):
             for key in (
                 "logoImageUrl",
@@ -226,12 +253,16 @@ def extract_brand_logo_url(soup: BeautifulSoup, product_json: Dict[str, object])
             src = img.get(attr, "")
             if src:
                 add_candidate(src)
+        add_srcset(img.get("srcset", ""))
+        add_srcset(img.get("data-srcset", ""))
 
     for img in soup.select('img[alt*="logo" i], img[class*="logo" i], img[src*="logo" i]'):
         for attr in ("src", "data-src", "data-original", "data-lazy-src"):
             src = img.get(attr, "")
             if src:
                 add_candidate(src)
+        add_srcset(img.get("srcset", ""))
+        add_srcset(img.get("data-srcset", ""))
 
     if not candidates:
         return ""
