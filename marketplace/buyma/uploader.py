@@ -78,6 +78,7 @@ def _notification_product(row_data: MarketplaceRow, category_diag: Dict[str, Any
         or ""
     )
     return {
+        "row_num": row_data.get("row_num") or "",
         "product_name": row_data.get("product_name_kr") or row_data.get("product_name_en") or "",
         "product_name_kr": row_data.get("product_name_kr") or "",
         "brand": row_data.get("brand_en") or row_data.get("brand") or "",

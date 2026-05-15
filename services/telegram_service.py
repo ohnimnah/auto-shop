@@ -252,9 +252,9 @@ def _message_key(text: str) -> str:
     return hashlib.sha256(text.encode("utf-8", "replace")).hexdigest()
 
 
-def _deduped(text: str) -> bool:
+def _deduped(text: str, *, dedup_key: str | None = None) -> bool:
     now = time.time()
-    key = _message_key(text)
+    key = dedup_key or _message_key(text)
     last_sent = _DEDUP_CACHE.get(key, 0)
     if now - last_sent < DEDUP_SECONDS:
         return True
@@ -307,7 +307,7 @@ def _runtime_credentials() -> tuple[dict[str, Any], str, str]:
     return config, token, chat_id
 
 
-def send_message(text: str, reply_markup: dict[str, Any] | None = None) -> bool:
+def send_message(text: str, reply_markup: dict[str, Any] | None = None, *, dedup_key: str | None = None) -> bool:
     """Send a Telegram message if configured; never raise into main flow."""
     try:
         config, token, chat_id = _runtime_credentials()
@@ -317,7 +317,7 @@ def send_message(text: str, reply_markup: dict[str, Any] | None = None) -> bool:
             return False
 
         message = _truncate_message(text, MAX_MESSAGE_CHARS)
-        if reply_markup is None and _deduped(message):
+        if reply_markup is None and _deduped(message, dedup_key=dedup_key):
             return False
 
         data = {"chat_id": chat_id, "text": message}
@@ -442,6 +442,24 @@ def _job_count_labels(job_name: str) -> tuple[str, str]:
     return "성공", "실패"
 
 
+def _upload_notification_dedup_key(kind: str, product: dict[str, Any], error: Any = "") -> str:
+    row_id = str(product.get("row_num") or product.get("row") or "").strip()
+    if row_id:
+        return f"upload:{kind}:row:{row_id}"
+    raw = "|".join(
+        str(value or "")
+        for value in (
+            kind,
+            product.get("product_name") or product.get("product_name_kr"),
+            product.get("brand"),
+            product.get("price") or product.get("buyma_price"),
+            product.get("category"),
+            error,
+        )
+    )
+    return f"upload:{kind}:{_message_key(raw)}"
+
+
 def notify_job_finished(job_name: str, success_count: int, fail_count: int, duration: str | float | int) -> bool:
     success = int(success_count or 0)
     fail = int(fail_count or 0)
@@ -470,7 +488,8 @@ def notify_upload_success(product: dict[str, Any]) -> bool:
         f"상품명: {_truncate(product.get('product_name') or product.get('product_name_kr'))}\n\n"
         f"브랜드: {_truncate(product.get('brand'))}\n"
         f"가격: {_truncate(product.get('price') or product.get('buyma_price'))}\n"
-        f"카테고리: {category_text}"
+        f"카테고리: {category_text}",
+        dedup_key=_upload_notification_dedup_key("success", product),
     )
 
 
@@ -479,7 +498,8 @@ def notify_upload_failed(product: dict[str, Any], error: Any) -> bool:
         "❌ BUYMA 업로드 실패\n"
         f"{MESSAGE_DIVIDER}\n"
         f"상품명: {_truncate(product.get('product_name') or product.get('product_name_kr'))}\n\n"
-        f"사유: {_truncate(error, 220)}"
+        f"사유: {_truncate(error, 220)}",
+        dedup_key=_upload_notification_dedup_key("failed", product, error),
     )
 
 

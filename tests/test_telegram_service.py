@@ -55,6 +55,26 @@ class TelegramServiceTests(unittest.TestCase):
 
         self.assertEqual(len(fake_requests.calls), 1)
 
+    def test_upload_success_dedup_uses_row_number(self):
+        fake_requests = _FakeRequests()
+        env = {
+            "TELEGRAM_ENABLED": "true",
+            "TELEGRAM_BOT_TOKEN": "123456:abcdefghijklmnopqrstuvwxyz",
+            "TELEGRAM_CHAT_ID": "456",
+        }
+        base = {
+            "product_name": "same product",
+            "brand": "same brand",
+            "price": "10000",
+            "category": "Tシャツ・カットソー",
+        }
+        with patch.dict(os.environ, env, clear=False), patch("services.telegram_service.requests", fake_requests):
+            self.assertTrue(telegram_service.notify_upload_success({**base, "row_num": 10}))
+            self.assertTrue(telegram_service.notify_upload_success({**base, "row_num": 11}))
+            self.assertFalse(telegram_service.notify_upload_success({**base, "row_num": 10}))
+
+        self.assertEqual(len(fake_requests.calls), 2)
+
     def test_send_message_preserves_notification_line_breaks(self):
         fake_requests = _FakeRequests()
         env = {
