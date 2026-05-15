@@ -133,6 +133,30 @@ class MusinsaCategoryOverrideTests(unittest.TestCase):
         self.assertEqual(result, StandardCategory.PANTS_REGULAR)
         self.assertEqual(meta["reason"], "musinsa_category_override")
 
+    def test_jacket_product_title_wins_over_vague_top_category(self):
+        result, meta = classify_standard_category_from_sheet(
+            musinsa_large="여성",
+            musinsa_middle="상의",
+            musinsa_small="기타 상의",
+            product_name="Cropped Short Sleeve Tailored Jacket",
+            brand="ETRE AU SOMMET",
+        )
+
+        self.assertEqual(result, StandardCategory.OUTER_JACKET)
+        self.assertEqual(meta["reason"], "product_keyword_override")
+
+    def test_explicit_tshirt_bucket_wins_over_hooded_product_title(self):
+        result, meta = classify_standard_category_from_sheet(
+            musinsa_large="여성",
+            musinsa_middle="상의",
+            musinsa_small="긴소매 티셔츠",
+            product_name="Lettering Hooded Slim-Fit Long Sleeve Top",
+            brand="ETRE AU SOMMET",
+        )
+
+        self.assertEqual(result, StandardCategory.TOP_TSHIRT)
+        self.assertEqual(meta["reason"], "musinsa_category_override")
+
     def test_musinsa_sports_vest_maps_to_outer_vest(self):
         result, meta = classify_standard_category_from_sheet(
             musinsa_large="여성",

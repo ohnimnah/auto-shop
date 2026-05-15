@@ -409,6 +409,15 @@ def build_buyma_category_plan(
     )
     final_path_valid = validate_buyma_category_path(cat1, cat2, corrected_cat3)
     mapping_diag = explain_standard_category_mapping(standard_category, is_mens=is_mens_category)
+    if not final_path_valid and mapping_diag.get("validator_passed"):
+        _safe_log(
+            "  [category][semantic] corrected path invalid, "
+            "falling back to standard spec"
+        )
+        cat1 = str(mapping_diag.get("buyma_parent") or cat1)
+        cat2 = str(mapping_diag.get("buyma_middle") or cat2)
+        corrected_cat3 = str(mapping_diag.get("buyma_child") or corrected_cat3)
+        final_path_valid = validate_buyma_category_path(cat1, cat2, corrected_cat3)
 
     _safe_log(f"  [category][semantic] musinsa={sheet_cat1} / {sheet_cat2} / {sheet_cat3}")
     _safe_log(f"  [category][semantic] product_name={source_product_name}")

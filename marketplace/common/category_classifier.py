@@ -318,6 +318,21 @@ def _has_sweat_top_signal(text: str) -> bool:
     return any(_contains_keyword(text, token) for token in sweat_tokens)
 
 
+def _has_hoodie_signal(text: str) -> bool:
+    hoodie_tokens = ("후드", "후디", "hoodie", "hooded")
+    return any(_contains_keyword(text, token) for token in hoodie_tokens)
+
+
+def _has_outer_jacket_signal(text: str) -> bool:
+    jacket_tokens = ("자켓", "재킷", "점퍼", "jacket", "blouson")
+    return any(_contains_keyword(text, token) for token in jacket_tokens)
+
+
+def _has_padding_signal(text: str) -> bool:
+    padding_tokens = ("패딩", "다운", "down jacket", "puffer", "padding")
+    return any(_contains_keyword(text, token) for token in padding_tokens)
+
+
 def _has_belt_product_signal(text: str) -> bool:
     normalized = _normalize_text(text)
     return (
@@ -395,6 +410,43 @@ def _resolve_from_musinsa_category_text(text: str) -> Optional[StandardCategory]
     return None
 
 
+def _has_non_top_category_context(text: str) -> bool:
+    non_top_tokens = (
+        "바지", "팬츠", "스커트", "치마", "원피스", "드레스",
+        "신발", "슈즈", "가방", "백", "악세서리", "액세서리",
+        "속옷", "홈웨어", "디지털", "가전",
+        "bottom", "bottoms", "pants", "skirt", "dress", "shoes",
+        "bag", "accessory", "accessories", "inner", "underwear",
+    )
+    return any(_contains_keyword(text, token) for token in non_top_tokens)
+
+
+def _has_vague_top_category_context(text: str) -> bool:
+    normalized = _normalize_text(text)
+    has_top = any(_contains_keyword(normalized, token) for token in ("상의", "top", "tops"))
+    has_vague = any(_contains_keyword(normalized, token) for token in ("기타", "etc", "other", "기본", "일반"))
+    return has_top and has_vague
+
+
+def _resolve_product_strong_top_signal(
+    product_name: str,
+    *,
+    musinsa_category_text: str = "",
+) -> Optional[StandardCategory]:
+    product_text = _normalize_text(product_name)
+    category_text = _normalize_text(musinsa_category_text)
+    if not product_text:
+        return None
+
+    # Product titles like "Tailored Jacket" are stronger than vague
+    # Musinsa buckets such as "기타 상의".
+    if _has_outer_jacket_signal(product_text) and not _has_padding_signal(product_text) and not _has_non_top_category_context(category_text):
+        return StandardCategory.OUTER_JACKET
+    if _has_hoodie_signal(product_text) and _has_vague_top_category_context(category_text):
+        return StandardCategory.TOP_HOODIE
+    return None
+
+
 def fallback_category(name: str, brand: str) -> str:
     clean_name = normalize_product_name(name)
     text = _normalize_text(f"{clean_name} {brand}")
@@ -436,6 +488,15 @@ def classify_category_with_reason(
 
     if _has_sweat_top_signal(force_text):
         return StandardCategory.TOP_SWEAT, "sweat_keyword_override"
+
+    if _has_padding_signal(force_text):
+        return StandardCategory.OUTER_PADDING, "padding_keyword_override"
+
+    if _has_outer_jacket_signal(force_text):
+        return StandardCategory.OUTER_JACKET, "jacket_keyword_override"
+
+    if _has_hoodie_signal(force_text):
+        return StandardCategory.TOP_HOODIE, "hoodie_keyword_override"
 
     pants_category = _resolve_pants_signal(force_text)
     if pants_category is not None:
@@ -753,6 +814,13 @@ def classify_standard_category_from_sheet(
         musinsa_small or "",
         "",
     )
+    product_override = _resolve_product_strong_top_signal(product_name, musinsa_category_text=musinsa_category_text)
+    if product_override is not None:
+        return product_override, {
+            "reason": "product_keyword_override",
+            "standard_category": product_override.value,
+        }
+
     category_override = _resolve_from_musinsa_category_text(musinsa_category_text)
     if category_override is not None:
         return category_override, {
