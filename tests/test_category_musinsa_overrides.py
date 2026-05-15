@@ -1,7 +1,7 @@
 import unittest
 
 from marketplace.buyma.standard_category import StandardCategory
-from marketplace.common.category_classifier import classify_standard_category_from_sheet
+from marketplace.common.category_classifier import classify_category_with_reason, classify_standard_category_from_sheet
 
 
 class MusinsaCategoryOverrideTests(unittest.TestCase):
@@ -72,6 +72,9 @@ class MusinsaCategoryOverrideTests(unittest.TestCase):
             ("상의", "Hoodie", "BASIC PANTS", StandardCategory.TOP_HOODIE),
             ("Tops", "Sleeveless", "SUMMER SHORTS", StandardCategory.TOP_TANK),
             ("상의", "블라우스", "DENIM SKIRT", StandardCategory.TOP_BLOUSE),
+            ("상의", "반팔 셔츠", "SHORT SLEEVE SHIRT", StandardCategory.TOP_SHIRT),
+            ("상의", "긴팔 브라우스", "LONG SLEEVE BLOUSE", StandardCategory.TOP_BLOUSE),
+            ("상의", "반팔 티셔츠", "LOGO T-SHIRT", StandardCategory.TOP_TSHIRT),
         )
         for middle, small, product_name, expected in cases:
             with self.subTest(middle=middle, small=small):
@@ -116,6 +119,51 @@ class MusinsaCategoryOverrideTests(unittest.TestCase):
         )
 
         self.assertEqual(result, StandardCategory.OUTER_JACKET)
+        self.assertEqual(meta["reason"], "musinsa_category_override")
+
+    def test_musinsa_sports_vest_maps_to_outer_vest(self):
+        result, meta = classify_standard_category_from_sheet(
+            musinsa_large="여성",
+            musinsa_middle="스포츠/레저",
+            musinsa_small="베스트",
+            product_name="BREEZE RUN TRACK VEST",
+            brand="GLOWNY",
+        )
+
+        self.assertEqual(result, StandardCategory.OUTER_VEST)
+        self.assertEqual(meta["reason"], "musinsa_category_override")
+
+    def test_musinsa_zip_up_top_maps_to_cardigan(self):
+        result, meta = classify_standard_category_from_sheet(
+            musinsa_large="여성",
+            musinsa_middle="상의",
+            musinsa_small="집업",
+            product_name="G CLASSIC ESSENTIAL RIB ZIP-UP",
+            brand="GLOWNY",
+        )
+
+        self.assertEqual(result, StandardCategory.TOP_CARDIGAN)
+        self.assertEqual(meta["reason"], "musinsa_category_override")
+
+    def test_overalls_fallback_maps_to_jumpsuit(self):
+        result, reason = classify_category_with_reason(
+            name="THE JANE OVERALLS",
+            brand="GLOWNY",
+        )
+
+        self.assertEqual(result, StandardCategory.JUMPSUIT)
+        self.assertEqual(reason, "overall_keyword_override")
+
+    def test_musinsa_overalls_maps_to_jumpsuit(self):
+        result, meta = classify_standard_category_from_sheet(
+            musinsa_large="여성",
+            musinsa_middle="원피스",
+            musinsa_small="오버롤",
+            product_name="THE JANE OVERALLS",
+            brand="GLOWNY",
+        )
+
+        self.assertEqual(result, StandardCategory.JUMPSUIT)
         self.assertEqual(meta["reason"], "musinsa_category_override")
 
     def test_musinsa_digital_category_wins_over_tshirt_keywords(self):
