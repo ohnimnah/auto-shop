@@ -1371,7 +1371,12 @@ def fill_size_edit_details(
                         if _is_zero_measure_value(picked_value):
                             _log_measure(label, selected_pairs, picked_value, "zero_skip")
                             continue
-                        target_id = target.get_attribute("id") or target.get_attribute("name") or str(id(target))
+                        target_id = (
+                            getattr(target, "id", "")
+                            or target.get_attribute("id")
+                            or target.get_attribute("name")
+                            or f"{_normalize_measure_label(label)}:{len(used_inputs)}"
+                        )
                         if target_id in used_inputs:
                             _log_measure(label, selected_pairs, picked_value, "already_used")
                             continue
