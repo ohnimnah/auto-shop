@@ -375,6 +375,23 @@ def build_buyma_category_plan(
         standard_category,
         is_mens=is_mens_category,
     )
+    mapping_diag = explain_standard_category_mapping(standard_category, is_mens=is_mens_category)
+    standard_path = (
+        str(mapping_diag.get("buyma_parent") or ""),
+        str(mapping_diag.get("buyma_middle") or ""),
+        str(mapping_diag.get("buyma_child") or ""),
+    )
+    mapped_path = (str(mapped_parent or ""), str(mapped_cat2 or ""), str(mapped_cat3 or ""))
+    if (
+        mapping_row_source == "auto_seed"
+        and mapping_diag.get("validator_passed")
+        and mapped_path != standard_path
+    ):
+        _safe_log(
+            "  [category][semantic] unsafe auto_seed mapping ignored, "
+            "falling back to standard spec"
+        )
+        mapped_parent, mapped_cat2, mapped_cat3 = standard_path
     mapping_valid = validate_buyma_category_path(mapped_parent, mapped_cat2, mapped_cat3)
     mapping_table_used = standard_category != StandardCategory.ETC and bool(mapped_cat2) and mapping_valid
 
@@ -408,7 +425,6 @@ def build_buyma_category_plan(
         musinsa_category_text,
     )
     final_path_valid = validate_buyma_category_path(cat1, cat2, corrected_cat3)
-    mapping_diag = explain_standard_category_mapping(standard_category, is_mens=is_mens_category)
     if not final_path_valid and mapping_diag.get("validator_passed"):
         _safe_log(
             "  [category][semantic] corrected path invalid, "

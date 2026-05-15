@@ -230,6 +230,31 @@ class StandardCategoryTests(unittest.TestCase):
         self.assertEqual(plan["cat3"], "スウェット・トレーナー")
         self.assertTrue(plan["category_path_valid"])
 
+    def test_buyma_category_plan_ignores_mismatched_auto_seed_mapping(self):
+        row = {
+            "product_name_kr": "",
+            "product_name_en": "Lettering Hooded Slim-Fit Long Sleeve Top",
+            "brand": "ETRE AU SOMMET",
+            "musinsa_category_large": "여성",
+            "musinsa_category_middle": "상의",
+            "musinsa_category_small": "긴소매 티셔츠",
+        }
+
+        with patch("marketplace.buyma.category.standard_category_map_mod.resolve_standard_category_buyma_target") as resolve_mock:
+            with patch("marketplace.buyma.category.standard_category_map_mod.get_resolved_mapping_row_source", return_value="auto_seed"):
+                with patch("marketplace.buyma.category.standard_category_map_mod.get_runtime_mapping_source", return_value="google_sheet_auto_seed+default"):
+                    resolve_mock.return_value = (
+                        "レディースファッション",
+                        "トップス",
+                        "パーカー・フーディ",
+                    )
+                    plan = build_buyma_category_plan(row, category_corrector=_identity_corrector)
+
+        self.assertEqual(plan["standard_category"], "TOP_TSHIRT")
+        self.assertEqual(plan["cat2"], "トップス")
+        self.assertEqual(plan["cat3"], "Tシャツ・カットソー")
+        self.assertTrue(plan["category_path_valid"])
+
     def test_legacy_infer_buyma_category_keeps_blouse_out_of_tshirt(self):
         self.assertEqual(
             infer_buyma_category("여성 반팔 블라우스", "SHORT SLEEVE BLOUSE", "GLOWNY"),

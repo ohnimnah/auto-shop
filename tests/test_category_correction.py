@@ -31,6 +31,15 @@ class CategoryCorrectionTests(unittest.TestCase):
 
         self.assertEqual(result, "スウェット・トレーナー")
 
+    def test_explicit_tshirt_category_is_not_overridden_by_hooded_title(self) -> None:
+        result = correct_buyma_category(
+            "Tシャツ・カットソー",
+            "Lettering Hooded Slim-Fit Long Sleeve Top",
+            "여성 상의 긴소매 티셔츠",
+        )
+
+        self.assertEqual(result, "Tシャツ・カットソー")
+
 
 if __name__ == "__main__":
     unittest.main()

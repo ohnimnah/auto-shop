@@ -60,7 +60,9 @@ def _has_sweat_signal(text: str) -> bool:
 def correct_buyma_category(base_category, product_name, musinsa_category) -> str:
     """Return corrected BUYMA child-category label."""
     base = _to_text(base_category).strip()
-    text = f"{_to_text(product_name).strip().lower()} {_to_text(musinsa_category).strip().lower()}"
+    product_text = _to_text(product_name).strip().lower()
+    musinsa_text = _to_text(musinsa_category).strip().lower()
+    text = f"{product_text} {musinsa_text}"
 
     if "サングラス" in base or _contains_any(text, EYEWEAR_KEYWORDS):
         return "サングラス"
@@ -87,6 +89,8 @@ def correct_buyma_category(base_category, product_name, musinsa_category) -> str
     if _contains_any(text, PAJAMA_KEYWORDS):
         return "ルームウェア・パジャマ"
 
+    if base == "Tシャツ・カットソー" and _has_tshirt_signal(musinsa_text):
+        return base
     if _contains_any(text, HOODIE_KEYWORDS):
         return "パーカー・フーディ"
     if _contains_any(text, DOWN_KEYWORDS):
