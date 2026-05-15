@@ -207,6 +207,11 @@ MUSINSA_CATEGORY_OVERRIDES: List[Tuple[Tuple[str, ...], StandardCategory]] = [
     (("bottoms", "short"), StandardCategory.PANTS_SHORTS),
     (("pants", "short"), StandardCategory.PANTS_SHORTS),
     (("pants", "half pants"), StandardCategory.PANTS_SHORTS),
+    (("바지", "팬츠"), StandardCategory.PANTS_REGULAR),
+    (("바지", "코튼"), StandardCategory.PANTS_REGULAR),
+    (("팬츠", "코튼"), StandardCategory.PANTS_REGULAR),
+    (("bottom", "pants"), StandardCategory.PANTS_REGULAR),
+    (("bottoms", "pants"), StandardCategory.PANTS_REGULAR),
     (("오버롤",), StandardCategory.JUMPSUIT),
     (("오버롤즈",), StandardCategory.JUMPSUIT),
     (("점프수트",), StandardCategory.JUMPSUIT),
@@ -313,6 +318,45 @@ def _has_sweat_top_signal(text: str) -> bool:
     return any(_contains_keyword(text, token) for token in sweat_tokens)
 
 
+def _has_belt_product_signal(text: str) -> bool:
+    normalized = _normalize_text(text)
+    return (
+        _contains_keyword(normalized, "벨트")
+        or _contains_keyword(normalized, "ベルト")
+        or bool(re.search(r"\bbelt\b", normalized))
+    )
+
+
+def _has_english_phrase(text: str, phrase: str) -> bool:
+    normalized = _normalize_text(text)
+    pattern = r"\b" + r"\s+".join(re.escape(part) for part in phrase.lower().split()) + r"\b"
+    return bool(re.search(pattern, normalized))
+
+
+def _resolve_pants_signal(text: str) -> Optional[StandardCategory]:
+    if (
+        any(_contains_keyword(text, token) for token in ("숏팬츠", "쇼츠", "반바지"))
+        or any(_has_english_phrase(text, token) for token in ("shorts", "short pants", "half pants"))
+    ):
+        return StandardCategory.PANTS_SHORTS
+    if any(_contains_keyword(text, token) for token in ("청바지", "데님", "denim", "jeans")):
+        return StandardCategory.PANTS_DENIM
+    if any(_contains_keyword(text, token) for token in ("카고", "cargo")):
+        return StandardCategory.PANTS_CARGO
+    if any(_contains_keyword(text, token) for token in ("스웻팬츠", "스웨트팬츠", "트레이닝팬츠", "sweatpants", "sweat pants", "track pants")):
+        return StandardCategory.PANTS_TRAINING
+    if any(_contains_keyword(text, token) for token in ("조거", "jogger")):
+        return StandardCategory.PANTS_JOGGER
+    if any(_contains_keyword(text, token) for token in ("레깅스", "leggings", "legging")):
+        return StandardCategory.PANTS_LEGGINGS
+    if (
+        any(_contains_keyword(text, token) for token in ("팬츠", "바지"))
+        or any(_has_english_phrase(text, token) for token in ("pants", "trousers"))
+    ):
+        return StandardCategory.PANTS_REGULAR
+    return None
+
+
 def _resolve_shirt_blouse_signal(text: str) -> Optional[StandardCategory]:
     if any(_contains_keyword(text, token) for token in ("블라우스", "브라우스", "blouse")):
         return StandardCategory.TOP_BLOUSE
@@ -393,6 +437,10 @@ def classify_category_with_reason(
     if _has_sweat_top_signal(force_text):
         return StandardCategory.TOP_SWEAT, "sweat_keyword_override"
 
+    pants_category = _resolve_pants_signal(force_text)
+    if pants_category is not None:
+        return pants_category, "pants_keyword_override"
+
     shirt_blouse_category = _resolve_shirt_blouse_signal(force_text)
     if shirt_blouse_category == StandardCategory.TOP_BLOUSE:
         return StandardCategory.TOP_BLOUSE, "blouse_keyword_override"
@@ -410,8 +458,7 @@ def classify_category_with_reason(
 
     # Guardrail: belt products may include noisy shape/innerwear words like
     # "padded" or "body-shaping"; explicit belt signals should stay in belts.
-    belt_tokens = ("벨트", "belt", "ベルト")
-    if any(_contains_keyword(force_text, token) for token in belt_tokens):
+    if _has_belt_product_signal(force_text):
         return StandardCategory.ACC_BELT, "belt_keyword_override"
 
     # If caller already resolved a concrete category from sheet/mapping,

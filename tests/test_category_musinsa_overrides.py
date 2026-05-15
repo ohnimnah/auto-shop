@@ -121,6 +121,18 @@ class MusinsaCategoryOverrideTests(unittest.TestCase):
         self.assertEqual(result, StandardCategory.OUTER_JACKET)
         self.assertEqual(meta["reason"], "musinsa_category_override")
 
+    def test_musinsa_pants_category_wins_over_belted_product_name(self):
+        result, meta = classify_standard_category_from_sheet(
+            musinsa_large="여성",
+            musinsa_middle="바지",
+            musinsa_small="코튼 팬츠",
+            product_name="Belted Two-Pocket Cutline Oversized Pants",
+            brand="ETRE AU SOMMET",
+        )
+
+        self.assertEqual(result, StandardCategory.PANTS_REGULAR)
+        self.assertEqual(meta["reason"], "musinsa_category_override")
+
     def test_musinsa_sports_vest_maps_to_outer_vest(self):
         result, meta = classify_standard_category_from_sheet(
             musinsa_large="여성",

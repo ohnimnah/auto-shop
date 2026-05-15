@@ -31,6 +31,7 @@ class CategoryClassifierFallbackTests(unittest.TestCase):
         self.assertEqual(classify_category("short sleeve shirt", ""), StandardCategory.TOP_SHIRT)
         self.assertEqual(classify_category("소프트 헤비 워싱 오버 핏 스웻 셔츠", ""), StandardCategory.TOP_SWEAT)
         self.assertEqual(classify_category("soft heavy washed oversized sweatshirt", ""), StandardCategory.TOP_SWEAT)
+        self.assertEqual(classify_category("Belted Two-Pocket Cutline Oversized Pants", ""), StandardCategory.PANTS_REGULAR)
         self.assertEqual(classify_category("romantic blouse", ""), StandardCategory.TOP_BLOUSE)
         self.assertEqual(classify_category("logo t-shirt", ""), StandardCategory.TOP_TSHIRT)
         self.assertEqual(classify_category("long coat", ""), StandardCategory.OUTER_COAT)
