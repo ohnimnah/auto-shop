@@ -52,10 +52,11 @@ BUYMA_GENDER_CATEGORY_MAP = {
 }
 
 CATEGORY_KEYWORDS = [
+    (["블라우스", "브라우스", "blouse"], None, "トップス", "ブラウス・シャツ"),
+    (["셔츠", "남방", "shirt"], None, "トップス", "ブラウス・シャツ"),
     (["티셔츠", "반팔", "긴팔", "tee", "t-shirt"], None, "トップス", "Tシャツ・カットソー"),
     (["후드", "hoodie", "hood"], None, "トップス", "パーカー・フーディ"),
     (["맨투맨", "sweatshirt", "sweat"], None, "トップス", "スウェット"),
-    (["셔츠", "shirt", "blouse"], None, "トップス", "シャツ"),
     (["니트", "sweater", "knit"], None, "トップス", "ニット・セーター"),
     (["청바지", "데님", "jeans", "denim"], None, "ボトムス", "デニム・ジーンズ"),
     (["슬랙스", "trousers"], None, "ボトムス", "スラックス"),
@@ -71,6 +72,17 @@ CATEGORY_KEYWORDS = [
     (["부츠", "boot"], None, "靴", "ブーツ"),
     (["로퍼", "loafer"], None, "靴", "ローファー"),
 ]
+
+
+def _legacy_has_tshirt_signal(text: str) -> bool:
+    return any(token in text for token in ("티셔츠", "t-shirt", "t shirt", "tshirt", "tee", "カットソー"))
+
+
+def _legacy_category_keyword_matches(text: str, keyword: str) -> bool:
+    keyword_norm = (keyword or "").lower()
+    if keyword_norm in {"셔츠", "shirt"} and _legacy_has_tshirt_signal(text):
+        return False
+    return keyword_norm in text
 
 CATEGORY_RECOVERY_ALIASES: Dict[str, List[str]] = {
     "テックアクセサリー": ["スマホケース・テックアクセサリーその他", "iPhone・スマホケース", "スマホケース", "PCケース・バッグ"],
@@ -131,7 +143,7 @@ def infer_buyma_category(product_name_kr: str, product_name_en: str, brand: str 
     if any(token in text for token in ["new balance", "뉴발란스", "mr530", "530lg", "530sg", "530ka", "m1906", "1906r", "2002r", "327", "990v", "991", "992", "993"]):
         return (fashion_category, "靴", "スニーカー")
     for keywords, cat1, cat2, cat3 in CATEGORY_KEYWORDS:
-        if any(keyword.lower() in text for keyword in keywords):
+        if any(_legacy_category_keyword_matches(text, keyword) for keyword in keywords):
             if cat1 is None:
                 cat1 = fashion_category
             return (cat1, cat2 or "", cat3 or "")
@@ -208,7 +220,10 @@ def normalize_sheet_category_labels(cat1: str, cat2: str, cat3: str) -> Tuple[st
         "후드": "パーカー・フーディ",
         "후드티": "パーカー・フーディ",
         "맨투맨": "スウェット",
-        "셔츠": "シャツ",
+        "셔츠": "ブラウス・シャツ",
+        "남방": "ブラウス・シャツ",
+        "블라우스": "ブラウス・シャツ",
+        "브라우스": "ブラウス・シャツ",
         "니트": "ニット・セーター",
         "코트": "コート",
         "아우터": "ジャケット",

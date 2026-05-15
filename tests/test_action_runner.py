@@ -126,6 +126,59 @@ class ActionRunnerTests(unittest.TestCase):
 
             self.assertFalse(list(Path(tmp).glob("upload_*.lock")))
 
+    def test_upload_completion_notification_uses_row_counts(self):
+        script = (
+            "print('  10행 상태 업데이트: 출품완료'); "
+            "print('  11행 상품입력 실패. 건너뜁니다'); "
+            "print('  11행 상태 업데이트: 오류')"
+        )
+        with tempfile.TemporaryDirectory() as tmp, patch.dict("os.environ", {"AUTO_SHOP_LOCK_DIR": tmp}, clear=False):
+            runner, _state, _manager, _events = self._runner(
+                lambda _action: [sys.executable, "-u", "-c", script],
+                buyma_account_provider=lambda: "main@example.com",
+                owner_provider=lambda: "형",
+            )
+
+            with patch("core.action_runner.notify_job_finished") as notify_finished:
+                self.assertTrue(runner.run("upload-auto"))
+                time.sleep(0.8)
+
+        notify_finished.assert_called()
+        _job_name, success_count, fail_count, _duration = notify_finished.call_args.args
+        self.assertEqual(success_count, 1)
+        self.assertEqual(fail_count, 1)
+
+    def test_image_completion_notification_uses_row_counts(self):
+        script = (
+            "print('2026 [INFO] [IMAGE DONE] SKU=A ROW=3'); "
+            "print('2026 [ERROR] [ERROR] SKU=B ROW=4 - image failed')"
+        )
+        runner, _state, _manager, _events = self._runner(
+            lambda _action: [sys.executable, "-u", "-c", script]
+        )
+
+        with patch("core.action_runner.notify_job_finished") as notify_finished:
+            self.assertTrue(runner.run("save-images"))
+            time.sleep(0.8)
+
+        _job_name, success_count, fail_count, _duration = notify_finished.call_args.args
+        self.assertEqual(success_count, 1)
+        self.assertEqual(fail_count, 1)
+
+    def test_team_watch_completion_notification_uses_row_counts(self):
+        script = "print('2026 [INFO] [THUMBNAIL DONE] ROW=7')"
+        runner, _state, _manager, _events = self._runner(
+            lambda _action: [sys.executable, "-u", "-c", script]
+        )
+
+        with patch("core.action_runner.notify_job_finished") as notify_finished:
+            self.assertTrue(runner.start_team_watch("design"))
+            time.sleep(0.8)
+
+        _job_name, success_count, fail_count, _duration = notify_finished.call_args.args
+        self.assertEqual(success_count, 1)
+        self.assertEqual(fail_count, 0)
+
 
 if __name__ == "__main__":
     unittest.main()

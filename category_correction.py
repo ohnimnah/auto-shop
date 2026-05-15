@@ -22,6 +22,7 @@ PAJAMA_KEYWORDS = ["파자마", "잠옷", "pajama", "sleepwear", "loungewear", "
 HOODIE_KEYWORDS = ["후드", "hoodie", "hooded", "zip hoodie"]
 SWEAT_KEYWORDS = ["맨투맨", "스웻", "스웨트", "sweatshirt"]
 TSHIRT_KEYWORDS = ["티셔츠", "반팔", "긴팔", "t-shirt", "tee"]
+BLOUSE_KEYWORDS = ["블라우스", "브라우스", "blouse"]
 SHIRT_KEYWORDS = ["셔츠", "남방", "button-down"]
 KNIT_KEYWORDS = ["니트", "스웨터", "knit", "sweater"]
 CARDIGAN_KEYWORDS = ["가디건", "cardigan"]
@@ -46,6 +47,10 @@ def _to_text(value: object) -> str:
 
 def _contains_any(text: str, keywords: list[str]) -> bool:
     return bool(text) and any(keyword in text for keyword in keywords)
+
+
+def _has_tshirt_signal(text: str) -> bool:
+    return _contains_any(text, ["티셔츠", "t-shirt", "t shirt", "tshirt", "tee", "カットソー"])
 
 
 def correct_buyma_category(base_category, product_name, musinsa_category) -> str:
@@ -82,8 +87,10 @@ def correct_buyma_category(base_category, product_name, musinsa_category) -> str
         return "パーカー・フーディ"
     if _contains_any(text, DOWN_KEYWORDS):
         return "ダウンジャケット"
-    if _contains_any(text, SHIRT_KEYWORDS):
-        return "シャツ"
+    if _contains_any(text, BLOUSE_KEYWORDS):
+        return "ブラウス・シャツ"
+    if _contains_any(text, SHIRT_KEYWORDS) and not _has_tshirt_signal(text):
+        return "ブラウス・シャツ"
     if _contains_any(text, SWEAT_KEYWORDS):
         return "スウェット・トレーナー"
     if _contains_any(text, TSHIRT_KEYWORDS):
@@ -118,4 +125,3 @@ def correct_buyma_category(base_category, product_name, musinsa_category) -> str
         return "バッグ"
 
     return base
-

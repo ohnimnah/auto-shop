@@ -141,8 +141,8 @@ class TelegramServiceTests(unittest.TestCase):
         text = send_message.call_args.args[0]
         self.assertIn("✅ 작업 완료", text)
         self.assertIn("------------", text)
-        self.assertIn("작업: 정찰\n\n성공: 1", text)
-        self.assertIn("실패: 0\n소요시간: 6초", text)
+        self.assertIn("작업: 정찰\n\n정찰 성공: 1", text)
+        self.assertIn("정찰 실패: 0\n소요시간: 6초", text)
 
     def test_job_finished_warns_when_failures_exist(self):
         with patch("services.telegram_service.send_message") as send_message:
@@ -150,7 +150,15 @@ class TelegramServiceTests(unittest.TestCase):
 
         text = send_message.call_args.args[0]
         self.assertIn("⚠️ 작업 완료", text)
-        self.assertIn("실패: 1", text)
+        self.assertIn("정찰 실패: 1", text)
+
+    def test_upload_job_finished_uses_korean_upload_count_labels(self):
+        with patch("services.telegram_service.send_message") as send_message:
+            telegram_service.notify_job_finished("BUYMA 업로드", success_count=5, fail_count=2, duration=70)
+
+        text = send_message.call_args.args[0]
+        self.assertIn("업로드 성공: 5", text)
+        self.assertIn("업로드 실패: 2", text)
 
     def test_upload_success_translates_common_buyma_child_categories(self):
         product = {

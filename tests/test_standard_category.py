@@ -6,6 +6,7 @@ from marketplace.buyma.category import (
     _category_recovery_aliases,
     _category_recovery_candidates,
     build_buyma_category_plan,
+    infer_buyma_category,
 )
 from marketplace.buyma.standard_category import (
     StandardCategory,
@@ -194,6 +195,33 @@ class StandardCategoryTests(unittest.TestCase):
         self.assertEqual(plan["cat2"], "スマホケース・テックアクセサリー")
         self.assertEqual(plan["cat3"], "テックアクセサリー")
         self.assertTrue(plan["category_path_valid"])
+
+    def test_buyma_category_plan_keeps_blouse_out_of_tshirt(self):
+        row = {
+            "product_name_kr": "",
+            "product_name_en": "LACE SHORT SLEEVE BLOUSE",
+            "brand": "GLOWNY",
+            "musinsa_category_large": "여성",
+            "musinsa_category_middle": "상의",
+            "musinsa_category_small": "반팔 블라우스",
+        }
+
+        plan = build_buyma_category_plan(row, category_corrector=_identity_corrector)
+
+        self.assertEqual(plan["standard_category"], "TOP_BLOUSE")
+        self.assertEqual(plan["cat2"], "トップス")
+        self.assertEqual(plan["cat3"], "ブラウス・シャツ")
+        self.assertTrue(plan["category_path_valid"])
+
+    def test_legacy_infer_buyma_category_keeps_blouse_out_of_tshirt(self):
+        self.assertEqual(
+            infer_buyma_category("여성 반팔 블라우스", "SHORT SLEEVE BLOUSE", "GLOWNY"),
+            ("レディースファッション", "トップス", "ブラウス・シャツ"),
+        )
+        self.assertEqual(
+            infer_buyma_category("여성 반팔 티셔츠", "LOGO T-SHIRT", "GLOWNY"),
+            ("レディースファッション", "トップス", "Tシャツ・カットソー"),
+        )
 
     def test_category_recovery_aliases(self):
         self.assertIn("デニム・ジーンズ", _category_recovery_aliases("デニム・ジーパン"))

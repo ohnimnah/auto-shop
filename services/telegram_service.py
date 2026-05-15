@@ -427,16 +427,32 @@ def notify_job_started(job_name: str) -> bool:
     )
 
 
+def _job_count_labels(job_name: str) -> tuple[str, str]:
+    name = str(job_name or "")
+    if "BUYMA 업로드" in name:
+        return "업로드 성공", "업로드 실패"
+    if "이미지" in name:
+        return "이미지 성공", "이미지 실패"
+    if "썸네일" in name:
+        return "썸네일 성공", "썸네일 실패"
+    if "정찰" in name:
+        return "정찰 성공", "정찰 실패"
+    if "목록" in name:
+        return "수집 성공", "수집 실패"
+    return "성공", "실패"
+
+
 def notify_job_finished(job_name: str, success_count: int, fail_count: int, duration: str | float | int) -> bool:
     success = int(success_count or 0)
     fail = int(fail_count or 0)
     title = "✅ 작업 완료" if fail == 0 else "⚠️ 작업 완료(실패 포함)"
+    success_label, fail_label = _job_count_labels(job_name)
     return send_message(
         f"{title}\n"
         f"{MESSAGE_DIVIDER}\n"
         f"작업: {_truncate(job_name)}\n\n"
-        f"성공: {success}\n"
-        f"실패: {fail}\n"
+        f"{success_label}: {success}\n"
+        f"{fail_label}: {fail}\n"
         f"소요시간: {_format_duration(duration)}"
     )
 

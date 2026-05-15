@@ -132,7 +132,7 @@ STANDARD_CATEGORY_SPECS = {
     StandardCategory.TOP_LONG_SLEEVE: StandardCategorySpec(StandardCategory.TOP_LONG_SLEEVE, MIDDLE_TOPS, MIDDLE_TOPS, "Tシャツ・カットソー", ("긴팔", "롱슬리브", "long sleeve", "longsleeve")),
     StandardCategory.TOP_SWEAT: StandardCategorySpec(StandardCategory.TOP_SWEAT, MIDDLE_TOPS, MIDDLE_TOPS, "スウェット・トレーナー", ("맨투맨", "스웨트", "스웻", "sweatshirt", "sweat")),
     StandardCategory.TOP_HOODIE: StandardCategorySpec(StandardCategory.TOP_HOODIE, MIDDLE_TOPS, MIDDLE_TOPS, "パーカー・フーディ", ("후드", "후디", "후드티", "hoodie", "hooded", "zip hoodie")),
-    StandardCategory.TOP_SHIRT: StandardCategorySpec(StandardCategory.TOP_SHIRT, MIDDLE_TOPS, MIDDLE_TOPS, "シャツ", ("셔츠", "남방", "button-down", "button down", "shirt")),
+    StandardCategory.TOP_SHIRT: StandardCategorySpec(StandardCategory.TOP_SHIRT, MIDDLE_TOPS, MIDDLE_TOPS, "ブラウス・シャツ", ("셔츠", "남방", "button-down", "button down", "shirt")),
     StandardCategory.TOP_BLOUSE: StandardCategorySpec(StandardCategory.TOP_BLOUSE, MIDDLE_TOPS, MIDDLE_TOPS, "ブラウス・シャツ", ("블라우스", "blouse")),
     StandardCategory.TOP_KNIT: StandardCategorySpec(StandardCategory.TOP_KNIT, MIDDLE_TOPS, MIDDLE_TOPS, "ニット・セーター", ("니트", "스웨터", "knit", "sweater")),
     StandardCategory.TOP_CARDIGAN: StandardCategorySpec(StandardCategory.TOP_CARDIGAN, MIDDLE_TOPS, MIDDLE_TOPS, "カーディガン", ("가디건", "cardigan")),

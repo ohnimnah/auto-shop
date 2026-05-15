@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import time
+import re
 from typing import Callable
 
 from core.errors import AppError, ErrorCode
@@ -19,6 +20,10 @@ from services.telegram_service import (
     notify_upload_locked,
 )
 from state.app_state import AppLogger, AppState, LogEvent
+
+
+_ROW_RE = re.compile(r"ROW=(\d+)")
+_KOREAN_ROW_RE = re.compile(r"(\d+)행")
 
 
 class ActionRunner:
@@ -52,6 +57,8 @@ class ActionRunner:
         self._team_started_at: dict[str, float] = {}
         self._upload_lock_account_id: str = ""
         self._team_upload_lock_account_ids: dict[str, str] = {}
+        self._job_summary: dict[str, set[str] | int] = self._new_summary()
+        self._team_summaries: dict[str, dict[str, set[str] | int]] = {}
 
     def run(self, action: str) -> bool:
         if self.process_manager.is_running():
@@ -68,6 +75,7 @@ class ActionRunner:
         if stage_key:
             self.state.set_stage_status(stage_key, "진행중")
         self.state.set_status("작전 준비중")
+        self._job_summary = self._new_summary()
 
         try:
             command = self.command_builder(action)
@@ -112,6 +120,7 @@ class ActionRunner:
         if stage_key:
             self.state.set_stage_status(stage_key, "진행중")
         self.state.set_status("작전 진행중")
+        self._job_summary = self._new_summary()
         self._log("\n" + "=" * 70 + "\n", category="process")
         self._log(f"실행: {' '.join(command)}\n", category="process")
         try:
@@ -175,13 +184,14 @@ class ActionRunner:
                 return False
         self.state.set_team_watch_enabled(team_key, True)
         self.state.set_stage_status(team_key, "감시중")
+        self._team_summaries[team_key] = self._new_summary()
         command = self.command_builder(action)
         self._log(f"워커 실행: {' '.join(command)}\n", category=team_key)
         try:
             started = self.process_manager.start_team(
                 team_key,
                 command,
-                on_line=lambda line: self._log(line, category=team_key),
+                on_line=lambda line: self._handle_team_line(team_key, line),
                 on_done=lambda code: self._handle_team_done(team_key, code),
             )
             if started:
@@ -232,6 +242,7 @@ class ActionRunner:
                 self._release_team_upload_lock(team_key)
 
     def _handle_line(self, action: str, line: str) -> None:
+        self._record_summary_line(self._job_summary, action, line)
         if action == "watch":
             self._log(line, category="scout")
         else:
@@ -241,12 +252,19 @@ class ActionRunner:
             self.state.set_current_action(self.state.current_action, stage_key)
             self.state.set_stage_status(stage_key, "진행중")
 
+    def _handle_team_line(self, team_key: str, line: str) -> None:
+        action = self.team_watch_actions.get(team_key, "")
+        summary = self._team_summaries.setdefault(team_key, self._new_summary())
+        self._record_summary_line(summary, action, line)
+        self._log(line, category=team_key)
+
     def _handle_done(self, return_code: int) -> None:
         success = return_code == 0
         self._log(f"\n작업 종료 (code: {return_code})\n", category="process")
         job_name = self._job_name or self._job_label(self.state.current_action)
         duration = max(0, time.time() - self._job_started_at) if self._job_started_at else 0
-        notify_job_finished(job_name, 1 if success else 0, 0 if success else 1, duration)
+        success_count, fail_count = self._summary_counts(self._job_summary, process_success=success)
+        notify_job_finished(job_name, success_count, fail_count, duration)
         if not success:
             notify_critical_error(job_name, f"작업이 비정상 종료되었습니다. code={return_code}")
         self.state.record_process_done(success)
@@ -258,13 +276,16 @@ class ActionRunner:
         self.state.set_status("대기중")
         self._job_started_at = 0.0
         self._job_name = ""
+        self._job_summary = self._new_summary()
         self._release_upload_lock()
 
     def _handle_team_done(self, team_key: str, return_code: int) -> None:
         self._log(f"워커 종료 (code: {return_code})\n", category=team_key)
         duration = max(0, time.time() - self._team_started_at.pop(team_key, 0))
         success = return_code == 0
-        notify_job_finished(self._team_label(team_key), 1 if success else 0, 0 if success else 1, duration)
+        summary = self._team_summaries.pop(team_key, self._new_summary())
+        success_count, fail_count = self._summary_counts(summary, process_success=success)
+        notify_job_finished(self._team_label(team_key), success_count, fail_count, duration)
         if not success:
             notify_critical_error(self._team_label(team_key), f"워커가 비정상 종료되었습니다. code={return_code}")
         enabled = self.state.team_watch_enabled.get(team_key, False)
@@ -289,6 +310,98 @@ class ActionRunner:
 
     def _is_upload_action(self, action: str) -> bool:
         return action in {"upload-review", "upload-auto", "watch-upload"}
+
+    def _new_summary(self) -> dict[str, set[str] | int]:
+        return {"success_rows": set(), "fail_rows": set(), "anonymous_success": 0, "anonymous_fail": 0}
+
+    def _summary_kind(self, action: str) -> str:
+        if action in {"upload-review", "upload-auto", "watch-upload"}:
+            return "upload"
+        if action in {"save-images", "watch-images"}:
+            return "image"
+        if action in {"thumbnail-create", "watch-thumbnails"}:
+            return "thumbnail"
+        if action in {"run", "watch"}:
+            return "crawl"
+        return ""
+
+    def _record_summary_line(self, summary: dict[str, set[str] | int], action: str, line: str) -> None:
+        kind = self._summary_kind(action)
+        if not kind:
+            return
+        text = line.strip()
+        if not text:
+            return
+
+        if kind == "upload":
+            if "상태 업데이트: 출품완료" in text:
+                self._mark_summary(summary, True, self._extract_row_id(text))
+            elif (
+                "상태 업데이트: 오류" in text
+                or "상품입력 실패" in text
+                or "upload_fill_failed" in text
+                or "upload_row_failed" in text
+            ):
+                self._mark_summary(summary, False, self._extract_row_id(text))
+            return
+
+        if kind == "image":
+            if "[IMAGE DONE]" in text:
+                self._mark_summary(summary, True, self._extract_row_id(text))
+            elif "[ERROR]" in text or "이미지 저장 실패" in text or "이미지 처리 실패" in text:
+                self._mark_summary(summary, False, self._extract_row_id(text))
+            return
+
+        if kind == "thumbnail":
+            if "[THUMBNAIL DONE]" in text:
+                self._mark_summary(summary, True, self._extract_row_id(text))
+            elif "thumbnail failed" in text or "썸네일 생성 실패" in text or "[ERROR]" in text:
+                self._mark_summary(summary, False, self._extract_row_id(text))
+            return
+
+        if kind == "crawl":
+            if "[CRAWL DONE]" in text:
+                self._mark_summary(summary, True, self._extract_row_id(text))
+            elif "[ERROR]" in text or "크롤링 오류" in text or "처리 오류" in text:
+                self._mark_summary(summary, False, self._extract_row_id(text))
+
+    def _extract_row_id(self, text: str) -> str:
+        row_match = _ROW_RE.search(text)
+        if row_match:
+            return row_match.group(1)
+        korean_row_match = _KOREAN_ROW_RE.search(text)
+        if korean_row_match:
+            return korean_row_match.group(1)
+        return ""
+
+    def _mark_summary(self, summary: dict[str, set[str] | int], is_success: bool, row_id: str) -> None:
+        success_rows = summary["success_rows"]
+        fail_rows = summary["fail_rows"]
+        if not isinstance(success_rows, set) or not isinstance(fail_rows, set):
+            return
+        if row_id:
+            if is_success:
+                if row_id not in fail_rows:
+                    success_rows.add(row_id)
+            else:
+                success_rows.discard(row_id)
+                fail_rows.add(row_id)
+            return
+        key = "anonymous_success" if is_success else "anonymous_fail"
+        summary[key] = int(summary.get(key, 0) or 0) + 1
+
+    def _summary_counts(self, summary: dict[str, set[str] | int], *, process_success: bool) -> tuple[int, int]:
+        success_rows = summary.get("success_rows")
+        fail_rows = summary.get("fail_rows")
+        success_count = len(success_rows) if isinstance(success_rows, set) else 0
+        fail_count = len(fail_rows) if isinstance(fail_rows, set) else 0
+        success_count += int(summary.get("anonymous_success", 0) or 0)
+        fail_count += int(summary.get("anonymous_fail", 0) or 0)
+        if success_count or fail_count:
+            if not process_success and fail_count == 0:
+                fail_count = 1
+            return success_count, fail_count
+        return (1, 0) if process_success else (0, 1)
 
     def _upload_account_id(self) -> str:
         return build_upload_account_id(self.buyma_account_provider())
