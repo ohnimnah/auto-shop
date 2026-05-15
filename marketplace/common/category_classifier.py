@@ -60,7 +60,8 @@ CATEGORY_FALLBACK_RULES: List[Tuple[str, List[str], StandardCategory]] = [
     ("sports_shoes", ["인도어화", "스포츠화", "코트화", "풋살화", "배드민턴화", "핸드볼화"], StandardCategory.SHOES_SNEAKER),
     ("mary_jane", ["메리제인", "mary jane"], StandardCategory.SHOES_FLAT),
     ("sandals", ["슬리퍼", "샌들", "sandal", "slide"], StandardCategory.SHOES_SANDAL),
-    ("hoodie", ["hoodie", "후드", "후디", "맨투맨", "sweatshirt"], StandardCategory.TOP_HOODIE),
+    ("sweat_top", ["맨투맨", "스웻 셔츠", "스웨트 셔츠", "sweatshirt", "sweat shirt"], StandardCategory.TOP_SWEAT),
+    ("hoodie", ["hoodie", "후드", "후디"], StandardCategory.TOP_HOODIE),
     ("dress", ["dress", "드레스", "원피스"], StandardCategory.DRESS),
     ("jumpsuit_overalls", ["점프수트", "오버롤", "오버롤즈", "jumpsuit", "overall", "overalls", "salopette"], StandardCategory.JUMPSUIT),
     ("skirt", ["skirt", "스커트"], StandardCategory.SKIRT_LONG),
@@ -137,13 +138,18 @@ MUSINSA_CATEGORY_OVERRIDES: List[Tuple[Tuple[str, ...], StandardCategory]] = [
     (("스포츠 레저", "vest"), StandardCategory.OUTER_VEST),
     (("outer", "jacket"), StandardCategory.OUTER_JACKET),
     (("outer", "jumper"), StandardCategory.OUTER_JACKET),
-    (("상의", "블라우스"), StandardCategory.TOP_BLOUSE),
-    (("상의", "브라우스"), StandardCategory.TOP_BLOUSE),
-    (("상의", "blouse"), StandardCategory.TOP_BLOUSE),
+    (("상의", "맨투맨"), StandardCategory.TOP_SWEAT),
+    (("상의", "스웻"), StandardCategory.TOP_SWEAT),
+    (("상의", "스웨트"), StandardCategory.TOP_SWEAT),
+    (("상의", "sweatshirt"), StandardCategory.TOP_SWEAT),
+    (("상의", "sweat shirt"), StandardCategory.TOP_SWEAT),
     (("상의", "티셔츠"), StandardCategory.TOP_TSHIRT),
     (("상의", "t shirt"), StandardCategory.TOP_TSHIRT),
     (("상의", "t-shirt"), StandardCategory.TOP_TSHIRT),
     (("상의", "tee"), StandardCategory.TOP_TSHIRT),
+    (("상의", "블라우스"), StandardCategory.TOP_BLOUSE),
+    (("상의", "브라우스"), StandardCategory.TOP_BLOUSE),
+    (("상의", "blouse"), StandardCategory.TOP_BLOUSE),
     (("상의", "셔츠"), StandardCategory.TOP_SHIRT),
     (("상의", "남방"), StandardCategory.TOP_SHIRT),
     (("상의", "shirt"), StandardCategory.TOP_SHIRT),
@@ -158,9 +164,6 @@ MUSINSA_CATEGORY_OVERRIDES: List[Tuple[Tuple[str, ...], StandardCategory]] = [
     (("상의", "후드"), StandardCategory.TOP_HOODIE),
     (("상의", "후디"), StandardCategory.TOP_HOODIE),
     (("상의", "hoodie"), StandardCategory.TOP_HOODIE),
-    (("상의", "맨투맨"), StandardCategory.TOP_SWEAT),
-    (("상의", "스웨트"), StandardCategory.TOP_SWEAT),
-    (("상의", "sweat"), StandardCategory.TOP_SWEAT),
     (("상의", "슬리브리스"), StandardCategory.TOP_TANK),
     (("상의", "민소매"), StandardCategory.TOP_TANK),
     (("상의", "나시"), StandardCategory.TOP_TANK),
@@ -305,10 +308,19 @@ def _has_tshirt_signal(text: str) -> bool:
     return any(_contains_keyword(text, token) for token in tshirt_tokens)
 
 
+def _has_sweat_top_signal(text: str) -> bool:
+    sweat_tokens = ("맨투맨", "스웻 셔츠", "스웨트 셔츠", "sweatshirt", "sweat shirt")
+    return any(_contains_keyword(text, token) for token in sweat_tokens)
+
+
 def _resolve_shirt_blouse_signal(text: str) -> Optional[StandardCategory]:
     if any(_contains_keyword(text, token) for token in ("블라우스", "브라우스", "blouse")):
         return StandardCategory.TOP_BLOUSE
-    if any(_contains_keyword(text, token) for token in ("셔츠", "남방", "shirt")) and not _has_tshirt_signal(text):
+    if (
+        any(_contains_keyword(text, token) for token in ("셔츠", "남방", "shirt"))
+        and not _has_tshirt_signal(text)
+        and not _has_sweat_top_signal(text)
+    ):
         return StandardCategory.TOP_SHIRT
     return None
 
@@ -377,6 +389,9 @@ def classify_category_with_reason(
     has_skirt = any(_contains_keyword(force_text, token) for token in SKIRT_TOKENS)
     if has_dress and not has_skirt:
         return StandardCategory.DRESS, "dress_keyword_override"
+
+    if _has_sweat_top_signal(force_text):
+        return StandardCategory.TOP_SWEAT, "sweat_keyword_override"
 
     shirt_blouse_category = _resolve_shirt_blouse_signal(force_text)
     if shirt_blouse_category == StandardCategory.TOP_BLOUSE:

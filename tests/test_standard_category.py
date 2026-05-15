@@ -213,6 +213,23 @@ class StandardCategoryTests(unittest.TestCase):
         self.assertEqual(plan["cat3"], "ブラウス・シャツ")
         self.assertTrue(plan["category_path_valid"])
 
+    def test_buyma_category_plan_keeps_sweatshirt_out_of_blouse(self):
+        row = {
+            "product_name_kr": "소프트 헤비 워싱 오버 핏 스웻 셔츠",
+            "product_name_en": "Soft Heavy Washed Oversized Sweatshirt",
+            "brand": "ETRE AU SOMMET",
+            "musinsa_category_large": "여성",
+            "musinsa_category_middle": "상의",
+            "musinsa_category_small": "맨투맨/스웨트",
+        }
+
+        plan = build_buyma_category_plan(row, category_corrector=_identity_corrector)
+
+        self.assertEqual(plan["standard_category"], "TOP_SWEAT")
+        self.assertEqual(plan["cat2"], "トップス")
+        self.assertEqual(plan["cat3"], "スウェット・トレーナー")
+        self.assertTrue(plan["category_path_valid"])
+
     def test_legacy_infer_buyma_category_keeps_blouse_out_of_tshirt(self):
         self.assertEqual(
             infer_buyma_category("여성 반팔 블라우스", "SHORT SLEEVE BLOUSE", "GLOWNY"),
@@ -221,6 +238,10 @@ class StandardCategoryTests(unittest.TestCase):
         self.assertEqual(
             infer_buyma_category("여성 반팔 티셔츠", "LOGO T-SHIRT", "GLOWNY"),
             ("レディースファッション", "トップス", "Tシャツ・カットソー"),
+        )
+        self.assertEqual(
+            infer_buyma_category("여성 상의 맨투맨/스웨트", "Soft Heavy Washed Oversized Sweatshirt", "ETRE AU SOMMET"),
+            ("レディースファッション", "トップス", "スウェット・トレーナー"),
         )
 
     def test_category_recovery_aliases(self):

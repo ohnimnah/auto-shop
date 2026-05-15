@@ -22,6 +22,15 @@ class CategoryCorrectionTests(unittest.TestCase):
 
         self.assertEqual(result, "Tシャツ・カットソー")
 
+    def test_sweatshirt_does_not_collapse_to_blouse_shirt(self) -> None:
+        result = correct_buyma_category(
+            "スウェット・トレーナー",
+            "소프트 헤비 워싱 오버 핏 스웻 셔츠",
+            "여성 상의 맨투맨/스웨트",
+        )
+
+        self.assertEqual(result, "スウェット・トレーナー")
+
 
 if __name__ == "__main__":
     unittest.main()

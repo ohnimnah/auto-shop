@@ -52,11 +52,11 @@ BUYMA_GENDER_CATEGORY_MAP = {
 }
 
 CATEGORY_KEYWORDS = [
+    (["맨투맨", "스웻", "스웨트", "sweatshirt", "sweat shirt"], None, "トップス", "スウェット・トレーナー"),
     (["블라우스", "브라우스", "blouse"], None, "トップス", "ブラウス・シャツ"),
     (["셔츠", "남방", "shirt"], None, "トップス", "ブラウス・シャツ"),
     (["티셔츠", "반팔", "긴팔", "tee", "t-shirt"], None, "トップス", "Tシャツ・カットソー"),
     (["후드", "hoodie", "hood"], None, "トップス", "パーカー・フーディ"),
-    (["맨투맨", "sweatshirt", "sweat"], None, "トップス", "スウェット"),
     (["니트", "sweater", "knit"], None, "トップス", "ニット・セーター"),
     (["청바지", "데님", "jeans", "denim"], None, "ボトムス", "デニム・ジーンズ"),
     (["슬랙스", "trousers"], None, "ボトムス", "スラックス"),
@@ -78,9 +78,13 @@ def _legacy_has_tshirt_signal(text: str) -> bool:
     return any(token in text for token in ("티셔츠", "t-shirt", "t shirt", "tshirt", "tee", "カットソー"))
 
 
+def _legacy_has_sweat_signal(text: str) -> bool:
+    return any(token in text for token in ("맨투맨", "스웻", "스웨트", "sweatshirt", "sweat shirt"))
+
+
 def _legacy_category_keyword_matches(text: str, keyword: str) -> bool:
     keyword_norm = (keyword or "").lower()
-    if keyword_norm in {"셔츠", "shirt"} and _legacy_has_tshirt_signal(text):
+    if keyword_norm in {"셔츠", "shirt"} and (_legacy_has_tshirt_signal(text) or _legacy_has_sweat_signal(text)):
         return False
     return keyword_norm in text
 
