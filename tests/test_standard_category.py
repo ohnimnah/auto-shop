@@ -34,6 +34,7 @@ class StandardCategoryTests(unittest.TestCase):
             ("카고 조거 팬츠", "PANTS_JOGGER"),
             ("러닝 스니커즈", "SHOES_RUNNING"),
             ("레더 로퍼", "SHOES_LOAFER"),
+            ("From knee socks", "ACC_SOCKS"),
         ]
         for name, expected in cases:
             with self.subTest(name=name):

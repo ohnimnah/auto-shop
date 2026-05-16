@@ -82,6 +82,7 @@ class StandardCategory(str, Enum):
     ACC_BEANIE = "ACC_BEANIE"
     ACC_BELT = "ACC_BELT"
     ACC_SCARF = "ACC_SCARF"
+    ACC_SOCKS = "ACC_SOCKS"
     ACC_JEWELRY = "ACC_JEWELRY"
     ACC_EYEWEAR = "ACC_EYEWEAR"
     ACC_WATCH = "ACC_WATCH"
@@ -186,6 +187,7 @@ STANDARD_CATEGORY_SPECS = {
     StandardCategory.ACC_BEANIE: StandardCategorySpec(StandardCategory.ACC_BEANIE, MIDDLE_HATS, MIDDLE_HATS, "ニットキャップ・ビーニー", ("비니", "beanie")),
     StandardCategory.ACC_BELT: StandardCategorySpec(StandardCategory.ACC_BELT, MIDDLE_ACCESSORIES_WOMEN, MIDDLE_ACCESSORIES_MEN, "ベルト", ("벨트", "belt")),
     StandardCategory.ACC_SCARF: StandardCategorySpec(StandardCategory.ACC_SCARF, MIDDLE_ACCESSORIES_WOMEN, MIDDLE_ACCESSORIES_MEN, "マフラー・ストール", ("머플러", "스카프", "scarf", "muffler")),
+    StandardCategory.ACC_SOCKS: StandardCategorySpec(StandardCategory.ACC_SOCKS, MIDDLE_INNER_ROOM, MIDDLE_INNER_ROOM, "タイツ・ソックス", ("양말", "삭스", "레그웨어", "socks", "sock", "knee socks", "legwear", "tights")),
     StandardCategory.ACC_JEWELRY: StandardCategorySpec(StandardCategory.ACC_JEWELRY, "アクセサリー", "アクセサリー", "", ("목걸이", "반지", "귀걸이", "팔찌", "necklace", "ring", "earring", "bracelet")),
     StandardCategory.ACC_EYEWEAR: StandardCategorySpec(StandardCategory.ACC_EYEWEAR, MIDDLE_ACCESSORIES_WOMEN, MIDDLE_EYEWEAR_MEN, "サングラス", ("선글라스", "안경", "sunglasses", "eyewear")),
     StandardCategory.ACC_WATCH: StandardCategorySpec(StandardCategory.ACC_WATCH, MIDDLE_WATCH, MIDDLE_WATCH, "", ("시계", "watch")),
@@ -306,6 +308,7 @@ RESOLUTION_PRIORITY: Tuple[StandardCategory, ...] = (
     StandardCategory.ACC_EYEWEAR,
     StandardCategory.ACC_JEWELRY,
     StandardCategory.ACC_SCARF,
+    StandardCategory.ACC_SOCKS,
     StandardCategory.ACC_BEANIE,
     StandardCategory.ACC_CAP,
     StandardCategory.ACC_HAT,

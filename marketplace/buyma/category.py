@@ -516,6 +516,8 @@ def _category_recovery_candidates(
             StandardCategory.ACC_EYEWEAR,
             StandardCategory.ACC_BEANIE,
             StandardCategory.ACC_BELT,
+            StandardCategory.ACC_SCARF,
+            StandardCategory.ACC_SOCKS,
             StandardCategory.ACC_CAP,
             StandardCategory.ACC_HAT,
         }
