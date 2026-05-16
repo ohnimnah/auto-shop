@@ -56,6 +56,7 @@ class StandardCategory(str, Enum):
     SETUP = "SETUP"
     HOME_PAJAMA = "HOME_PAJAMA"
     INNER_UNDERWEAR = "INNER_UNDERWEAR"
+    SWIMWEAR = "SWIMWEAR"
 
     # Shoes
     SNEAKER = "SNEAKER"  # legacy alias; resolves to SHOES_SNEAKER in mapping helpers.
@@ -116,6 +117,7 @@ MIDDLE_BOTTOMS_MEN = "パンツ・ボトムス"
 MIDDLE_DRESS_WOMEN = "ワンピース・オールインワン"
 MIDDLE_OTHER_FASHION_MEN = "その他ファッション"
 MIDDLE_INNER_ROOM = "インナー・ルームウェア"
+MIDDLE_SWIM_BEACH = "水着・ビーチグッズ"
 MIDDLE_SHOES_WOMEN = "靴・シューズ"
 MIDDLE_SHOES_MEN = "靴・ブーツ・サンダル"
 MIDDLE_BAGS_WOMEN = "バッグ・カバン"
@@ -168,6 +170,7 @@ STANDARD_CATEGORY_SPECS = {
     StandardCategory.SETUP: StandardCategorySpec(StandardCategory.SETUP, MIDDLE_DRESS_WOMEN, MIDDLE_OTHER_FASHION_MEN, "セットアップ", ("셋업", "세트업", "setup", "set-up", "two piece")),
     StandardCategory.HOME_PAJAMA: StandardCategorySpec(StandardCategory.HOME_PAJAMA, MIDDLE_INNER_ROOM, MIDDLE_INNER_ROOM, "ルームウェア・パジャマ", ("파자마", "잠옷", "룸웨어", "홈웨어", "pajama", "sleepwear", "loungewear")),
     StandardCategory.INNER_UNDERWEAR: StandardCategorySpec(StandardCategory.INNER_UNDERWEAR, MIDDLE_INNER_ROOM, MIDDLE_INNER_ROOM, "インナー・下着", ("언더웨어", "속옷", "innerwear", "underwear")),
+    StandardCategory.SWIMWEAR: StandardCategorySpec(StandardCategory.SWIMWEAR, MIDDLE_SWIM_BEACH, MIDDLE_SWIM_BEACH, "ビキニ", ("수영복", "비치웨어", "비키니", "bikini", "swimsuit", "swimwear", "beachwear")),
     StandardCategory.SHOES_SNEAKER: StandardCategorySpec(StandardCategory.SHOES_SNEAKER, MIDDLE_SHOES_WOMEN, MIDDLE_SHOES_MEN, "スニーカー", ("스니커즈", "운동화", "sneaker", "sneakers", "trainer")),
     StandardCategory.SHOES_RUNNING: StandardCategorySpec(StandardCategory.SHOES_RUNNING, MIDDLE_SHOES_WOMEN, MIDDLE_SHOES_MEN, "スニーカー", ("러닝화", "러닝", "running shoes", "running")),
     StandardCategory.SHOES_BOOTS: StandardCategorySpec(StandardCategory.SHOES_BOOTS, MIDDLE_SHOES_WOMEN, MIDDLE_SHOES_MEN, "ブーツ", ("부츠", "워커", "boots", "boot")),
@@ -264,6 +267,7 @@ def build_combined_text(
 RESOLUTION_PRIORITY: Tuple[StandardCategory, ...] = (
     StandardCategory.HOME_PAJAMA,
     StandardCategory.INNER_UNDERWEAR,
+    StandardCategory.SWIMWEAR,
     StandardCategory.OUTER_PADDING,
     StandardCategory.OUTER_TRENCH,
     StandardCategory.OUTER_DENIM_JACKET,

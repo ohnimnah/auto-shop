@@ -2,10 +2,13 @@
 
 from __future__ import annotations
 
+from datetime import datetime, timezone
+import json
+from pathlib import Path
 from selenium.webdriver.common.by import By
 from selenium.webdriver.common.keys import Keys
 import sys
-from typing import Callable, Dict, List, Sequence, Tuple
+from typing import Callable, Dict, List, Mapping, Sequence, Tuple
 from marketplace.buyma.standard_category import (
     STANDARD_CATEGORY_SPECS,
     StandardCategory,
@@ -35,6 +38,65 @@ def _safe_log(message: str) -> None:
         encoding = sys.stdout.encoding or "utf-8"
         encoded = (message or "").encode(encoding, errors="replace")
         print(encoded.decode(encoding, errors="replace"))
+
+
+def append_category_selection_event(
+    row_data: Mapping[str, object],
+    category_diag: Mapping[str, object],
+    *,
+    log_path: str | Path = "logs/category_selection_events.jsonl",
+) -> None:
+    """Append one BUYMA category decision/selection event as JSONL."""
+    try:
+        path = Path(log_path)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        musinsa_category = " / ".join(
+            str(row_data.get(key) or "").strip()
+            for key in ("musinsa_category_large", "musinsa_category_middle", "musinsa_category_small")
+            if str(row_data.get(key) or "").strip()
+        )
+        target_path = " > ".join(
+            str(category_diag.get(key) or "").strip()
+            for key in (
+                "target_buyma_parent_category",
+                "target_buyma_middle_category",
+                "target_buyma_child_category",
+            )
+            if str(category_diag.get(key) or "").strip()
+        )
+        actual_path = " > ".join(
+            str(category_diag.get(key) or "").strip()
+            for key in (
+                "actual_selected_parent_category",
+                "actual_selected_middle_category",
+                "actual_selected_child_category",
+            )
+            if str(category_diag.get(key) or "").strip()
+        )
+        event = {
+            "ts": datetime.now(timezone.utc).isoformat(),
+            "row": row_data.get("row_num") or "",
+            "product_name": row_data.get("product_name_kr") or row_data.get("product_name_en") or "",
+            "brand": row_data.get("brand_en") or row_data.get("brand") or "",
+            "musinsa_category": musinsa_category,
+            "standard_category": category_diag.get("standard_category") or "",
+            "target_buyma_category": target_path,
+            "actual_buyma_category": actual_path,
+            "success": bool(category_diag.get("category_selection_success")),
+            "final_result": category_diag.get("final_result") or "",
+            "failure_stage": category_diag.get("failure_stage") or "",
+            "cat_source": category_diag.get("cat_source") or "",
+            "mapping_table_used": bool(category_diag.get("mapping_table_used")),
+            "mapping_validator_passed": bool(category_diag.get("mapping_validator_passed")),
+            "semantic_fallback_used": bool(category_diag.get("semantic_fallback_used")),
+            "legacy_used": bool(category_diag.get("legacy_used")),
+            "recovery_used": bool(category_diag.get("recovery_used")),
+            "recovery_method": category_diag.get("recovery_method") or "",
+        }
+        with path.open("a", encoding="utf-8") as fh:
+            fh.write(json.dumps(event, ensure_ascii=False, sort_keys=True) + "\n")
+    except Exception as exc:
+        _safe_log(f"  △ 카테고리 선택 로그 기록 실패: {exc}")
 
 
 FEMALE_KEYWORDS = [
@@ -518,6 +580,7 @@ def _category_recovery_candidates(
             StandardCategory.ACC_BELT,
             StandardCategory.ACC_SCARF,
             StandardCategory.ACC_SOCKS,
+            StandardCategory.SWIMWEAR,
             StandardCategory.ACC_CAP,
             StandardCategory.ACC_HAT,
         }

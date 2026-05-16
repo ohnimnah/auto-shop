@@ -50,6 +50,7 @@ class CategoryClassifierFallbackTests(unittest.TestCase):
         self.assertEqual(classify_category("gold necklace", ""), StandardCategory.ACC_JEWELRY)
         self.assertEqual(classify_category("sports socks", ""), StandardCategory.ACC_SOCKS)
         self.assertEqual(classify_category("From knee socks", ""), StandardCategory.ACC_SOCKS)
+        self.assertEqual(classify_category("SPORTY TRACK RIBBON BIKINI", ""), StandardCategory.SWIMWEAR)
         self.assertEqual(classify_category("심리스 이너프리 브라", "카인다미"), StandardCategory.INNER_UNDERWEAR)
         self.assertEqual(classify_category("골반뽕 볼륨업 보정속옷", "KINDAME"), StandardCategory.INNER_UNDERWEAR)
         self.assertIn(

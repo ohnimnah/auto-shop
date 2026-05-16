@@ -13,6 +13,7 @@ import re
 from typing import Any, Callable, Dict, List
 
 from marketplace.buyma.failure_tracking import capture_failure_artifacts
+from marketplace.buyma.category import append_category_selection_event
 from marketplace.buyma.mapper import buyma_title_units
 from marketplace.buyma.retry_ops import safe_click
 from marketplace.common.interfaces import MarketplaceRow, MarketplaceUploader
@@ -224,6 +225,7 @@ def upload_products(
                     ):
                         print(f"  {row_num}행 상태 업데이트: {status_completed}")
                     category_diag["final_result"] = "success"
+                    append_category_selection_event(row_data, category_diag)
                     notify_upload_success(_notification_product(row_data, category_diag))
                 elif upload_mode == "auto":
                     if update_cell_by_header(
@@ -237,10 +239,12 @@ def upload_products(
                         print(f"  {row_num}행 상태 업데이트: 오류")
                     if not category_diag.get("final_result"):
                         category_diag["final_result"] = "failed"
+                    append_category_selection_event(row_data, category_diag)
                     notify_upload_failed(_notification_product(row_data, category_diag), "BUYMA 제출 완료 확인 실패")
             elif fill_result == "manual_review":
                 print(f"  {row_num}행은 상품명 등 수동 확인이 필요합니다. 현재 브라우저 화면을 확인해주세요.")
                 category_diag["final_result"] = "manual_review"
+                append_category_selection_event(row_data, category_diag)
                 notify_upload_failed(_notification_product(row_data, category_diag), "상품명 등 수동 확인 필요")
                 keep_browser_open = True
                 if append_category_candidate:
@@ -275,6 +279,7 @@ def upload_products(
                     print(f"  {row_num}행 상태 업데이트: 오류")
                 if not category_diag.get("final_result"):
                     category_diag["final_result"] = "error"
+                append_category_selection_event(row_data, category_diag)
                 if interactive:
                     safe_input("  Enter를 눌러 다음으로 진행...")
 

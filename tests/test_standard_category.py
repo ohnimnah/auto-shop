@@ -1,10 +1,12 @@
 import unittest
+from tempfile import TemporaryDirectory
 from unittest.mock import patch
 
 from marketplace.buyma.category import (
     _best_fuzzy_match,
     _category_recovery_aliases,
     _category_recovery_candidates,
+    append_category_selection_event,
     build_buyma_category_plan,
     infer_buyma_category,
 )
@@ -17,6 +19,8 @@ from marketplace.buyma.standard_category import (
 )
 import standard_category_map
 from standard_category_map import CategoryMappingRow
+import json
+from pathlib import Path
 
 
 def _identity_corrector(base_category: str, product_name: str, musinsa_category: str) -> str:
@@ -35,6 +39,7 @@ class StandardCategoryTests(unittest.TestCase):
             ("러닝 스니커즈", "SHOES_RUNNING"),
             ("레더 로퍼", "SHOES_LOAFER"),
             ("From knee socks", "ACC_SOCKS"),
+            ("SPORTY TRACK RIBBON BIKINI", "SWIMWEAR"),
         ]
         for name, expected in cases:
             with self.subTest(name=name):
@@ -146,6 +151,39 @@ class StandardCategoryTests(unittest.TestCase):
         self.assertTrue(diag["validator_passed"])
         self.assertTrue(validate_buyma_category_path(diag["buyma_parent"], diag["buyma_middle"], diag["buyma_child"]))
 
+    def test_append_category_selection_event_writes_jsonl(self):
+        row = {
+            "row_num": 969,
+            "product_name_en": "From knee socks",
+            "brand_en": "BNFROM",
+            "musinsa_category_large": "여성",
+            "musinsa_category_middle": "소품",
+            "musinsa_category_small": "양말/레그웨어",
+        }
+        diag = {
+            "category_selection_success": True,
+            "final_result": "success",
+            "standard_category": "ACC_SOCKS",
+            "target_buyma_parent_category": "レディースファッション",
+            "target_buyma_middle_category": "インナー・ルームウェア",
+            "target_buyma_child_category": "タイツ・ソックス",
+            "actual_selected_parent_category": "レディースファッション",
+            "actual_selected_middle_category": "インナー・ルームウェア",
+            "actual_selected_child_category": "タイツ・ソックス",
+            "cat_source": "시트(W/X/Y)+stdmap",
+            "mapping_table_used": True,
+        }
+        with TemporaryDirectory() as tmpdir:
+            path = Path(tmpdir) / "category_selection_events.jsonl"
+            append_category_selection_event(row, diag, log_path=path)
+            data = json.loads(path.read_text(encoding="utf-8").strip())
+
+        self.assertEqual(data["row"], 969)
+        self.assertEqual(data["standard_category"], "ACC_SOCKS")
+        self.assertEqual(data["musinsa_category"], "여성 / 소품 / 양말/레그웨어")
+        self.assertEqual(data["target_buyma_category"], "レディースファッション > インナー・ルームウェア > タイツ・ソックス")
+        self.assertTrue(data["success"])
+
     def test_buyma_category_plan_uses_granular_standard_category(self):
         row = {
             "product_name_kr": "와이드 데님 청바지",
@@ -178,6 +216,23 @@ class StandardCategoryTests(unittest.TestCase):
         self.assertEqual(plan["standard_category"], "OUTER_JACKET")
         self.assertEqual(plan["cat2"], "アウター")
         self.assertEqual(plan["cat3"], "ジャケット")
+
+    def test_buyma_category_plan_maps_bikini_to_swimwear(self):
+        row = {
+            "product_name_kr": "SPORTY TRACK RIBBON BIKINI",
+            "product_name_en": "",
+            "brand": "BNFROM",
+            "musinsa_category_large": "여성",
+            "musinsa_category_middle": "스포츠/레저",
+            "musinsa_category_small": "수영복/비치웨어",
+        }
+
+        plan = build_buyma_category_plan(row, category_corrector=_identity_corrector)
+
+        self.assertEqual(plan["standard_category"], "SWIMWEAR")
+        self.assertEqual(plan["cat2"], "水着・ビーチグッズ")
+        self.assertEqual(plan["cat3"], "ビキニ")
+        self.assertTrue(plan["category_path_valid"])
         self.assertTrue(plan["category_path_valid"])
 
     def test_buyma_category_plan_maps_digital_to_tech_accessory(self):

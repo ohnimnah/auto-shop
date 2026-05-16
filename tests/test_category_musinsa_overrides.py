@@ -99,6 +99,7 @@ class MusinsaCategoryOverrideTests(unittest.TestCase):
             ("악세서리", "시계", StandardCategory.ACC_WATCH),
             ("액세서리", "목걸이", StandardCategory.ACC_JEWELRY),
             ("소품", "양말/레그웨어", StandardCategory.ACC_SOCKS),
+            ("스포츠/레저", "수영복/비치웨어", StandardCategory.SWIMWEAR),
         )
         for middle, small, expected in cases:
             with self.subTest(middle=middle, small=small):
