@@ -21,6 +21,7 @@ PRODUCT_SHEET_DERIVED_FIELDS = (
     "musinsa_category_large",
     "musinsa_category_middle",
     "musinsa_category_small",
+    "brand_logo_url",
 )
 
 PRODUCT_CRAWL_RESULT_FIELDS = (
@@ -95,6 +96,7 @@ PRODUCT_SHEET_FIELDS = (
     "musinsa_category_large",
     "musinsa_category_middle",
     "musinsa_category_small",
+    "brand_logo_url",
 )
 
 
