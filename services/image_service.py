@@ -162,7 +162,7 @@ def download_thumbnail_images(
     image_urls: List[str],
     folder_name: str,
     images_root: str,
-    max_thumbnail_images: int,
+    max_thumbnail_images: int | None,
 ) -> str:
     """Download product images and return comma-separated local file paths."""
     if not image_urls:
@@ -175,7 +175,8 @@ def download_thumbnail_images(
     os.makedirs(image_dir, exist_ok=True)
 
     saved_paths: List[str] = []
-    for index, image_url in enumerate(image_urls[:max_thumbnail_images], start=1):
+    target_urls = image_urls[:max_thumbnail_images] if max_thumbnail_images else list(image_urls)
+    for index, image_url in enumerate(target_urls, start=1):
         try:
             parsed = urllib.parse.urlparse(image_url)
             ext = os.path.splitext(parsed.path)[1].lower()
@@ -193,6 +194,7 @@ def download_thumbnail_images(
         except Exception as image_error:
             print(f"    이미지 다운로드 스킵: {image_error}")
 
+    print(f"    이미지 저장 결과: 후보 {len(target_urls)}개 / 저장 {len(saved_paths)}개")
     return ",".join(saved_paths)
 
 

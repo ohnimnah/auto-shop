@@ -100,6 +100,7 @@ class MusinsaCategoryOverrideTests(unittest.TestCase):
             ("액세서리", "목걸이", StandardCategory.ACC_JEWELRY),
             ("소품", "양말/레그웨어", StandardCategory.ACC_SOCKS),
             ("스포츠/레저", "수영복/비치웨어", StandardCategory.SWIMWEAR),
+            ("스포츠/레저", "가방", StandardCategory.BAG_CROSSBODY),
         )
         for middle, small, expected in cases:
             with self.subTest(middle=middle, small=small):
@@ -124,6 +125,18 @@ class MusinsaCategoryOverrideTests(unittest.TestCase):
         )
 
         self.assertEqual(result, StandardCategory.OUTER_JACKET)
+        self.assertEqual(meta["reason"], "musinsa_category_override")
+
+    def test_musinsa_sports_bag_maps_to_crossbody_bag(self):
+        result, meta = classify_standard_category_from_sheet(
+            musinsa_large="남성",
+            musinsa_middle="스포츠/레저",
+            musinsa_small="가방",
+            product_name="맨티스 2 웨이스트 팩 - 24K",
+            brand="ARCTERYX",
+        )
+
+        self.assertEqual(result, StandardCategory.BAG_CROSSBODY)
         self.assertEqual(meta["reason"], "musinsa_category_override")
 
     def test_musinsa_pants_category_wins_over_belted_product_name(self):

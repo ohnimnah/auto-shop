@@ -235,6 +235,24 @@ class StandardCategoryTests(unittest.TestCase):
         self.assertTrue(plan["category_path_valid"])
         self.assertTrue(plan["category_path_valid"])
 
+    def test_buyma_category_plan_maps_sports_bag_to_crossbody_bag(self):
+        row = {
+            "product_name_kr": "맨티스 2 웨이스트 팩 - 24K",
+            "product_name_en": "",
+            "brand": "ARCTERYX",
+            "musinsa_category_large": "남성",
+            "musinsa_category_middle": "스포츠/레저",
+            "musinsa_category_small": "가방",
+        }
+
+        plan = build_buyma_category_plan(row, category_corrector=_identity_corrector)
+
+        self.assertEqual(plan["standard_category"], "BAG_CROSSBODY")
+        self.assertEqual(plan["cat1"], "メンズファッション")
+        self.assertEqual(plan["cat2"], "バッグ・カバン")
+        self.assertEqual(plan["cat3"], "ショルダーバッグ")
+        self.assertTrue(plan["category_path_valid"])
+
     def test_buyma_category_plan_maps_digital_to_tech_accessory(self):
         row = {
             "product_name_kr": "",

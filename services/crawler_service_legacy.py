@@ -252,20 +252,31 @@ def extract_musinsa_thumbnail_urls(
     soup: BeautifulSoup,
     product_json: Dict[str, object],
     goods_no: str,
-    max_thumbnail_images: int,
+    max_thumbnail_images: int | None,
+    mss_state: Dict[str, object] | None = None,
 ) -> List[str]:
     """Extract product image URLs from Musinsa product page."""
     candidates: List[str] = []
     seen_urls = set()
     seen_images = set()
 
+    def is_probable_product_image(url: str) -> bool:
+        parsed = urllib.parse.urlparse(url)
+        path = parsed.path.lower()
+        if goods_no:
+            return goods_no in url or "/prd_img/" in path
+        return any(token in path for token in ("goods_img", "prd_img", "/goods/", "/product/"))
+
     def add_candidate(src: str):
-        normalized = normalize_image_source(src)
+        raw_src = str(src or "").strip()
+        if not raw_src or any(ch in raw_src for ch in ("\n", "\r", "\t", "<", ">")) or " " in raw_src:
+            return
+        if "://" not in raw_src and not raw_src.startswith(("//", "/")):
+            return
+        normalized = normalize_image_source(raw_src)
         if not normalized or normalized in seen_urls:
             return
-        if "goods_img" not in normalized and "prd_img" not in normalized:
-            return
-        if goods_no and goods_no not in normalized:
+        if not is_probable_product_image(normalized):
             return
         identity_key = build_image_identity_key(normalized)
         if identity_key in seen_images:
@@ -273,6 +284,37 @@ def extract_musinsa_thumbnail_urls(
         seen_urls.add(normalized)
         seen_images.add(identity_key)
         candidates.append(normalized)
+
+    def add_srcset(srcset: str):
+        for part in (srcset or "").split(","):
+            src = part.strip().split(" ")[0].strip()
+            if src:
+                add_candidate(src)
+
+    def add_image_sources_from_text(text: str):
+        if not text:
+            return
+        for match in re.finditer(r"""(?:src|data-src|data-original|data-lazy-src)=["']([^"']+)["']""", text, re.IGNORECASE):
+            add_candidate(match.group(1))
+        for match in re.finditer(r"""(?:https?:)?//[^"'<> ]+?/(?:goods_img|prd_img)/[^"'<> ]+""", text, re.IGNORECASE):
+            add_candidate(match.group(0))
+
+    def walk_image_values(obj: object, path: str = ""):
+        if max_thumbnail_images and len(candidates) >= max_thumbnail_images:
+            return
+        if isinstance(obj, dict):
+            for key, value in obj.items():
+                key_lower = str(key or "").lower()
+                next_path = f"{path}.{key_lower}" if path else key_lower
+                if isinstance(value, str):
+                    if any(token in next_path for token in ("image", "img", "thumbnail", "photo", "goods")):
+                        add_candidate(value)
+                        add_image_sources_from_text(value)
+                elif isinstance(value, (dict, list)):
+                    walk_image_values(value, next_path)
+        elif isinstance(obj, list):
+            for item in obj:
+                walk_image_values(item, path)
 
     if isinstance(product_json, dict):
         image_field = product_json.get("image")
@@ -283,20 +325,27 @@ def extract_musinsa_thumbnail_urls(
                 if isinstance(item, str):
                     add_candidate(item)
 
+    if isinstance(mss_state, dict):
+        walk_image_values(mss_state)
+
     og_image = soup.select_one('meta[property="og:image"]')
     if og_image:
         add_candidate(og_image.get("content", ""))
 
     for img in soup.select("img"):
-        for attr in ("src", "data-src", "data-original", "data-lazy-src"):
+        for attr in ("src", "data-src", "data-original", "data-lazy-src", "data-image", "data-url"):
             src = img.get(attr, "")
             if not src:
                 continue
-            if goods_no and goods_no not in src:
-                continue
             add_candidate(src)
+        add_srcset(img.get("srcset", ""))
+        add_srcset(img.get("data-srcset", ""))
 
-    return candidates[:max_thumbnail_images]
+    print(f"    이미지 후보 추출: {len(candidates)}개")
+
+    if max_thumbnail_images:
+        return candidates[:max_thumbnail_images]
+    return candidates
 
 
 def extract_product_json(soup: BeautifulSoup) -> Dict[str, object]:
@@ -1504,7 +1553,7 @@ def scrape_musinsa_product(
     download_images: bool = False,
     images_only: bool = False,
     crawl_page_settle_seconds: float = 2.0,
-    max_thumbnail_images: int = 20,
+    max_thumbnail_images: int | None = None,
     download_images_fn=None,
     fetch_buyma_lowest_price_fn=None,
 ) -> Product:
@@ -1583,6 +1632,7 @@ def scrape_musinsa_product(
                     product_json=product_json,
                     goods_no=goods_no,
                     max_thumbnail_images=max_thumbnail_images,
+                    mss_state=mss_state,
                 )
                 image_folder_name = build_image_folder_name(row_num, 2, product_name)
                 image_paths = download_images_fn(image_urls, image_folder_name)
@@ -1696,6 +1746,7 @@ def scrape_musinsa_product(
                 product_json=product_json,
                 goods_no=goods_no,
                 max_thumbnail_images=max_thumbnail_images,
+                mss_state=mss_state,
             )
             image_folder_name = build_image_folder_name(row_num, 2, product_name)
             image_paths = download_images_fn(image_urls, image_folder_name)

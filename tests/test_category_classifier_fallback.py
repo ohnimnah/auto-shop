@@ -39,6 +39,8 @@ class CategoryClassifierFallbackTests(unittest.TestCase):
         self.assertEqual(classify_category("crossbody bag", ""), StandardCategory.BAG_CROSSBODY)
         self.assertEqual(classify_category("leather tote bag", ""), StandardCategory.BAG_TOTE)
         self.assertEqual(classify_category("mini crossbody bag", ""), StandardCategory.BAG_CROSSBODY)
+        self.assertEqual(classify_category("맨티스 2 웨이스트 팩 - 24K", ""), StandardCategory.BAG_CROSSBODY)
+        self.assertEqual(classify_category("mantis 2 waist pack", ""), StandardCategory.BAG_CROSSBODY)
         self.assertEqual(classify_category("card holder wallet", ""), StandardCategory.BAG_WALLET)
         self.assertEqual(classify_category("logo beanie", ""), StandardCategory.ACC_BEANIE)
         self.assertEqual(classify_category("bucket hat", ""), StandardCategory.ACC_HAT)
