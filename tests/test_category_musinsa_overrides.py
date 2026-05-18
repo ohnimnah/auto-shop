@@ -101,6 +101,8 @@ class MusinsaCategoryOverrideTests(unittest.TestCase):
             ("소품", "양말/레그웨어", StandardCategory.ACC_SOCKS),
             ("스포츠/레저", "수영복/비치웨어", StandardCategory.SWIMWEAR),
             ("스포츠/레저", "가방", StandardCategory.BAG_CROSSBODY),
+            ("가방", "숄더백", StandardCategory.BAG_SHOULDER),
+            ("신발", "부츠/워커", StandardCategory.SHOES_BOOTS),
         )
         for middle, small, expected in cases:
             with self.subTest(middle=middle, small=small):
@@ -137,6 +139,18 @@ class MusinsaCategoryOverrideTests(unittest.TestCase):
         )
 
         self.assertEqual(result, StandardCategory.BAG_CROSSBODY)
+        self.assertEqual(meta["reason"], "musinsa_category_override")
+
+    def test_musinsa_shoulder_bag_wins_over_belt_word_in_product_name(self):
+        result, meta = classify_standard_category_from_sheet(
+            musinsa_large="여성",
+            musinsa_middle="가방",
+            musinsa_small="숄더백",
+            product_name="Strap Belt Eyelet Cross Big Bag",
+            brand="ETRE AU SOMMET",
+        )
+
+        self.assertEqual(result, StandardCategory.BAG_SHOULDER)
         self.assertEqual(meta["reason"], "musinsa_category_override")
 
     def test_musinsa_pants_category_wins_over_belted_product_name(self):

@@ -119,7 +119,7 @@ def build_common_mapping_rows_from_raw(raw_rows: Iterable[Dict[str, str]]) -> Li
         is_mens = gender == "men"
         for std_cat, spec in STANDARD_CATEGORY_SPECS.items():
             middle = spec.middle(is_mens=is_mens)
-            child = spec.child
+            child = spec.child_for(is_mens=is_mens)
             hit = _find_raw_category_row(raw_rows, parent=parent, middle=middle, child=child)
             out.append(
                 CategoryMappingRow(
@@ -205,7 +205,7 @@ def build_default_mapping_rows() -> List[CategoryMappingRow]:
                     gender,
                     parent,
                     spec.middle(is_mens=is_mens),
-                    spec.child,
+                    spec.child_for(is_mens=is_mens),
                     "",
                     "",
                     "default",

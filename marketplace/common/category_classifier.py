@@ -80,6 +80,7 @@ CATEGORY_FALLBACK_RULES: List[Tuple[str, List[str], StandardCategory]] = [
     ("sneakers", ["sneakers", "sneaker", "운동화", "스니커즈"], StandardCategory.SHOES_SNEAKER),
     ("sneaker_models", ["보메로", "vomero", "올드스쿨", "old skool", "oldskool", "컴피쿠시", "comfycush", "ld 1000", "ld-1000"], StandardCategory.SHOES_SNEAKER),
     ("sports_shoes", ["인도어화", "스포츠화", "코트화", "풋살화", "배드민턴화", "핸드볼화"], StandardCategory.SHOES_SNEAKER),
+    ("boots", ["부츠", "워커", "boots", "boot"], StandardCategory.SHOES_BOOTS),
     ("mary_jane", ["메리제인", "mary jane"], StandardCategory.SHOES_FLAT),
     ("sandals", ["슬리퍼", "샌들", "sandal", "slide"], StandardCategory.SHOES_SANDAL),
     ("sweat_top", ["맨투맨", "스웻 셔츠", "스웨트 셔츠", "sweatshirt", "sweat shirt"], StandardCategory.TOP_SWEAT),
@@ -181,6 +182,19 @@ MUSINSA_CATEGORY_OVERRIDES: List[Tuple[Tuple[str, ...], StandardCategory]] = [
     (("sports", "bag"), StandardCategory.BAG_CROSSBODY),
     (("sports", "crossbody"), StandardCategory.BAG_CROSSBODY),
     (("sports", "waist pack"), StandardCategory.BAG_CROSSBODY),
+    (("가방", "숄더백"), StandardCategory.BAG_SHOULDER),
+    (("가방", "숄더"), StandardCategory.BAG_SHOULDER),
+    (("가방", "shoulder"), StandardCategory.BAG_SHOULDER),
+    (("가방", "크로스"), StandardCategory.BAG_CROSSBODY),
+    (("가방", "cross"), StandardCategory.BAG_CROSSBODY),
+    (("bag", "shoulder"), StandardCategory.BAG_SHOULDER),
+    (("bag", "cross"), StandardCategory.BAG_CROSSBODY),
+    (("신발", "부츠"), StandardCategory.SHOES_BOOTS),
+    (("신발", "워커"), StandardCategory.SHOES_BOOTS),
+    (("신발", "boots"), StandardCategory.SHOES_BOOTS),
+    (("신발", "boot"), StandardCategory.SHOES_BOOTS),
+    (("shoes", "boots"), StandardCategory.SHOES_BOOTS),
+    (("shoes", "boot"), StandardCategory.SHOES_BOOTS),
     (("outer", "jacket"), StandardCategory.OUTER_JACKET),
     (("outer", "jumper"), StandardCategory.OUTER_JACKET),
     (("상의", "맨투맨"), StandardCategory.TOP_SWEAT),
@@ -413,6 +427,17 @@ def _has_belt_product_signal(text: str) -> bool:
     )
 
 
+def _is_bag_category(category: Optional[StandardCategory]) -> bool:
+    return category in {
+        StandardCategory.BAG_TOTE,
+        StandardCategory.BAG_SHOULDER,
+        StandardCategory.BAG_CROSSBODY,
+        StandardCategory.BAG_BACKPACK,
+        StandardCategory.BAG_CLUTCH,
+        StandardCategory.BAG_WALLET,
+    }
+
+
 def _has_english_phrase(text: str, phrase: str) -> bool:
     normalized = _normalize_text(text)
     pattern = r"\b" + r"\s+".join(re.escape(part) for part in phrase.lower().split()) + r"\b"
@@ -591,6 +616,8 @@ def classify_category_with_reason(
     # Guardrail: belt products may include noisy shape/innerwear words like
     # "padded" or "body-shaping"; explicit belt signals should stay in belts.
     if _has_belt_product_signal(force_text):
+        if _is_bag_category(existing_category):
+            return existing_category, "existing_bag_category"
         return StandardCategory.ACC_BELT, "belt_keyword_override"
 
     # If caller already resolved a concrete category from sheet/mapping,

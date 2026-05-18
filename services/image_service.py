@@ -175,6 +175,7 @@ def download_thumbnail_images(
     os.makedirs(image_dir, exist_ok=True)
 
     saved_paths: List[str] = []
+    seen_image_fingerprints: List[str] = []
     target_urls = image_urls[:max_thumbnail_images] if max_thumbnail_images else list(image_urls)
     for index, image_url in enumerate(target_urls, start=1):
         try:
@@ -183,19 +184,110 @@ def download_thumbnail_images(
             if ext not in {".jpg", ".jpeg", ".png", ".webp"}:
                 ext = ".jpg"
 
-            file_name = f"{index:02d}{ext}"
-            file_path = os.path.join(image_dir, file_name)
             request = urllib.request.Request(image_url, headers={"User-Agent": "Mozilla/5.0"})
             with urllib.request.urlopen(request, timeout=30) as response:
-                with open(file_path, "wb") as image_file:
-                    image_file.write(response.read())
+                raw_bytes = response.read()
 
+            if not is_likely_product_or_model_image(raw_bytes, image_url):
+                print(f"    이미지 다운로드 스킵: 상품/모델컷 아님 ({image_url})")
+                continue
+            fingerprint = build_visual_fingerprint(raw_bytes)
+            if is_duplicate_visual_fingerprint(fingerprint, seen_image_fingerprints):
+                print(f"    이미지 다운로드 스킵: 중복 이미지 ({image_url})")
+                continue
+
+            file_name = f"{len(saved_paths) + 1:02d}{ext}"
+            file_path = os.path.join(image_dir, file_name)
+            with open(file_path, "wb") as image_file:
+                image_file.write(raw_bytes)
+
+            if fingerprint:
+                seen_image_fingerprints.append(fingerprint)
             saved_paths.append(file_path.replace("\\", "/"))
         except Exception as image_error:
             print(f"    이미지 다운로드 스킵: {image_error}")
 
     print(f"    이미지 저장 결과: 후보 {len(target_urls)}개 / 저장 {len(saved_paths)}개")
     return ",".join(saved_paths)
+
+
+def is_likely_product_or_model_image(raw_bytes: bytes, image_url: str = "") -> bool:
+    """Return False for banners, icons, size charts, and extreme detail images."""
+    lower_url = (image_url or "").lower()
+    blocked_url_tokens = (
+        "banner",
+        "coupon",
+        "event",
+        "brand_logo",
+        "white_logo",
+        "favicon",
+        "model_info",
+        "model-info",
+        "modelinfo",
+        "size_info",
+        "size-info",
+        "sizeinfo",
+        "measurement",
+        "measure",
+        "spec",
+        "table",
+        "detail_info",
+        "detail-info",
+        "notice",
+        "guide",
+    )
+    if any(token in lower_url for token in blocked_url_tokens):
+        return False
+    try:
+        from io import BytesIO
+        from PIL import Image
+
+        with Image.open(BytesIO(raw_bytes)) as image:
+            width, height = image.size
+    except Exception:
+        return False
+
+    if width < 280 or height < 280:
+        return False
+    aspect_ratio = width / max(height, 1)
+    if aspect_ratio < 0.35 or aspect_ratio > 2.4:
+        return False
+    if height > width * 3.2 or width > height * 3.2:
+        return False
+    return True
+
+
+def build_visual_fingerprint(raw_bytes: bytes) -> str:
+    """Build a small perceptual fingerprint so resized copies can be skipped."""
+    try:
+        from io import BytesIO
+        from PIL import Image
+
+        with Image.open(BytesIO(raw_bytes)) as image:
+            grayscale = image.convert("L").resize((16, 16), Image.Resampling.LANCZOS)
+            pixels = list(grayscale.tobytes())
+    except Exception:
+        return ""
+    if not pixels:
+        return ""
+    average = sum(pixels) / len(pixels)
+    bits = "".join("1" if pixel >= average else "0" for pixel in pixels)
+    return f"{int(bits, 2):064x}"
+
+
+def hamming_distance(left: str, right: str) -> int:
+    if not left or not right:
+        return 999
+    try:
+        return (int(left, 16) ^ int(right, 16)).bit_count()
+    except Exception:
+        return 999
+
+
+def is_duplicate_visual_fingerprint(fingerprint: str, seen_fingerprints: List[str], max_distance: int = 8) -> bool:
+    if not fingerprint:
+        return False
+    return any(hamming_distance(fingerprint, seen) <= max_distance for seen in seen_fingerprints)
 
 
 def extract_brand_logo_url(soup: BeautifulSoup, page_state: Dict[str, object]) -> str:

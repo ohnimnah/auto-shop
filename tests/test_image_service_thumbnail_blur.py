@@ -1,4 +1,5 @@
 import unittest
+from io import BytesIO
 from pathlib import Path
 from tempfile import TemporaryDirectory
 from unittest.mock import Mock, patch
@@ -11,6 +12,21 @@ from services import image_service
 
 
 class ImageServiceThumbnailBlurTests(unittest.TestCase):
+    def _image_bytes(self, size):
+        payload = BytesIO()
+        Image.new("RGB", size, "white").save(payload, format="JPEG")
+        return payload.getvalue()
+
+    def _gradient_image_bytes(self, size):
+        image = Image.new("RGB", size)
+        width, height = size
+        for y in range(height):
+            for x in range(width):
+                image.putpixel((x, y), ((x * 255) // max(width - 1, 1), (y * 255) // max(height - 1, 1), 120))
+        payload = BytesIO()
+        image.save(payload, format="JPEG")
+        return payload.getvalue()
+
     def test_thumbnail_command_omits_blur_flag_when_disabled(self):
         with patch.object(image_service.os.path, "isdir", return_value=True), \
             patch.object(image_service.os.path, "exists", return_value=True), \
@@ -131,6 +147,34 @@ class ImageServiceThumbnailBlurTests(unittest.TestCase):
             image_service.extract_brand_logo_url(soup, {}),
             "https://image.msscdn.net/brand/bauf/small.png",
         )
+
+    def test_product_image_filter_keeps_product_and_model_photos(self):
+        self.assertTrue(image_service.is_likely_product_or_model_image(self._image_bytes((960, 1440))))
+        self.assertTrue(image_service.is_likely_product_or_model_image(self._image_bytes((500, 600))))
+
+    def test_product_image_filter_skips_banners_and_extreme_detail_images(self):
+        self.assertFalse(image_service.is_likely_product_or_model_image(self._image_bytes((1400, 180))))
+        self.assertFalse(image_service.is_likely_product_or_model_image(self._image_bytes((800, 3600))))
+        self.assertFalse(
+            image_service.is_likely_product_or_model_image(
+                self._image_bytes((960, 1440)),
+                "https://image.msscdn.net/images/goodsdetail/banner/event.jpg",
+            )
+        )
+        self.assertFalse(
+            image_service.is_likely_product_or_model_image(
+                self._image_bytes((960, 1440)),
+                "https://image.msscdn.net/images/prd_img/model_info.jpg",
+            )
+        )
+
+    def test_visual_fingerprint_detects_resized_duplicate_images(self):
+        large = self._gradient_image_bytes((960, 1440))
+        small = self._gradient_image_bytes((480, 720))
+        large_fingerprint = image_service.build_visual_fingerprint(large)
+        small_fingerprint = image_service.build_visual_fingerprint(small)
+
+        self.assertTrue(image_service.is_duplicate_visual_fingerprint(small_fingerprint, [large_fingerprint]))
 
 
 if __name__ == "__main__":

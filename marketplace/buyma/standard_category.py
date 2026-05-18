@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from enum import Enum
-from typing import Iterable, List, Tuple
+from typing import Iterable, List, Optional, Tuple
 
 
 class StandardCategory(str, Enum):
@@ -102,9 +102,15 @@ class StandardCategorySpec:
     child: str
     aliases: Tuple[str, ...]
     note: str = ""
+    women_child: Optional[str] = None
+    men_child: Optional[str] = None
 
     def middle(self, *, is_mens: bool) -> str:
         return self.men_middle if is_mens else self.women_middle
+
+    def child_for(self, *, is_mens: bool) -> str:
+        override = self.men_child if is_mens else self.women_child
+        return self.child if override is None else override
 
 
 PARENT_WOMEN = "レディースファッション"
@@ -119,6 +125,7 @@ MIDDLE_OTHER_FASHION_MEN = "その他ファッション"
 MIDDLE_INNER_ROOM = "インナー・ルームウェア"
 MIDDLE_SWIM_BEACH = "水着・ビーチグッズ"
 MIDDLE_SHOES_WOMEN = "靴・シューズ"
+MIDDLE_BOOTS_WOMEN = "ブーツ"
 MIDDLE_SHOES_MEN = "靴・ブーツ・サンダル"
 MIDDLE_BAGS_WOMEN = "バッグ・カバン"
 MIDDLE_BAGS_MEN = "バッグ・カバン"
@@ -173,7 +180,14 @@ STANDARD_CATEGORY_SPECS = {
     StandardCategory.SWIMWEAR: StandardCategorySpec(StandardCategory.SWIMWEAR, MIDDLE_SWIM_BEACH, MIDDLE_SWIM_BEACH, "ビキニ", ("수영복", "비치웨어", "비키니", "bikini", "swimsuit", "swimwear", "beachwear")),
     StandardCategory.SHOES_SNEAKER: StandardCategorySpec(StandardCategory.SHOES_SNEAKER, MIDDLE_SHOES_WOMEN, MIDDLE_SHOES_MEN, "スニーカー", ("스니커즈", "운동화", "sneaker", "sneakers", "trainer")),
     StandardCategory.SHOES_RUNNING: StandardCategorySpec(StandardCategory.SHOES_RUNNING, MIDDLE_SHOES_WOMEN, MIDDLE_SHOES_MEN, "スニーカー", ("러닝화", "러닝", "running shoes", "running")),
-    StandardCategory.SHOES_BOOTS: StandardCategorySpec(StandardCategory.SHOES_BOOTS, MIDDLE_SHOES_WOMEN, MIDDLE_SHOES_MEN, "ブーツ", ("부츠", "워커", "boots", "boot")),
+    StandardCategory.SHOES_BOOTS: StandardCategorySpec(
+        StandardCategory.SHOES_BOOTS,
+        MIDDLE_BOOTS_WOMEN,
+        MIDDLE_SHOES_MEN,
+        "ブーツ",
+        ("부츠", "워커", "boots", "boot"),
+        women_child="",
+    ),
     StandardCategory.SHOES_LOAFER: StandardCategorySpec(StandardCategory.SHOES_LOAFER, MIDDLE_SHOES_WOMEN, MIDDLE_SHOES_MEN, "ローファー・オックスフォード", ("로퍼", "loafer")),
     StandardCategory.SHOES_SANDAL: StandardCategorySpec(StandardCategory.SHOES_SANDAL, MIDDLE_SHOES_WOMEN, MIDDLE_SHOES_MEN, "サンダル・ミュール", ("샌들", "슬리퍼", "sandal", "slide")),
     StandardCategory.SHOES_PUMPS: StandardCategorySpec(StandardCategory.SHOES_PUMPS, MIDDLE_SHOES_WOMEN, MIDDLE_SHOES_MEN, "パンプス", ("펌프스", "힐", "pumps", "heels")),
@@ -242,7 +256,8 @@ def validate_buyma_category_path(parent: str, middle: str, child: str = "") -> b
         return False
     is_mens = parent == PARENT_MEN
     for spec in STANDARD_CATEGORY_SPECS.values():
-        if spec.middle(is_mens=is_mens) == middle and (not child or spec.child == child or not spec.child):
+        spec_child = spec.child_for(is_mens=is_mens)
+        if spec.middle(is_mens=is_mens) == middle and (not child or spec_child == child or not spec_child):
             return True
     return False
 
@@ -365,7 +380,7 @@ def map_standard_to_buyma_middle_and_subcategory(
     """Return (buyma_middle_category, buyma_sub_category)."""
     spec = get_standard_category_spec(standard_category)
     if spec:
-        return spec.middle(is_mens=is_mens), spec.child
+        return spec.middle(is_mens=is_mens), spec.child_for(is_mens=is_mens)
     return "", ""
 
 
@@ -379,7 +394,7 @@ def explain_standard_category_mapping(
     spec = get_standard_category_spec(category)
     parent = get_buyma_parent_category(is_mens=is_mens)
     middle = spec.middle(is_mens=is_mens) if spec else ""
-    child = spec.child if spec else ""
+    child = spec.child_for(is_mens=is_mens) if spec else ""
     return {
         "standard_category": category.value,
         "buyma_parent": parent,

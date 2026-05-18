@@ -38,6 +38,7 @@ class StandardCategoryTests(unittest.TestCase):
             ("카고 조거 팬츠", "PANTS_JOGGER"),
             ("러닝 스니커즈", "SHOES_RUNNING"),
             ("레더 로퍼", "SHOES_LOAFER"),
+            ("Multi Strap Bijo Leather Wide Boots", "SHOES_BOOTS"),
             ("From knee socks", "ACC_SOCKS"),
             ("SPORTY TRACK RIBBON BIKINI", "SWIMWEAR"),
         ]
@@ -151,6 +152,14 @@ class StandardCategoryTests(unittest.TestCase):
         self.assertTrue(diag["validator_passed"])
         self.assertTrue(validate_buyma_category_path(diag["buyma_parent"], diag["buyma_middle"], diag["buyma_child"]))
 
+    def test_women_boots_use_buyma_boots_middle_without_child(self):
+        diag = explain_standard_category_mapping(StandardCategory.SHOES_BOOTS, is_mens=False)
+
+        self.assertEqual(diag["buyma_parent"], "レディースファッション")
+        self.assertEqual(diag["buyma_middle"], "ブーツ")
+        self.assertEqual(diag["buyma_child"], "")
+        self.assertTrue(diag["validator_passed"])
+
     def test_append_category_selection_event_writes_jsonl(self):
         row = {
             "row_num": 969,
@@ -251,6 +260,42 @@ class StandardCategoryTests(unittest.TestCase):
         self.assertEqual(plan["cat1"], "メンズファッション")
         self.assertEqual(plan["cat2"], "バッグ・カバン")
         self.assertEqual(plan["cat3"], "ショルダーバッグ")
+        self.assertTrue(plan["category_path_valid"])
+
+    def test_buyma_category_plan_keeps_shoulder_bag_out_of_belt(self):
+        row = {
+            "product_name_kr": "",
+            "product_name_en": "Strap Belt Eyelet Cross Big Bag",
+            "brand": "ETRE AU SOMMET",
+            "musinsa_category_large": "여성",
+            "musinsa_category_middle": "가방",
+            "musinsa_category_small": "숄더백",
+        }
+
+        plan = build_buyma_category_plan(row, category_corrector=_identity_corrector)
+
+        self.assertEqual(plan["standard_category"], "BAG_SHOULDER")
+        self.assertEqual(plan["cat1"], "レディースファッション")
+        self.assertEqual(plan["cat2"], "バッグ・カバン")
+        self.assertEqual(plan["cat3"], "ショルダーバッグ")
+        self.assertTrue(plan["category_path_valid"])
+
+    def test_buyma_category_plan_maps_musinsa_boots_to_buyma_boots_middle(self):
+        row = {
+            "product_name_kr": "",
+            "product_name_en": "Multi Strap Bijo Leather Wide Boots",
+            "brand": "ETRE AU SOMMET",
+            "musinsa_category_large": "여성",
+            "musinsa_category_middle": "신발",
+            "musinsa_category_small": "부츠/워커",
+        }
+
+        plan = build_buyma_category_plan(row, category_corrector=_identity_corrector)
+
+        self.assertEqual(plan["standard_category"], "SHOES_BOOTS")
+        self.assertEqual(plan["cat1"], "レディースファッション")
+        self.assertEqual(plan["cat2"], "ブーツ")
+        self.assertEqual(plan["cat3"], "")
         self.assertTrue(plan["category_path_valid"])
 
     def test_buyma_category_plan_maps_digital_to_tech_accessory(self):

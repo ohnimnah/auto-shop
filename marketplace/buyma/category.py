@@ -171,7 +171,7 @@ CATEGORY_RECOVERY_ALIASES: Dict[str, List[str]] = {
 }
 
 COMMON_PARENT_FALLBACK_MIDDLES: Dict[str, List[str]] = {
-    "レディースファッション": ["トップス", "アウター", "ボトムス", "ワンピース・オールインワン", "靴・シューズ", "バッグ・カバン", "ファッション雑貨・小物", "スマホケース・テックアクセサリー"],
+    "レディースファッション": ["トップス", "アウター", "ボトムス", "ワンピース・オールインワン", "靴・シューズ", "ブーツ", "バッグ・カバン", "ファッション雑貨・小物", "スマホケース・テックアクセサリー"],
     "メンズファッション": ["トップス", "アウター・ジャケット", "パンツ・ボトムス", "靴・ブーツ・サンダル", "バッグ・カバン", "アクセサリー", "腕時計", "財布・雑貨", "アイウェア", "帽子", "ファッション雑貨・小物", "スマホケース・テックアクセサリー", "インナー・ルームウェア", "水着・ビーチグッズ", "フィットネス", "スーツ", "セットアップ", "ゴルフ", "その他ファッション"],
 }
 
@@ -571,7 +571,7 @@ def _category_recovery_candidates(
             candidates.append(other_spec.middle(is_mens=is_mens))
     elif item_index == 2:
         if spec:
-            candidates.append(spec.child)
+            candidates.append(spec.child_for(is_mens=is_mens))
         # Precision guard: for categories with strict child labels, do not
         # broaden to sibling children under the same middle category.
         strict_child_categories = {
@@ -589,7 +589,7 @@ def _category_recovery_candidates(
         target_middle = middle or category_plan.get("cat2", "")
         for other_spec in STANDARD_CATEGORY_SPECS.values():
             if other_spec.middle(is_mens=is_mens) == target_middle:
-                candidates.append(other_spec.child)
+                candidates.append(other_spec.child_for(is_mens=is_mens))
 
     return _dedupe_keep_order([value for value in candidates if value and "その他" not in value])
 

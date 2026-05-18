@@ -67,6 +67,7 @@ class CategoryClassifierFallbackTests(unittest.TestCase):
         self.assertEqual(classify_category("sports bra", ""), StandardCategory.INNER_UNDERWEAR)
         self.assertEqual(classify_category("innerfree bra", ""), StandardCategory.INNER_UNDERWEAR)
         self.assertEqual(classify_category("리브레 CF(1073A073100) 인도어화", "아식스"), StandardCategory.SHOES_SNEAKER)
+        self.assertEqual(classify_category("Multi Strap Bijo Leather Wide Boots", ""), StandardCategory.SHOES_BOOTS)
 
     def test_category_classification_from_unresolved_log_terms(self):
         self.assertEqual(classify_category("무드먼트 피그먼트 롱슬리브", "벤힛"), StandardCategory.TOP_LONG_SLEEVE)
